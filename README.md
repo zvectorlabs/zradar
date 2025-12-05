@@ -1,13 +1,22 @@
 # zradar
 
-High-performance OpenTelemetry ingestion service with ClickHouse backend.
+Agent Tracing & LLM Observability Platform with high-performance OpenTelemetry ingestion and ClickHouse backend.
 
 ## Overview
 
-zradar is a telemetry ingestion service that receives OTLP (OpenTelemetry Protocol) data and stores it in ClickHouse for fast querying and analysis. It features a scalable architecture with asynchronous processing, multi-tenancy, and comprehensive RBAC.
+zradar is an **agent observability platform** designed for tracing AI agents, LLM workflows, and agent-based applications. Built on OpenTelemetry Protocol (OTLP), it provides comprehensive observability for agent sessions, LLM calls, tool executions, and complex multi-step workflows. It features a scalable architecture with asynchronous processing, multi-tenancy, and comprehensive RBAC.
 
 ## Features
 
+### Agent Observability
+- **Agent Tracing** - Track agent sessions, workflows, and execution paths
+- **LLM Observability** - Monitor model calls, token usage, costs, and performance
+- **Tool Execution Tracking** - Instrument and analyze tool/function calls
+- **Workflow Visualization** - Tree, timeline, and graph views of agent execution
+- **Quality Scoring** - Custom evaluations and quality metrics for agents and LLM calls
+- **Cost Analysis** - Track LLM costs, token usage, and budget per agent/project
+
+### Platform Features
 - **Standard OTLP Protocol** - Works with any OpenTelemetry client
 - **Asynchronous Processing** - Job queue with separate worker processes
 - **Dual Database Architecture** - PostgreSQL (control) + ClickHouse (data)
@@ -73,6 +82,38 @@ OTLP Clients → Server → Job Queue → Workers → Plugins → Backends
 ```
 
 The server handles ingestion and enqueues jobs. Workers process jobs asynchronously and route to configured plugins (ClickHouse, S3, etc.).
+
+## Agent Observability
+
+zradar is purpose-built for observing AI agents and LLM applications. It supports:
+
+### Agent Span Types
+- **AGENT** - Agent execution spans (conversational agents, task agents, etc.)
+- **GENERATION** - LLM generation calls (chat completions, text generation)
+- **TOOL** - Tool/function calls executed by agents
+- **CHAIN** - Chain of operations (LangChain, LlamaIndex chains)
+- **RETRIEVER** - RAG retrieval operations
+- **EVALUATOR** - Evaluation operations
+- **EMBEDDING** - Embedding generation
+- **GUARDRAIL** - Guardrail/safety checks
+
+### Key Metrics Tracked
+- **Agent Performance**: Session count, success rate, average latency per agent
+- **LLM Usage**: Model calls, token usage (prompt/completion/total), costs per model
+- **Tool Usage**: Tool call frequency, success rate, execution time
+- **Quality Scores**: Accuracy, relevance, latency, custom evaluations
+- **Cost Analysis**: LLM costs, trends, budget tracking, cost per agent
+- **Error Analysis**: LLM errors, tool errors, agent errors (by type)
+
+### LLM-Specific Attributes
+zradar tracks rich LLM metadata including:
+- Model information (vendor, model name, temperature, max_tokens)
+- Token usage (prompt, completion, total)
+- Cost tracking (input, output, total costs)
+- Response metadata (request/response IDs, finish reasons)
+- Embedding dimensions and usage
+
+See [examples/README.md](examples/README.md) for code examples showing agent and LLM instrumentation.
 
 ## Deployment
 
