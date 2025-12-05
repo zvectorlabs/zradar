@@ -1,0 +1,109 @@
+[workspace]
+resolver = "2"
+members = [
+    # Layer 1: Core (traits and models)
+    "crates/core/zradar-models",
+    "crates/core/zradar-traits",
+    "crates/core/zradar-migrations",
+    "crates/core/zradar-plugins",
+    
+    # Layer 2: Plugins (ALL implementations)
+    "crates/plugins/zradar-plugin-postgres",
+    "crates/plugins/zradar-plugin-clickhouse",
+    "crates/plugins/zradar-plugin-s3",
+    "crates/plugins/zradar-plugin-redis",
+    "crates/plugins/zradar-plugin-local",
+    
+    # Layer 3: Services (business logic)
+    "crates/services/api",
+    "crates/services/api-optel",
+    
+    # Layer 4: Applications (executables)
+    "crates/applications/zradar-server",
+    "crates/applications/zradar-worker",
+    
+    # Functional Tests
+    "test_functional",
+]
+
+[workspace.package]
+edition = "2024"
+
+# Shared workspace dependencies
+[workspace.dependencies]
+# OpenTelemetry Protocol - THE CONTRACT (v0.4 uses tonic 0.9)
+opentelemetry-proto = { version = "0.4", features = ["gen-tonic", "trace", "metrics", "logs"] }
+
+# gRPC/Async (must match opentelemetry-proto's tonic version)
+tonic = { version = "0.9", features = ["gzip"] }
+prost = "0.11"
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+
+# ClickHouse
+clickhouse = { version = "0.11", features = ["lz4"] }
+clickhouse-derive = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+hex = "0.4"
+async-trait = "0.1"
+
+# Redis (for hybrid queue)
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# AWS SDK (for S3 storage)
+aws-sdk-s3 = "1.9"
+aws-config = "1.0"
+
+# Web framework (upgraded to 0.7 for utoipa support)
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"] }
+
+# Auto-documentation
+utoipa = { version = "4.2", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+
+# Database
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "chrono", "migrate"] }
+
+# Authentication
+jsonwebtoken = "9.2"
+bcrypt = "0.15"
+
+# Internal workspace crates (Core)
+zradar-models = { path = "crates/core/zradar-models" }
+zradar-traits = { path = "crates/core/zradar-traits" }
+zradar-plugins = { path = "crates/core/zradar-plugins" }
+
+# Internal workspace crates (Services)
+api = { path = "crates/services/api" }
+api-optel = { path = "crates/services/api-optel" }
+
+# Plugins
+zradar-plugin-postgres = { path = "crates/plugins/zradar-plugin-postgres" }
+zradar-plugin-clickhouse = { path = "crates/plugins/zradar-plugin-clickhouse" }
+zradar-plugin-s3 = { path = "crates/plugins/zradar-plugin-s3" }
+zradar-plugin-redis = { path = "crates/plugins/zradar-plugin-redis" }
+zradar-plugin-local = { path = "crates/plugins/zradar-plugin-local" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

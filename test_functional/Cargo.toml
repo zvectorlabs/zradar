@@ -1,0 +1,66 @@
+[package]
+name = "zradar-functional-tests"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "functional_tests"
+path = "lib.rs"
+
+[[test]]
+name = "functional_tests"
+path = "functional_tests.rs"
+harness = true
+
+[dependencies]
+# Internal crates
+zradar-models = { path = "../crates/core/zradar-models" }
+api = { path = "../crates/services/api" }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+
+# gRPC/OTLP
+tonic = { workspace = true }
+prost = { workspace = true }
+opentelemetry-proto = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+clickhouse = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Testing utilities
+anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Auth
+bcrypt = { workspace = true }
+
+# Test data generation
+fake = { version = "2.9", features = ["derive", "uuid", "chrono"] }
+rand = "0.8"
+
+# Pretty assertions
+pretty_assertions = "1.4"
+
+# Retry logic
+tokio-retry = "0.3"
+
+# Hex encoding/decoding
+hex = "0.4"
+
+# URL encoding
+urlencoding = "2.1"
+
+# Async streams
+tokio-stream = "0.1"
+

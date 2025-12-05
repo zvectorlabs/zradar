@@ -1,0 +1,59 @@
+# zradar test configuration
+# This config is used by functional tests with isolated test databases
+
+# OTLP gRPC port for tests
+otlp_port = 9016
+
+# Batch configuration
+batch_size = 1000
+batch_timeout_seconds = 10
+
+# PostgreSQL configuration (Control Plane) - Test Database
+# Uses port 9011 mapped from docker-compose.test.yml
+[postgres]
+max_connections = 20
+
+# ClickHouse configuration (Data Plane) - Test Database
+# Uses port 9012 mapped from docker-compose.test.yml
+[clickhouse]
+url = "http://localhost:9012"
+user = "zradar_test"
+password = "test_pass_123"
+database = "telemetry_test"
+max_connections = 10
+
+# Admin API configuration - Test port 9015
+[admin_api]
+admin_api_port = 9015
+jwt_secret = "test-secret-key-for-functional-tests-only"
+jwt_expiry_hours = 24
+
+# Authentication configuration
+[auth]
+enabled = true
+cache_ttl_seconds = 300
+
+
+# Ingestor configuration (Redis for job queue)
+# Uses port 9014 mapped from docker-compose.test.yml
+[ingestor]
+#redis.url = "redis://localhost:9014"
+#redis.max_connections = 10
+#redis.ttl_seconds = 3600
+skip_job = true 
+
+
+# Local storage for test batches
+[ingestor.storage]
+# type = "local"
+# path = "/tmp/zradar-test-batches"
+
+
+# Worker configuration
+[workers]
+batch_processor.enabled = false  # Tests run without workers
+
+# Auto-migrations for test environment
+[migrations]
+auto_migrate = true
+

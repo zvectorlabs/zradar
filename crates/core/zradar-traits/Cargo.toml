@@ -1,0 +1,25 @@
+[package]
+name = "zradar-traits"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+default = []
+# Enable utoipa derives for OpenAPI documentation
+utoipa = ["dep:utoipa"]
+
+[dependencies]
+async-trait = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+# Optional: OpenAPI documentation
+utoipa = { workspace = true, optional = true }
+# SQL database support (required for Postgres plugin)
+sqlx = { workspace = true }
+
+# Internal dependencies
+zradar-models = { path = "../zradar-models", default-features = false }

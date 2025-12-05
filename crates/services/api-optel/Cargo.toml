@@ -1,0 +1,33 @@
+[package]
+name = "api-optel"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+description = "OpenTelemetry Protocol (OTLP) gRPC services for zradar"
+
+[dependencies]
+zradar-models = { path = "../../core/zradar-models" }
+api = { path = "../api" }
+zradar-traits = { path = "../../core/zradar-traits" }
+
+# ✅ OpenTelemetry Protocol - THE CONTRACT
+# This is the ONLY source of truth for OTLP types
+opentelemetry-proto = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+hex = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+

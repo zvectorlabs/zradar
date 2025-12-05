@@ -1,0 +1,25 @@
+[package]
+name = "zradar-migrations"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+description = "Centralized migration registry for zradar plugins"
+
+[dependencies]
+# Error handling
+anyhow = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Database support (required - this is a migration system!)
+sqlx = { workspace = true }
+

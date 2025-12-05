@@ -1,0 +1,23 @@
+# Development Dockerfile with hot reload
+FROM rust:1.90-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for hot reload
+RUN cargo install cargo-watch
+
+# Create app directory
+WORKDIR /app
+
+# Expose ports
+EXPOSE 4317 8080
+
+# Default command (can be overridden in docker-compose)
+CMD ["cargo", "run", "--release"]
+

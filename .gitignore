@@ -1,0 +1,35 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Configuration
+config.toml
+config.toml.backup
+*.local.toml
+
+# Logs
+*.log
+
+# Generated files
+Cargo.lock
+
+# Data directories (preserve structure but ignore contents)
+data/clickhouse/*
+!data/clickhouse/.gitkeep
+data/trace-batches/*
+!data/trace-batches/.gitkeep
+data/postgres/*
+!data/postgres/.gitkeep
+data/redis/*
+!data/redis/.gitkeep
+
+.env

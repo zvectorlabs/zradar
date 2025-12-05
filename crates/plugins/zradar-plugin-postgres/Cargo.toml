@@ -1,0 +1,43 @@
+[package]
+name = "zradar-plugin-postgres"
+version = "0.1.0"
+edition.workspace = true
+description = "PostgreSQL plugin - default implementation for all repositories"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Database
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio", "uuid", "chrono", "migrate", "json"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Hashing for API keys
+sha2 = "0.10"
+
+# Compression
+flate2 = "1.0"
+
+# Internal dependencies
+zradar-models = { workspace = true }
+zradar-traits = { workspace = true }
+zradar-plugins = { workspace = true }
+zradar-migrations = { path = "../../core/zradar-migrations" }
+
+[build-dependencies]
+# For embedding migrations
+

@@ -1,0 +1,62 @@
+# Test environment - ephemeral, minimal setup
+# Usage: cargo test --test functional_tests -- --ignored
+# Test port: 9011 (PostgreSQL only)
+#
+# Architecture: PostgreSQL-only (ultra-simplified)
+# - All test data in PostgreSQL
+# - Centralized migration system auto-runs on test startup
+# - In-memory volume for fast cleanup
+# - Redis/ClickHouse disabled (add back if needed)
+
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    container_name: zradar-test-postgres
+    environment:
+      POSTGRES_DB: zradar_test
+      POSTGRES_USER: zradar_test
+      POSTGRES_PASSWORD: test_pass_123
+    ports:
+      - "9011:5432"  # Test PostgreSQL port
+    tmpfs:
+      - /var/lib/postgresql/data  # In-memory = fast + auto-cleanup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zradar_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - zradar-test
+
+  # Redis - DISABLED for testing (not needed yet)
+  # Uncomment if you need Redis in test environment
+  # redis-test:
+  #   image: redis:7-alpine
+  #   container_name: zradar-test-redis
+  #   ports:
+  #     - "9014:6379"
+  #   tmpfs:
+  #     - /data
+  #   networks:
+  #     - zradar-test
+
+  # ClickHouse - DISABLED for testing (using Postgres only)
+  # Uncomment if you need ClickHouse in test environment
+  # clickhouse-test:
+  #   image: clickhouse/clickhouse-server:24.1-alpine
+  #   container_name: zradar-test-clickhouse
+  #   environment:
+  #     CLICKHOUSE_DB: telemetry_test
+  #     CLICKHOUSE_USER: zradar_test
+  #     CLICKHOUSE_PASSWORD: test_pass_123
+  #   ports:
+  #     - "9012:8123"
+  #   networks:
+  #     - zradar-test
+
+networks:
+  zradar-test:
+    driver: bridge
+
+# Note: No persistent volumes needed - all test data in-memory (tmpfs)
+

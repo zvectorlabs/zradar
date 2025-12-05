@@ -1,0 +1,120 @@
+# =============================================================================
+# ZRADAR PLUGIN CONFIGURATION
+# =============================================================================
+#
+# This file configures the plugin system for zradar.
+# Plugins extend zradar with additional storage, queue, and cache backends.
+#
+# Default backends (PostgreSQL) are always available without plugins.
+# =============================================================================
+
+[plugins]
+# Directory containing plugin .so/.dylib files
+plugin_dir = "./plugins"
+
+# Plugins to load (in order)
+# - "postgres" is built-in (always available)
+# - Other plugins are loaded dynamically
+enabled = [
+    "clickhouse",   # Telemetry storage (high-performance)
+    "s3",           # Block storage (production)
+    "redis",        # Cache (fast lookups)
+]
+
+# =============================================================================
+# BACKEND SELECTION
+# =============================================================================
+# Choose which plugin provides each backend.
+# Use "postgres" for default built-in implementation.
+
+[plugins.backends]
+# Block storage for trace batches
+# - "postgres" = Store in PostgreSQL (small deployments)
+# - "s3" = Store in S3 (production)
+# - "local" = Store on filesystem (development)
+storage = "s3"
+
+# Job queue for async processing
+# - "postgres" = PostgreSQL-based queue (up to 50 workers)
+# - "redis" = Redis-backed queue (high throughput)
+queue = "postgres"
+
+# Telemetry writer (spans, metrics)
+# - "postgres" = Store in PostgreSQL (small deployments)
+# - "clickhouse" = Store in ClickHouse (production, analytics)
+telemetry_writer = "clickhouse"
+
+# Telemetry reader (queries, analytics)
+# - "postgres" = Query from PostgreSQL
+# - "clickhouse" = Query from ClickHouse (optimized)
+telemetry_reader = "clickhouse"
+
+# Cache provider
+# - "memory" = In-memory cache (single instance)
+# - "redis" = Redis cache (distributed)
+cache = "redis"
+
+# Auth provider
+# - "postgres" = PostgreSQL-based auth (default)
+auth = "postgres"
+
+# =============================================================================
+# MIGRATION CONFIGURATION
+# =============================================================================
+# Plugins that manage databases can run migrations automatically.
+
+[plugins.migrations]
+# Run migrations automatically on startup
+auto_migrate = true
+
+# Fail startup if migration checksums don't match
+strict_checksums = true
+
+# Per-plugin migration directories
+[plugins.migrations.plugin_migrations.clickhouse]
+migrations_dir = "./migrations_clickhouse"
+# Override auto_migrate for this plugin (optional)
+# auto_migrate = false
+
+[plugins.migrations.plugin_migrations.postgres]
+migrations_dir = "./migrations"
+
+# =============================================================================
+# PLUGIN-SPECIFIC CONFIGURATION
+# =============================================================================
+
+[plugins.clickhouse]
+url = "http://localhost:8123"
+user = "default"
+password = ""
+database = "zradar"
+test_mode = false
+
+[plugins.s3]
+bucket = "zradar-traces"
+region = "us-east-1"
+# For MinIO or other S3-compatible storage:
+# endpoint = "http://localhost:9000"
+
+[plugins.redis]
+url = "redis://localhost:6379"
+# pool_size = 10
+
+# =============================================================================
+# EXAMPLE: MINIMAL CONFIGURATION (PostgreSQL only)
+# =============================================================================
+# For small deployments, use PostgreSQL for everything:
+#
+# [plugins]
+# enabled = []
+#
+# [plugins.backends]
+# storage = "postgres"
+# queue = "postgres"
+# telemetry_writer = "postgres"
+# telemetry_reader = "postgres"
+# cache = "memory"
+# auth = "postgres"
+#
+# =============================================================================
+

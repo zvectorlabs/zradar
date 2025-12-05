@@ -1,0 +1,27 @@
+{
+  "name": "zradar-nodejs-example",
+  "version": "1.0.0",
+  "description": "Example Node.js client for zradar OTLP",
+  "main": "send-trace.js",
+  "type": "module",
+  "scripts": {
+    "start": "node send-trace.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/sdk-node": "^0.45.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.45.0",
+    "@opentelemetry/resources": "^1.18.0",
+    "@opentelemetry/semantic-conventions": "^1.18.0"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otlp",
+    "zradar",
+    "observability",
+    "llm"
+  ],
+  "author": "",
+  "license": "Apache-2.0"
+}
+

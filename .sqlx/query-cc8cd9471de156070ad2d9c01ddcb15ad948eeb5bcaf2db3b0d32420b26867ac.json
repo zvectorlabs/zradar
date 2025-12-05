@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE ingestion_jobs \n            SET status = 'completed', \n                completed_at = NOW() \n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc8cd9471de156070ad2d9c01ddcb15ad948eeb5bcaf2db3b0d32420b26867ac"
+}

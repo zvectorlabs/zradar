@@ -1,0 +1,124 @@
+# Development Environment (Default)
+# This is optimized for local development with hot reload
+# Usage: make dev  OR  docker-compose up
+#
+# Architecture: PostgreSQL-only (simplified)
+# - All data stored in PostgreSQL (telemetry, scores, control plane)
+# - Centralized migration system auto-runs on server startup
+# - Set AUTO_MIGRATE=true to enable automatic migrations
+
+services:
+  # PostgreSQL - All data storage
+  postgres:
+    image: postgres:17-alpine
+    container_name: zradar-postgres
+    environment:
+      POSTGRES_DB: zradar
+      POSTGRES_USER: zradar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"  # Direct PostgreSQL access
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      # Note: Migrations are embedded in the application (no manual mounting needed)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zradar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zradar
+
+  # Redis - DISABLED (not needed yet, can be added later for job queues)
+  # Uncomment below if you need Redis for job queue coordination
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: zradar-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - ./data/redis:/data
+  #   networks:
+  #     - zradar
+
+  # ClickHouse - DISABLED (using Postgres for everything)
+  # Uncomment below if you need ClickHouse for high-scale deployments
+  # clickhouse:
+  #   image: clickhouse/clickhouse-server:24.1-alpine
+  #   container_name: zradar-clickhouse
+  #   environment:
+  #     CLICKHOUSE_DB: telemetry
+  #     CLICKHOUSE_USER: zradar
+  #     CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dev_password}
+  #   ports:
+  #     - "8123:8123"  # ClickHouse HTTP
+  #     - "9000:9000"  # ClickHouse Native
+  #   volumes:
+  #     - ./data/clickhouse:/var/lib/clickhouse
+  #   networks:
+  #     - zradar
+
+  # zradar server with hot reload (Development)
+  zradar:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: zradar-server
+    environment:
+      # Database connections (Postgres-only)
+      DATABASE_URL: postgres://zradar:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/zradar
+      # REDIS_URL: redis://redis:6379  # Uncomment if you enable Redis
+      
+      # Development config
+      RUST_LOG: ${RUST_LOG:-debug,zradar=trace}
+      RUST_BACKTRACE: 1
+      
+      # Migration config - Centralized system
+      # On first run: Always migrates (auto-detects empty database)
+      # Subsequent runs: Only if AUTO_MIGRATE=true
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      
+      # Job queue config
+      QUEUE_TYPE: ${QUEUE_TYPE:-postgres}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      
+      # Server ports
+      OTLP_PORT: 4317
+      QUERY_API_PORT: 8080
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "8080:8080"  # Admin API
+    volumes:
+      # Mount source for hot reload
+      - ./crates:/app/crates:ro
+      - ./test_functional:/app/test_functional:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./Cargo.lock:/app/Cargo.lock:ro
+      - ./config.server.toml:/app/config.toml:ro
+      - ./data/trace-batches:/app/data/trace-batches
+      # Note: Migrations are embedded in the application binary
+      # The centralized migration system auto-discovers and applies them
+      # Cargo caches for faster builds
+      - cargo_cache:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - target_cache:/app/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # redis: disabled - not needed yet
+      # clickhouse: disabled - using Postgres only
+    networks:
+      - zradar
+    command: cargo watch -x 'run --bin zradar'
+
+networks:
+  zradar:
+    driver: bridge
+
+volumes:
+  # Cargo caches as Docker volumes for better performance
+  cargo_cache:
+  cargo_git:
+  target_cache:
+  # Note: Database volumes are mapped to ./data/ directory for persistence
