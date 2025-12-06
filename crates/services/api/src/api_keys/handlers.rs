@@ -1,17 +1,17 @@
 //! HTTP handlers
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::{service::*, types::*};
-use crate::errors::{ControlError, Result};
-use crate::audit::{AuditLogger, AuditEvent, AuditStatus};
+use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
 use crate::auth::{ApiKeyAuth, DefaultKeyGenerator};
+use crate::errors::{ControlError, Result};
 use crate::http::extractors::AuthenticatedUser;
 
 #[utoipa::path(
@@ -29,7 +29,7 @@ use crate::http::extractors::AuthenticatedUser;
     security(
         ("bearer_token" = [])
     ),
-    tag = "api-keys"
+    tag = "ApiKeys"
 )]
 pub async fn create_api_key(
     State(service): State<Arc<ApiKeyService<DefaultKeyGenerator>>>,
@@ -38,16 +38,22 @@ pub async fn create_api_key(
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>)> {
     // Get project
-    let project = service.project_storage.get_project(project_id).await?
+    let project = service
+        .project_storage
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
 
     // Check permission
-    service.rbac.require_permission(
-        user.id,
-        project.organization_id,
-        Some(project_id),
-        "api_keys:create"
-    ).await?;
+    service
+        .rbac
+        .require_permission(
+            user.id,
+            project.organization_id,
+            Some(project_id),
+            "api_keys:create",
+        )
+        .await?;
 
     // Validate permissions if provided (skipped for trait abstraction)
     // In production, validation would be done at a higher level
@@ -61,33 +67,39 @@ pub async fn create_api_key(
     let key_prefix = key.chars().take(12).collect::<String>();
 
     // Create API key in database
-    let api_key = service.api_key_storage.create_key(
-        project.organization_id,
-        project_id,
-        key_hash,
-        key_prefix.clone(),
-        req.clone(),
-        user.id,
-    ).await?;
+    let api_key = service
+        .api_key_storage
+        .create_key(
+            project.organization_id,
+            project_id,
+            key_hash,
+            key_prefix.clone(),
+            req.clone(),
+            user.id,
+        )
+        .await?;
 
     // Log creation
-    let _ = service.audit.log(AuditEvent {
-        organization_id: Some(project.organization_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "api_key.created".to_string(),
-        resource_type: Some("api_key".to_string()),
-        resource_id: Some(api_key.id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "key_id": api_key.id,
-            "key_prefix": key_prefix,
-            "project_id": project_id,
-            "permissions": api_key.permissions
-        })),
-    }).await;
+    let _ = service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(project.organization_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "api_key.created".to_string(),
+            resource_type: Some("api_key".to_string()),
+            resource_id: Some(api_key.id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "key_id": api_key.id,
+                "key_prefix": key_prefix,
+                "project_id": project_id,
+                "permissions": api_key.permissions
+            })),
+        })
+        .await;
 
     tracing::info!(
         key_id = %api_key.id,
@@ -96,15 +108,18 @@ pub async fn create_api_key(
         "API key created"
     );
 
-    Ok((StatusCode::CREATED, Json(CreateApiKeyResponse {
-        id: api_key.id,
-        key,  // Return the actual key (only time it's shown)
-        key_prefix,
-        name: api_key.name,
-        permissions: api_key.permissions,
-        expires_at: api_key.expires_at,
-        created_at: api_key.created_at,
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateApiKeyResponse {
+            id: api_key.id,
+            key, // Return the actual key (only time it's shown)
+            key_prefix,
+            name: api_key.name,
+            permissions: api_key.permissions,
+            expires_at: api_key.expires_at,
+            created_at: api_key.created_at,
+        }),
+    ))
 }
 
 /// List API keys for a project
@@ -122,7 +137,7 @@ pub async fn create_api_key(
     security(
         ("bearer_token" = [])
     ),
-    tag = "api-keys"
+    tag = "ApiKeys"
 )]
 pub async fn list_api_keys(
     State(service): State<Arc<ApiKeyService<DefaultKeyGenerator>>>,
@@ -130,18 +145,27 @@ pub async fn list_api_keys(
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<ApiKeyResponse>>> {
     // Get project
-    let project = service.project_storage.get_project(project_id).await?
+    let project = service
+        .project_storage
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
 
     // Check permission
-    service.rbac.require_permission(
-        user.id,
-        project.organization_id,
-        Some(project_id),
-        "api_keys:read"
-    ).await?;
+    service
+        .rbac
+        .require_permission(
+            user.id,
+            project.organization_id,
+            Some(project_id),
+            "api_keys:read",
+        )
+        .await?;
 
-    let keys = service.api_key_storage.list_keys(project.organization_id, project_id).await?;
+    let keys = service
+        .api_key_storage
+        .list_keys(project.organization_id, project_id)
+        .await?;
     let response: Vec<ApiKeyResponse> = keys.into_iter().map(|k| k.into()).collect();
 
     Ok(Json(response))
@@ -162,23 +186,29 @@ pub async fn list_api_keys(
     security(
         ("bearer_token" = [])
     ),
-    tag = "api-keys"
+    tag = "ApiKeys"
 )]
 pub async fn get_api_key(
     State(service): State<Arc<ApiKeyService<DefaultKeyGenerator>>>,
     user: AuthenticatedUser,
     Path(key_id): Path<Uuid>,
 ) -> Result<Json<ApiKeyResponse>> {
-    let api_key = service.api_key_storage.get_key(key_id).await?
+    let api_key = service
+        .api_key_storage
+        .get_key(key_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("API key not found".to_string()))?;
 
     // Check permission
-    service.rbac.require_permission(
-        user.id,
-        api_key.organization_id,
-        Some(api_key.project_id),
-        "api_keys:read"
-    ).await?;
+    service
+        .rbac
+        .require_permission(
+            user.id,
+            api_key.organization_id,
+            Some(api_key.project_id),
+            "api_keys:read",
+        )
+        .await?;
 
     Ok(Json(api_key.into()))
 }
@@ -198,23 +228,29 @@ pub async fn get_api_key(
     security(
         ("bearer_token" = [])
     ),
-    tag = "api-keys"
+    tag = "ApiKeys"
 )]
 pub async fn revoke_api_key(
     State(service): State<Arc<ApiKeyService<DefaultKeyGenerator>>>,
     user: AuthenticatedUser,
     Path(key_id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    let api_key = service.api_key_storage.get_key(key_id).await?
+    let api_key = service
+        .api_key_storage
+        .get_key(key_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("API key not found".to_string()))?;
 
     // Check permission
-    service.rbac.require_permission(
-        user.id,
-        api_key.organization_id,
-        Some(api_key.project_id),
-        "api_keys:revoke"
-    ).await?;
+    service
+        .rbac
+        .require_permission(
+            user.id,
+            api_key.organization_id,
+            Some(api_key.project_id),
+            "api_keys:revoke",
+        )
+        .await?;
 
     service.api_key_storage.revoke_key(key_id).await?;
 
@@ -222,21 +258,24 @@ pub async fn revoke_api_key(
     service.auth.revoke(key_id).await?;
 
     // Log revocation
-    let _ = service.audit.log(AuditEvent {
-        organization_id: Some(api_key.organization_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "api_key.revoked".to_string(),
-        resource_type: Some("api_key".to_string()),
-        resource_id: Some(key_id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "key_id": key_id,
-            "key_prefix": api_key.key_prefix
-        })),
-    }).await;
+    let _ = service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(api_key.organization_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "api_key.revoked".to_string(),
+            resource_type: Some("api_key".to_string()),
+            resource_id: Some(key_id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "key_id": key_id,
+                "key_prefix": api_key.key_prefix
+            })),
+        })
+        .await;
 
     tracing::info!(key_id = %key_id, user_id = %user.id, "API key revoked");
 
@@ -258,23 +297,29 @@ pub async fn revoke_api_key(
     security(
         ("bearer_token" = [])
     ),
-    tag = "api-keys"
+    tag = "ApiKeys"
 )]
 pub async fn delete_api_key(
     State(service): State<Arc<ApiKeyService<DefaultKeyGenerator>>>,
     user: AuthenticatedUser,
     Path(key_id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    let api_key = service.api_key_storage.get_key(key_id).await?
+    let api_key = service
+        .api_key_storage
+        .get_key(key_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("API key not found".to_string()))?;
 
     // Check permission (high-risk operation)
-    service.rbac.require_permission(
-        user.id,
-        api_key.organization_id,
-        Some(api_key.project_id),
-        "api_keys:delete"
-    ).await?;
+    service
+        .rbac
+        .require_permission(
+            user.id,
+            api_key.organization_id,
+            Some(api_key.project_id),
+            "api_keys:delete",
+        )
+        .await?;
 
     service.api_key_storage.delete_key(key_id).await?;
 
@@ -282,21 +327,24 @@ pub async fn delete_api_key(
     service.auth.revoke(key_id).await?;
 
     // Log deletion
-    let _ = service.audit.log(AuditEvent {
-        organization_id: Some(api_key.organization_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "api_key.deleted".to_string(),
-        resource_type: Some("api_key".to_string()),
-        resource_id: Some(key_id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "key_id": key_id,
-            "key_prefix": api_key.key_prefix
-        })),
-    }).await;
+    let _ = service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(api_key.organization_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "api_key.deleted".to_string(),
+            resource_type: Some("api_key".to_string()),
+            resource_id: Some(key_id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "key_id": key_id,
+                "key_prefix": api_key.key_prefix
+            })),
+        })
+        .await;
 
     tracing::warn!(key_id = %key_id, user_id = %user.id, "API key deleted");
 

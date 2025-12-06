@@ -1,9 +1,9 @@
 //! Project HTTP handlers
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,7 +29,7 @@ use crate::http::extractors::AuthenticatedUser;
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn create_project(
     State(service): State<Arc<ProjectService>>,
@@ -55,7 +55,7 @@ pub async fn create_project(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn list_projects(
     State(service): State<Arc<ProjectService>>,
@@ -81,7 +81,7 @@ pub async fn list_projects(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn get_project(
     State(service): State<Arc<ProjectService>>,
@@ -108,7 +108,7 @@ pub async fn get_project(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn update_project(
     State(service): State<Arc<ProjectService>>,
@@ -135,7 +135,7 @@ pub async fn update_project(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn delete_project(
     State(service): State<Arc<ProjectService>>,
@@ -162,7 +162,7 @@ pub async fn delete_project(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn add_project_member(
     State(service): State<Arc<ProjectService>>,
@@ -189,7 +189,7 @@ pub async fn add_project_member(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn list_project_members(
     State(service): State<Arc<ProjectService>>,
@@ -216,13 +216,15 @@ pub async fn list_project_members(
     security(
         ("bearer_token" = [])
     ),
-    tag = "projects"
+    tag = "Projects"
 )]
 pub async fn remove_project_member(
     State(service): State<Arc<ProjectService>>,
     user: AuthenticatedUser,
     Path((project_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
-    service.remove_member(user.id, project_id, target_user_id).await?;
+    service
+        .remove_member(user.id, project_id, target_user_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

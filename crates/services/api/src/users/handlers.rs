@@ -1,10 +1,6 @@
 //! User and authentication HTTP handlers
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{Json, extract::State, http::StatusCode};
 use std::sync::Arc;
 
 use super::{service::AuthService, types::*};
@@ -21,7 +17,7 @@ use crate::http::extractors::AuthenticatedUser;
         (status = 400, description = "Invalid request"),
         (status = 409, description = "Email already exists"),
     ),
-    tag = "auth"
+    tag = "Auth"
 )]
 pub async fn register(
     State(service): State<Arc<AuthService>>,
@@ -40,7 +36,7 @@ pub async fn register(
         (status = 200, description = "Login successful", body = AuthResponse),
         (status = 401, description = "Invalid credentials"),
     ),
-    tag = "auth"
+    tag = "Auth"
 )]
 pub async fn login(
     State(service): State<Arc<AuthService>>,
@@ -61,11 +57,9 @@ pub async fn login(
     security(
         ("bearer_token" = [])
     ),
-    tag = "auth"
+    tag = "Auth"
 )]
-pub async fn me(
-    user: AuthenticatedUser,
-) -> Result<Json<UserResponse>> {
+pub async fn me(user: AuthenticatedUser) -> Result<Json<UserResponse>> {
     Ok(Json(user.into_inner().into()))
 }
 
@@ -80,7 +74,7 @@ pub async fn me(
     security(
         ("bearer_token" = [])
     ),
-    tag = "auth"
+    tag = "Auth"
 )]
 pub async fn refresh(
     State(service): State<Arc<AuthService>>,
@@ -89,9 +83,6 @@ pub async fn refresh(
     // Generate a new JWT token for the authenticated user
     // AuthenticatedUser wraps User, so we pass a reference to the inner User
     let new_token = service.jwt_auth.generate_token(&user.0)?;
-    
-    Ok(Json(RefreshResponse {
-        token: new_token,
-    }))
-}
 
+    Ok(Json(RefreshResponse { token: new_token }))
+}

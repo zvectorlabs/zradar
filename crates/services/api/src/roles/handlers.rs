@@ -1,16 +1,16 @@
 //! HTTP handlers
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::{service::RoleService, types::*};
+use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
 use crate::errors::{ControlError, Result};
-use crate::audit::{AuditLogger, AuditEvent, AuditStatus};
 use crate::http::extractors::AuthenticatedUser;
 use tracing::info;
 
@@ -27,7 +27,8 @@ use tracing::info;
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Insufficient permissions"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn create_role(
     State(service): State<Arc<RoleService>>,
@@ -38,34 +39,43 @@ pub async fn create_role(
     info!("Creating custom role: {} in org {}", req.name, org_id);
 
     // Check permission
-    service.rbac
+    service
+        .rbac
         .check_permission(user.id, org_id, None, "admin:roles")
         .await?;
 
     // Basic permission validation (ensure not empty)
     if req.permissions.is_empty() {
-        return Err(ControlError::InvalidInput("Role must have at least one permission".to_string()));
+        return Err(ControlError::InvalidInput(
+            "Role must have at least one permission".to_string(),
+        ));
     }
 
     // Create role
-    let role = service.role_storage.create_custom_role(org_id, req.clone(), user.id).await?;
+    let role = service
+        .role_storage
+        .create_custom_role(org_id, req.clone(), user.id)
+        .await?;
 
     // Audit log
-    service.audit.log(AuditEvent {
-        organization_id: Some(org_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "create".to_string(),
-        resource_type: Some("custom_role".to_string()),
-        resource_id: Some(role.id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "role_name": role.name,
-            "permissions": role.permissions,
-        })),
-    }).await?;
+    service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(org_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "create".to_string(),
+            resource_type: Some("custom_role".to_string()),
+            resource_id: Some(role.id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "role_name": role.name,
+                "permissions": role.permissions,
+            })),
+        })
+        .await?;
 
     info!("Created custom role: {} ({})", role.name, role.id);
 
@@ -85,7 +95,8 @@ pub async fn create_role(
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Organization not found"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn list_roles(
     State(service): State<Arc<RoleService>>,
@@ -93,7 +104,8 @@ pub async fn list_roles(
     Path(org_id): Path<Uuid>,
 ) -> Result<Json<Vec<CustomRole>>> {
     // Check permission
-    service.rbac
+    service
+        .rbac
         .check_permission(user.id, org_id, None, "read:roles")
         .await?;
 
@@ -115,18 +127,23 @@ pub async fn list_roles(
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Role not found"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn get_custom_role(
     State(service): State<Arc<RoleService>>,
     user: AuthenticatedUser,
     Path(role_id): Path<Uuid>,
 ) -> Result<Json<CustomRole>> {
-    let role = service.role_storage.get_custom_role(role_id).await?
+    let role = service
+        .role_storage
+        .get_custom_role(role_id)
+        .await?
         .ok_or(ControlError::NotFound("Role not found".to_string()))?;
 
     // Check permission
-    service.rbac
+    service
+        .rbac
         .check_permission(user.id, role.organization_id, None, "read:roles")
         .await?;
 
@@ -148,7 +165,8 @@ pub async fn get_custom_role(
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Role not found"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn update_custom_role(
     State(service): State<Arc<RoleService>>,
@@ -156,38 +174,51 @@ pub async fn update_custom_role(
     Path(role_id): Path<Uuid>,
     Json(req): Json<UpdateCustomRoleRequest>,
 ) -> Result<Json<CustomRole>> {
-    let existing_role = service.role_storage.get_custom_role(role_id).await?
+    let existing_role = service
+        .role_storage
+        .get_custom_role(role_id)
+        .await?
         .ok_or(ControlError::NotFound("Role not found".to_string()))?;
 
     // Check permission
-    service.rbac
+    service
+        .rbac
         .check_permission(user.id, existing_role.organization_id, None, "admin:roles")
         .await?;
 
     // Validate new permissions if provided
     if let Some(ref perms) = req.permissions
-        && perms.is_empty() {
-            return Err(ControlError::InvalidInput("Role must have at least one permission".to_string()));
-        }
+        && perms.is_empty()
+    {
+        return Err(ControlError::InvalidInput(
+            "Role must have at least one permission".to_string(),
+        ));
+    }
 
     // Update role
-    let updated_role = service.role_storage.update_custom_role(role_id, req.clone()).await?;
+    let updated_role = service
+        .role_storage
+        .update_custom_role(role_id, req.clone())
+        .await?;
 
     // Audit log
-    service.audit.log(AuditEvent {
-        organization_id: Some(existing_role.organization_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "update".to_string(),
-        resource_type: Some("custom_role".to_string()),
-        resource_id: Some(role_id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "changes": req,
-        })),
-    }).await?;
+    service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(existing_role.organization_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "update".to_string(),
+            resource_type: Some("custom_role".to_string()),
+            resource_id: Some(role_id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "changes": req,
+            })),
+        })
+        .await?;
 
     info!("Updated custom role: {}", role_id);
 
@@ -207,18 +238,23 @@ pub async fn update_custom_role(
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Role not found"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn delete_custom_role(
     State(service): State<Arc<RoleService>>,
     user: AuthenticatedUser,
     Path(role_id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    let role = service.role_storage.get_custom_role(role_id).await?
+    let role = service
+        .role_storage
+        .get_custom_role(role_id)
+        .await?
         .ok_or(ControlError::NotFound("Role not found".to_string()))?;
 
     // Check permission
-    service.rbac
+    service
+        .rbac
         .check_permission(user.id, role.organization_id, None, "admin:roles")
         .await?;
 
@@ -226,20 +262,23 @@ pub async fn delete_custom_role(
     service.role_storage.delete_custom_role(role_id).await?;
 
     // Audit log
-    service.audit.log(AuditEvent {
-        organization_id: Some(role.organization_id),
-        user_id: Some(user.id),
-        actor_type: Some("user".to_string()),
-        actor_id: Some(user.id),
-        actor_ip: None,
-        action: "delete".to_string(),
-        resource_type: Some("custom_role".to_string()),
-        resource_id: Some(role_id),
-        status: AuditStatus::Success,
-        details: Some(serde_json::json!({
-            "role_name": role.name,
-        })),
-    }).await?;
+    service
+        .audit
+        .log(AuditEvent {
+            organization_id: Some(role.organization_id),
+            user_id: Some(user.id),
+            actor_type: Some("user".to_string()),
+            actor_id: Some(user.id),
+            actor_ip: None,
+            action: "delete".to_string(),
+            resource_type: Some("custom_role".to_string()),
+            resource_id: Some(role_id),
+            status: AuditStatus::Success,
+            details: Some(serde_json::json!({
+                "role_name": role.name,
+            })),
+        })
+        .await?;
 
     info!("Deleted custom role: {}", role_id);
 
@@ -254,13 +293,17 @@ pub async fn delete_custom_role(
         (status = 200, description = "List of available permissions", body = Vec<PermissionDefinition>),
         (status = 401, description = "Unauthorized"),
     ),
-    security(("bearer_token" = []))
+    security(("bearer_token" = [])),
+    tag = "Roles"
 )]
 pub async fn list_permissions(
     State(service): State<Arc<RoleService>>,
     _user: AuthenticatedUser,
 ) -> Result<Json<Vec<PermissionDefinition>>> {
-    let permissions = service.role_storage.get_permission_definitions(None).await?;
+    let permissions = service
+        .role_storage
+        .get_permission_definitions(None)
+        .await?;
 
     Ok(Json(permissions))
 }

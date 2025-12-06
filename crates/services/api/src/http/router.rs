@@ -126,17 +126,17 @@ use crate::scores::{ScoresService, handlers as score_handlers};
         )
     ),
     tags(
-        (name = "auth", description = "Authentication and user management"),
-        (name = "organizations", description = "Organization management"),
-        (name = "projects", description = "Project management"),
-        (name = "api-keys", description = "API key management"),
-        (name = "roles", description = "Custom role management"),
-        (name = "query", description = "Query telemetry data (traces, spans)"),
-        (name = "analytics", description = "Analytics and aggregations"),
-        (name = "scores", description = "Evaluation scores management"),
+        (name = "Auth", description = "Authentication and user management"),
+        (name = "Organizations", description = "Organization management"),
+        (name = "Projects", description = "Project management"),
+        (name = "ApiKeys", description = "API key management"),
+        (name = "Roles", description = "Custom role management"),
+        (name = "Query", description = "Query telemetry data (traces, spans)"),
+        (name = "Analytics", description = "Analytics and aggregations"),
+        (name = "Scores", description = "Evaluation scores management"),
     ),
     info(
-        title = "zradar Admin API",
+        title = "ZRadar Admin API",
         version = "0.1.0",
         description = "Admin API for zradar - OpenTelemetry observability platform",
         contact(

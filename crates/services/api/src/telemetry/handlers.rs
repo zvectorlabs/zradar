@@ -1,8 +1,8 @@
 //! Telemetry/Query HTTP handlers
 
 use axum::{
-    extract::{Path, Query, State},
     Json,
+    extract::{Path, Query, State},
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -43,7 +43,7 @@ pub struct ProjectIdParam {
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "query"
+    tag = "Query"
 )]
 pub async fn query_traces(
     State(service): State<Arc<QueryService>>,
@@ -70,7 +70,7 @@ pub async fn query_traces(
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "query"
+    tag = "Query"
 )]
 pub async fn get_trace(
     State(service): State<Arc<QueryService>>,
@@ -78,7 +78,9 @@ pub async fn get_trace(
     Path(trace_id): Path<String>,
     Query(params): Query<ProjectIdParam>,
 ) -> Result<Json<TraceDetail>> {
-    let trace = service.get_trace(user.id, Uuid::nil(), params.project_id, &trace_id).await?;
+    let trace = service
+        .get_trace(user.id, Uuid::nil(), params.project_id, &trace_id)
+        .await?;
     Ok(Json(trace))
 }
 
@@ -107,7 +109,7 @@ pub async fn get_trace(
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "query"
+    tag = "Query"
 )]
 pub async fn query_spans(
     State(service): State<Arc<QueryService>>,
@@ -136,7 +138,7 @@ pub async fn query_spans(
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "analytics"
+    tag = "Analytics"
 )]
 pub async fn get_analytics(
     State(service): State<Arc<QueryService>>,
@@ -164,14 +166,16 @@ pub async fn get_analytics(
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "analytics"
+    tag = "Analytics"
 )]
 pub async fn get_top_endpoints(
     State(service): State<Arc<QueryService>>,
     user: AuthenticatedUser,
     Query(query): Query<TopNQuery>,
 ) -> Result<Json<Vec<TopEndpoint>>> {
-    let results = service.get_top_endpoints(user.id, Uuid::nil(), query).await?;
+    let results = service
+        .get_top_endpoints(user.id, Uuid::nil(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -191,13 +195,15 @@ pub async fn get_top_endpoints(
         (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
-    tag = "analytics"
+    tag = "Analytics"
 )]
 pub async fn get_error_breakdown(
     State(service): State<Arc<QueryService>>,
     user: AuthenticatedUser,
     Query(query): Query<ErrorAnalyticsQuery>,
 ) -> Result<Json<Vec<ErrorBreakdown>>> {
-    let results = service.get_error_breakdown(user.id, Uuid::nil(), query).await?;
+    let results = service
+        .get_error_breakdown(user.id, Uuid::nil(), query)
+        .await?;
     Ok(Json(results))
 }

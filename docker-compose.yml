@@ -18,12 +18,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"  # Direct PostgreSQL access
+      - "5432:5432" # Direct PostgreSQL access
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
       # Note: Migrations are embedded in the application (no manual mounting needed)
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zradar"]
+      test: [ "CMD-SHELL", "pg_isready -U zradar" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -69,26 +69,26 @@ services:
       # Database connections (Postgres-only)
       DATABASE_URL: postgres://zradar:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/zradar
       # REDIS_URL: redis://redis:6379  # Uncomment if you enable Redis
-      
+
       # Development config
       RUST_LOG: ${RUST_LOG:-debug,zradar=trace}
       RUST_BACKTRACE: 1
-      
+
       # Migration config - Centralized system
       # On first run: Always migrates (auto-detects empty database)
       # Subsequent runs: Only if AUTO_MIGRATE=true
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
-      
+
       # Job queue config
       QUEUE_TYPE: ${QUEUE_TYPE:-postgres}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
-      
+
       # Server ports
       OTLP_PORT: 4317
       QUERY_API_PORT: 8080
     ports:
-      - "4317:4317"  # OTLP gRPC
-      - "8080:8080"  # Admin API
+      - "4317:4317" # OTLP gRPC
+      - "8080:8080" # Admin API
     volumes:
       # Mount source for hot reload
       - ./crates:/app/crates:ro
@@ -110,7 +110,7 @@ services:
       # clickhouse: disabled - using Postgres only
     networks:
       - zradar
-    command: cargo watch -x 'run --bin zradar'
+    command: cargo watch --poll -x 'run --bin zradar'
 
 networks:
   zradar:
@@ -120,5 +120,6 @@ volumes:
   # Cargo caches as Docker volumes for better performance
   cargo_cache:
   cargo_git:
-  target_cache:
-  # Note: Database volumes are mapped to ./data/ directory for persistence
+  target_cache: # Note: Database volumes are mapped to ./data/ directory for persistence
+
+  pg_data:

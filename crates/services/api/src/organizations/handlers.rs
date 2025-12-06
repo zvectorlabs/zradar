@@ -1,9 +1,9 @@
 //! Organization HTTP handlers
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -26,7 +26,7 @@ use crate::http::extractors::AuthenticatedUser;
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn create_organization(
     State(service): State<Arc<OrganizationService>>,
@@ -48,7 +48,7 @@ pub async fn create_organization(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn list_organizations(
     State(service): State<Arc<OrganizationService>>,
@@ -73,7 +73,7 @@ pub async fn list_organizations(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn get_organization(
     State(service): State<Arc<OrganizationService>>,
@@ -100,7 +100,7 @@ pub async fn get_organization(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn update_organization(
     State(service): State<Arc<OrganizationService>>,
@@ -127,7 +127,7 @@ pub async fn update_organization(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn delete_organization(
     State(service): State<Arc<OrganizationService>>,
@@ -154,7 +154,7 @@ pub async fn delete_organization(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn add_organization_member(
     State(_service): State<Arc<OrganizationService>>,
@@ -164,7 +164,9 @@ pub async fn add_organization_member(
 ) -> Result<(StatusCode, Json<OrganizationMember>)> {
     // TODO: Implement user lookup and add member
     use crate::errors::ControlError;
-    Err(ControlError::Internal("User lookup not yet implemented".to_string()))
+    Err(ControlError::Internal(
+        "User lookup not yet implemented".to_string(),
+    ))
 }
 
 /// List organization members
@@ -182,7 +184,7 @@ pub async fn add_organization_member(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn list_organization_members(
     State(service): State<Arc<OrganizationService>>,
@@ -209,14 +211,15 @@ pub async fn list_organization_members(
     security(
         ("bearer_token" = [])
     ),
-    tag = "organizations"
+    tag = "Organizations"
 )]
 pub async fn remove_organization_member(
     State(service): State<Arc<OrganizationService>>,
     user: AuthenticatedUser,
     Path((org_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
-    service.remove_member(user.id, org_id, target_user_id).await?;
+    service
+        .remove_member(user.id, org_id, target_user_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
-

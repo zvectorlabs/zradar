@@ -1,9 +1,9 @@
 //! HTTP handlers
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -28,7 +28,7 @@ use crate::http::extractors::AuthenticatedUser;
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn create_score(
     State(service): State<Arc<ScoresService>>,
@@ -37,26 +37,36 @@ pub async fn create_score(
     Json(request): Json<CreateScoreRequest>,
 ) -> Result<(StatusCode, Json<ScoreResponse>)> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
+
     // Debug logging in test mode
     if std::env::var("ZVRADAR_TEST_MODE").is_ok() {
-        tracing::info!("🔍 CREATE SCORE: project_id={}, org_id={}, trace_id={}, name={}", 
-            project_id, project.organization_id, request.trace_id, request.name);
+        tracing::info!(
+            "🔍 CREATE SCORE: project_id={}, org_id={}, trace_id={}, name={}",
+            project_id,
+            project.organization_id,
+            request.trace_id,
+            request.name
+        );
     }
-    
-    let response = service.create_score(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        request,
-    ).await?;
-    
+
+    let response = service
+        .create_score(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            request,
+        )
+        .await?;
+
     if std::env::var("ZVRADAR_TEST_MODE").is_ok() {
         tracing::info!("🔍 SCORE CREATED: id={}", response.id);
     }
-    
+
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -76,7 +86,7 @@ pub async fn create_score(
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn get_trace_scores(
     State(service): State<Arc<ScoresService>>,
@@ -84,26 +94,35 @@ pub async fn get_trace_scores(
     Path((project_id, trace_id)): Path<(Uuid, String)>,
 ) -> Result<Json<Vec<ScoreResponse>>> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
+
     // Debug logging in test mode
     if std::env::var("ZVRADAR_TEST_MODE").is_ok() {
-        tracing::info!("🔍 GET TRACE SCORES: project_id={}, org_id={}, trace_id={}", 
-            project_id, project.organization_id, trace_id);
+        tracing::info!(
+            "🔍 GET TRACE SCORES: project_id={}, org_id={}, trace_id={}",
+            project_id,
+            project.organization_id,
+            trace_id
+        );
     }
-    
-    let scores = service.get_trace_scores(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        &trace_id,
-    ).await?;
-    
+
+    let scores = service
+        .get_trace_scores(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            &trace_id,
+        )
+        .await?;
+
     if std::env::var("ZVRADAR_TEST_MODE").is_ok() {
         tracing::info!("🔍 FOUND {} scores for trace_id={}", scores.len(), trace_id);
     }
-    
+
     Ok(Json(scores))
 }
 
@@ -123,7 +142,7 @@ pub async fn get_trace_scores(
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn get_trace_score_summary(
     State(service): State<Arc<ScoresService>>,
@@ -131,16 +150,21 @@ pub async fn get_trace_score_summary(
     Path((project_id, trace_id)): Path<(Uuid, String)>,
 ) -> Result<Json<Vec<ScoreSummaryResponse>>> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
-    let summary = service.get_trace_score_summary(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        &trace_id,
-    ).await?;
-    
+
+    let summary = service
+        .get_trace_score_summary(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            &trace_id,
+        )
+        .await?;
+
     Ok(Json(summary))
 }
 
@@ -160,7 +184,7 @@ pub async fn get_trace_score_summary(
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn get_session_scores(
     State(service): State<Arc<ScoresService>>,
@@ -168,16 +192,21 @@ pub async fn get_session_scores(
     Path((project_id, session_id)): Path<(Uuid, String)>,
 ) -> Result<Json<Vec<ScoreResponse>>> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
-    let scores = service.get_session_scores(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        &session_id,
-    ).await?;
-    
+
+    let scores = service
+        .get_session_scores(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            &session_id,
+        )
+        .await?;
+
     Ok(Json(scores))
 }
 
@@ -198,7 +227,7 @@ pub async fn get_session_scores(
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn get_score_by_id(
     State(service): State<Arc<ScoresService>>,
@@ -206,16 +235,21 @@ pub async fn get_score_by_id(
     Path((project_id, score_id)): Path<(Uuid, String)>,
 ) -> Result<Json<ScoreResponse>> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
-    let score = service.get_score_by_id(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        &score_id,
-    ).await?;
-    
+
+    let score = service
+        .get_score_by_id(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            &score_id,
+        )
+        .await?;
+
     Ok(Json(score))
 }
 
@@ -236,7 +270,7 @@ pub async fn get_score_by_id(
     security(
         ("bearer_token" = [])
     ),
-    tag = "scores"
+    tag = "Scores"
 )]
 pub async fn delete_score(
     State(service): State<Arc<ScoresService>>,
@@ -244,15 +278,20 @@ pub async fn delete_score(
     Path((project_id, score_id)): Path<(Uuid, String)>,
 ) -> Result<StatusCode> {
     // Look up project to get organization_id (tenant_id)
-    let project = service.project_repository.get_project(project_id).await?
+    let project = service
+        .project_repository
+        .get_project(project_id)
+        .await?
         .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-    
-    service.delete_score(
-        user.id,
-        project.organization_id.to_string(),  // Use organization_id as tenant_id
-        project_id,
-        &score_id,
-    ).await?;
-    
+
+    service
+        .delete_score(
+            user.id,
+            project.organization_id.to_string(), // Use organization_id as tenant_id
+            project_id,
+            &score_id,
+        )
+        .await?;
+
     Ok(StatusCode::NO_CONTENT)
 }
