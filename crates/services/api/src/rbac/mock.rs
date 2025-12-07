@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use crate::errors::{ControlError, Result};
 use super::permission_checker::PermissionChecker;
+use crate::errors::{ControlError, Result};
 
 type PermissionKey = (Uuid, Uuid, Option<Uuid>); // (user_id, org_id, project_id)
 
@@ -71,14 +71,14 @@ impl PermissionChecker for MockPermissionChecker {
 
         let key = (user_id, org_id, project_id);
         let permissions = self.permissions.lock().unwrap();
-        
+
         if let Some(user_perms) = permissions.get(&key) {
             // Check for exact permission or wildcard
             Ok(user_perms.contains(&permission.to_string())
                 || user_perms.contains(&"*".to_string())
-                || user_perms.iter().any(|p| {
-                    p.ends_with(":*") && permission.starts_with(&p[..p.len() - 1])
-                }))
+                || user_perms
+                    .iter()
+                    .any(|p| p.ends_with(":*") && permission.starts_with(&p[..p.len() - 1])))
         } else {
             Ok(false)
         }
@@ -91,7 +91,10 @@ impl PermissionChecker for MockPermissionChecker {
         project_id: Option<Uuid>,
         permission: &str,
     ) -> Result<()> {
-        if self.check_permission(user_id, org_id, project_id, permission).await? {
+        if self
+            .check_permission(user_id, org_id, project_id, permission)
+            .await?
+        {
             Ok(())
         } else {
             Err(ControlError::Forbidden(format!(
@@ -113,7 +116,7 @@ impl PermissionChecker for MockPermissionChecker {
 
         let key = (user_id, org_id, project_id);
         let permissions = self.permissions.lock().unwrap();
-        
+
         Ok(permissions.get(&key).cloned().unwrap_or_default())
     }
 }
@@ -125,13 +128,18 @@ mod tests {
     #[tokio::test]
     async fn test_mock_permission_checker() {
         let checker = MockPermissionChecker::new();
-        
+
         let user_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
         let project_id = Some(Uuid::new_v4());
 
         // Initially no permissions
-        assert!(!checker.check_permission(user_id, org_id, project_id, "traces:read").await.unwrap());
+        assert!(
+            !checker
+                .check_permission(user_id, org_id, project_id, "traces:read")
+                .await
+                .unwrap()
+        );
 
         // Grant permissions
         checker.grant_permissions(
@@ -142,29 +150,53 @@ mod tests {
         );
 
         // Check permissions
-        assert!(checker.check_permission(user_id, org_id, project_id, "traces:read").await.unwrap());
-        assert!(checker.check_permission(user_id, org_id, project_id, "traces:write").await.unwrap());
-        assert!(!checker.check_permission(user_id, org_id, project_id, "traces:delete").await.unwrap());
+        assert!(
+            checker
+                .check_permission(user_id, org_id, project_id, "traces:read")
+                .await
+                .unwrap()
+        );
+        assert!(
+            checker
+                .check_permission(user_id, org_id, project_id, "traces:write")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !checker
+                .check_permission(user_id, org_id, project_id, "traces:delete")
+                .await
+                .unwrap()
+        );
 
         // Wildcard permissions
-        checker.grant_permissions(
-            user_id,
-            org_id,
-            None,
-            vec!["*".to_string()],
+        checker.grant_permissions(user_id, org_id, None, vec!["*".to_string()]);
+        assert!(
+            checker
+                .check_permission(user_id, org_id, None, "any:permission")
+                .await
+                .unwrap()
         );
-        assert!(checker.check_permission(user_id, org_id, None, "any:permission").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_always_allow() {
         let checker = MockPermissionChecker::always_allow();
-        
+
         let user_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
 
-        assert!(checker.check_permission(user_id, org_id, None, "any:permission").await.unwrap());
-        assert!(checker.require_permission(user_id, org_id, None, "any:permission").await.is_ok());
+        assert!(
+            checker
+                .check_permission(user_id, org_id, None, "any:permission")
+                .await
+                .unwrap()
+        );
+        assert!(
+            checker
+                .require_permission(user_id, org_id, None, "any:permission")
+                .await
+                .is_ok()
+        );
     }
 }
-

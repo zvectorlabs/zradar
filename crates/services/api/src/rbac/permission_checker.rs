@@ -16,7 +16,7 @@ pub trait PermissionChecker: Send + Sync {
         project_id: Option<Uuid>,
         permission: &str,
     ) -> Result<bool>;
-    
+
     /// Require a permission or return an error
     async fn require_permission(
         &self,
@@ -25,7 +25,7 @@ pub trait PermissionChecker: Send + Sync {
         project_id: Option<Uuid>,
         permission: &str,
     ) -> Result<()>;
-    
+
     /// Get all effective permissions for a user at a given scope
     async fn get_user_permissions(
         &self,
@@ -34,4 +34,3 @@ pub trait PermissionChecker: Send + Sync {
         project_id: Option<Uuid>,
     ) -> Result<Vec<String>>;
 }
-

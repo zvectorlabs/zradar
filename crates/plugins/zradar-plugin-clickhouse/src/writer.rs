@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use zradar_models::{Span, Metric};
+use zradar_models::{Metric, Span};
 use zradar_traits::TelemetryWriter;
 
 use crate::client::ClickHouseClient;
@@ -26,7 +26,7 @@ impl TelemetryWriter for ClickHouseTelemetryWriter {
         if spans.is_empty() {
             return Ok(());
         }
-        
+
         // Debug logging in test mode
         if std::env::var("ZRADAR_TEST_MODE").is_ok() {
             for span in spans {
@@ -38,47 +38,47 @@ impl TelemetryWriter for ClickHouseTelemetryWriter {
                 );
             }
         }
-        
+
         let mut insert = self.client.client().insert("spans")?;
         for span in spans {
             insert.write(span).await?;
         }
         insert.end().await?;
-        
+
         tracing::info!(count = spans.len(), "Inserted spans into ClickHouse");
-        
+
         // Test mode: force synchronous visibility
         if self.client.is_test_mode() {
             let optimize_query = "OPTIMIZE TABLE spans FINAL SETTINGS mutations_sync=2";
             self.client.client().query(optimize_query).execute().await?;
             tracing::debug!("Applied OPTIMIZE TABLE FINAL (test mode)");
-            
+
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
-        
+
         Ok(())
     }
-    
+
     /// Insert metrics into ClickHouse
     async fn insert_metrics(&self, metrics: &[Metric]) -> anyhow::Result<()> {
         if metrics.is_empty() {
             return Ok(());
         }
-        
+
         let mut insert = self.client.client().insert("metrics")?;
         for metric in metrics {
             insert.write(metric).await?;
         }
         insert.end().await?;
-        
+
         tracing::info!(count = metrics.len(), "Inserted metrics into ClickHouse");
-        
+
         // Test mode: force synchronous visibility
         if self.client.is_test_mode() {
             let optimize_query = "OPTIMIZE TABLE metrics FINAL SETTINGS mutations_sync=2";
             self.client.client().query(optimize_query).execute().await?;
         }
-        
+
         Ok(())
     }
 }

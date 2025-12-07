@@ -5,11 +5,11 @@ use sqlx::FromRow;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use zradar_traits::{
-    OrganizationRepository, Organization, OrganizationMember, OrganizationWithRole,
-    CreateOrganizationRequest, UpdateOrganizationRequest, AddMemberRequest,
-};
 use crate::client::PostgresClient;
+use zradar_traits::{
+    AddMemberRequest, CreateOrganizationRequest, Organization, OrganizationMember,
+    OrganizationRepository, OrganizationWithRole, UpdateOrganizationRequest,
+};
 
 #[derive(Debug, Clone, FromRow)]
 struct OrganizationRow {
@@ -83,8 +83,11 @@ impl PostgresOrganizationRepository {
     pub fn new(client: Arc<PostgresClient>) -> Self {
         Self { client }
     }
-    
-    async fn list_user_memberships(&self, user_id: Uuid) -> anyhow::Result<Vec<OrganizationMember>> {
+
+    async fn list_user_memberships(
+        &self,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<OrganizationMember>> {
         let rows = sqlx::query_as::<_, MemberRow>(
             r#"
             SELECT om.* FROM organization_members om
@@ -96,16 +99,20 @@ impl PostgresOrganizationRepository {
         .bind(user_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(rows.into_iter().map(Into::into).collect())
     }
 }
 
 #[async_trait]
 impl OrganizationRepository for PostgresOrganizationRepository {
-    async fn create_org(&self, owner_id: Uuid, req: CreateOrganizationRequest) -> anyhow::Result<Organization> {
+    async fn create_org(
+        &self,
+        owner_id: Uuid,
+        req: CreateOrganizationRequest,
+    ) -> anyhow::Result<Organization> {
         let mut tx = self.client.pool().begin().await?;
-        
+
         let row = sqlx::query_as::<_, OrganizationRow>(
             r#"
             INSERT INTO organizations (slug, name, description, owner_id)
@@ -119,7 +126,7 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(owner_id)
         .fetch_one(&mut *tx)
         .await?;
-        
+
         sqlx::query(
             r#"
             INSERT INTO organization_members (organization_id, user_id, role, permissions)
@@ -130,37 +137,34 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(owner_id)
         .execute(&mut *tx)
         .await?;
-        
+
         tx.commit().await?;
-        
+
         Ok(row.into())
     }
-    
+
     async fn get_org(&self, id: Uuid) -> anyhow::Result<Option<Organization>> {
-        let row = sqlx::query_as::<_, OrganizationRow>(
-            "SELECT * FROM organizations WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+        let row = sqlx::query_as::<_, OrganizationRow>("SELECT * FROM organizations WHERE id = $1")
+            .bind(id)
+            .fetch_optional(self.client.pool())
+            .await?;
+
         Ok(row.map(Into::into))
     }
-    
+
     async fn get_org_by_slug(&self, slug: &str) -> anyhow::Result<Option<Organization>> {
-        let row = sqlx::query_as::<_, OrganizationRow>(
-            "SELECT * FROM organizations WHERE slug = $1",
-        )
-        .bind(slug)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+        let row =
+            sqlx::query_as::<_, OrganizationRow>("SELECT * FROM organizations WHERE slug = $1")
+                .bind(slug)
+                .fetch_optional(self.client.pool())
+                .await?;
+
         Ok(row.map(Into::into))
     }
-    
+
     async fn list_user_orgs(&self, user_id: Uuid) -> anyhow::Result<Vec<OrganizationWithRole>> {
         let members = self.list_user_memberships(user_id).await?;
-        
+
         let mut results = Vec::new();
         for member in members {
             if let Some(org) = self.get_org(member.organization_id).await? {
@@ -171,11 +175,15 @@ impl OrganizationRepository for PostgresOrganizationRepository {
                 });
             }
         }
-        
+
         Ok(results)
     }
-    
-    async fn update_org(&self, id: Uuid, updates: UpdateOrganizationRequest) -> anyhow::Result<Organization> {
+
+    async fn update_org(
+        &self,
+        id: Uuid,
+        updates: UpdateOrganizationRequest,
+    ) -> anyhow::Result<Organization> {
         let row = sqlx::query_as::<_, OrganizationRow>(
             r#"
             UPDATE organizations
@@ -197,10 +205,10 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(updates.settings)
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(row.into())
     }
-    
+
     async fn delete_org(&self, id: Uuid) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM organizations WHERE id = $1")
             .bind(id)
@@ -208,8 +216,13 @@ impl OrganizationRepository for PostgresOrganizationRepository {
             .await?;
         Ok(())
     }
-    
-    async fn add_member(&self, org_id: Uuid, user_id: Uuid, req: AddMemberRequest) -> anyhow::Result<OrganizationMember> {
+
+    async fn add_member(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        req: AddMemberRequest,
+    ) -> anyhow::Result<OrganizationMember> {
         let row = sqlx::query_as::<_, MemberRow>(
             r#"
             INSERT INTO organization_members (organization_id, user_id, role, custom_role_id, permissions)
@@ -224,11 +237,15 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(req.permissions.unwrap_or_default())
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(row.into())
     }
-    
-    async fn get_member(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<Option<OrganizationMember>> {
+
+    async fn get_member(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<OrganizationMember>> {
         let row = sqlx::query_as::<_, MemberRow>(
             "SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2",
         )
@@ -236,10 +253,10 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(user_id)
         .fetch_optional(self.client.pool())
         .await?;
-        
+
         Ok(row.map(Into::into))
     }
-    
+
     async fn list_members(&self, org_id: Uuid) -> anyhow::Result<Vec<OrganizationMember>> {
         let rows = sqlx::query_as::<_, MemberRow>(
             "SELECT * FROM organization_members WHERE organization_id = $1 AND is_active = true",
@@ -247,10 +264,10 @@ impl OrganizationRepository for PostgresOrganizationRepository {
         .bind(org_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(rows.into_iter().map(Into::into).collect())
     }
-    
+
     async fn remove_member(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2")
             .bind(org_id)

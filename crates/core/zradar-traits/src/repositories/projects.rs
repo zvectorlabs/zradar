@@ -90,37 +90,62 @@ pub struct ProjectWithRole {
 #[async_trait]
 pub trait ProjectRepository: Send + Sync {
     /// Create a new project
-    async fn create_project(&self, org_id: Uuid, req: CreateProjectRequest) -> anyhow::Result<Project>;
-    
+    async fn create_project(
+        &self,
+        org_id: Uuid,
+        req: CreateProjectRequest,
+    ) -> anyhow::Result<Project>;
+
     /// Get project by ID
     async fn get_project(&self, id: Uuid) -> anyhow::Result<Option<Project>>;
-    
+
     /// Get project by slug within an organization
-    async fn get_project_by_slug(&self, org_id: Uuid, slug: &str) -> anyhow::Result<Option<Project>>;
-    
+    async fn get_project_by_slug(
+        &self,
+        org_id: Uuid,
+        slug: &str,
+    ) -> anyhow::Result<Option<Project>>;
+
     /// List all projects in an organization
     async fn list_org_projects(&self, org_id: Uuid) -> anyhow::Result<Vec<Project>>;
-    
+
     /// List projects accessible to a user within an organization
-    async fn list_user_projects(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<Vec<ProjectWithRole>>;
-    
+    async fn list_user_projects(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<ProjectWithRole>>;
+
     /// Update a project
-    async fn update_project(&self, id: Uuid, updates: UpdateProjectRequest) -> anyhow::Result<Project>;
-    
+    async fn update_project(
+        &self,
+        id: Uuid,
+        updates: UpdateProjectRequest,
+    ) -> anyhow::Result<Project>;
+
     /// Delete a project
     async fn delete_project(&self, id: Uuid) -> anyhow::Result<()>;
-    
+
     // Member operations
-    
+
     /// Add a member to a project
-    async fn add_member(&self, project_id: Uuid, user_id: Uuid, req: AddProjectMemberRequest) -> anyhow::Result<ProjectMember>;
-    
+    async fn add_member(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+        req: AddProjectMemberRequest,
+    ) -> anyhow::Result<ProjectMember>;
+
     /// Get a member by project and user ID
-    async fn get_member(&self, project_id: Uuid, user_id: Uuid) -> anyhow::Result<Option<ProjectMember>>;
-    
+    async fn get_member(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<ProjectMember>>;
+
     /// List all members of a project
     async fn list_members(&self, project_id: Uuid) -> anyhow::Result<Vec<ProjectMember>>;
-    
+
     /// Remove a member from a project
     async fn remove_member(&self, project_id: Uuid, user_id: Uuid) -> anyhow::Result<()>;
 }

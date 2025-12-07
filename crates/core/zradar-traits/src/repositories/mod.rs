@@ -3,44 +3,41 @@
 //! These traits define the interfaces for data persistence.
 //! Implementations can be PostgreSQL, ClickHouse, or any other backend.
 
-pub mod users;
+pub mod api_keys;
+pub mod audit;
 pub mod organizations;
 pub mod projects;
-pub mod api_keys;
 pub mod roles;
-pub mod telemetry;
 pub mod scores;
-pub mod audit;
+pub mod telemetry;
+pub mod users;
 
 // Re-export all traits
-pub use users::UserRepository;
+pub use api_keys::ApiKeyRepository;
+pub use audit::AuditLogger;
 pub use organizations::OrganizationRepository;
 pub use projects::ProjectRepository;
-pub use api_keys::ApiKeyRepository;
 pub use roles::RoleRepository;
-pub use telemetry::{TelemetryWriter, TelemetryReader};
 pub use scores::{ScoreRepository, ScoreSummary};
-pub use audit::AuditLogger;
+pub use telemetry::{TelemetryReader, TelemetryWriter};
+pub use users::UserRepository;
 
 // Re-export entity types from each module
-pub use users::{User, UpdateUserRequest};
+pub use api_keys::{ApiKey, ApiKeyResponse, CreateApiKeyRequest, CreateApiKeyResponse};
+pub use audit::{AuditEvent, AuditLog, AuditStatus};
 pub use organizations::{
-    Organization, OrganizationMember, OrganizationWithRole,
-    CreateOrganizationRequest, UpdateOrganizationRequest, AddMemberRequest,
+    AddMemberRequest, CreateOrganizationRequest, Organization, OrganizationMember,
+    OrganizationWithRole, UpdateOrganizationRequest,
 };
 pub use projects::{
-    Project, ProjectMember, ProjectWithRole,
-    CreateProjectRequest, UpdateProjectRequest, AddProjectMemberRequest,
-};
-pub use api_keys::{
-    ApiKey, CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyResponse,
+    AddProjectMemberRequest, CreateProjectRequest, Project, ProjectMember, ProjectWithRole,
+    UpdateProjectRequest,
 };
 pub use roles::{
-    PermissionDefinition, CustomRole,
-    CreateCustomRoleRequest, UpdateCustomRoleRequest,
-    RiskAssessment, PermissionInfo,
+    CreateCustomRoleRequest, CustomRole, PermissionDefinition, PermissionInfo, RiskAssessment,
+    UpdateCustomRoleRequest,
 };
 pub use telemetry::{
-    TraceQueryFilters, SpanQueryFilters, TraceSummary, PaginatedResponse, Pagination, TimeRange,
+    PaginatedResponse, Pagination, SpanQueryFilters, TimeRange, TraceQueryFilters, TraceSummary,
 };
-pub use audit::{AuditLog, AuditEvent, AuditStatus};
+pub use users::{UpdateUserRequest, User};

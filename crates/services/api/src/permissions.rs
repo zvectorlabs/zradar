@@ -1,7 +1,7 @@
 //! Permission validation and risk assessment utilities
 
-use crate::errors::{ControlError, Result};
 use crate::domain::{PermissionDefinition, PermissionInfo, RiskAssessment};
+use crate::errors::{ControlError, Result};
 use std::collections::{HashMap, HashSet};
 
 /// Permission validator and expander
@@ -49,7 +49,7 @@ impl PermissionValidator {
     }
 
     /// Expand wildcards into concrete permissions
-    /// 
+    ///
     /// Examples:
     /// - `traces:*` expands to `[traces:read, traces:write, traces:delete, traces:export]`
     /// - `*` expands to all permissions
@@ -78,9 +78,11 @@ impl PermissionValidator {
             } else {
                 // Concrete permission
                 if let Some(def) = self.definitions.get(permission)
-                    && def.is_active && def.applicable_scopes.contains(&scope.to_string()) {
-                        expanded.insert(permission.clone());
-                    }
+                    && def.is_active
+                    && def.applicable_scopes.contains(&scope.to_string())
+                {
+                    expanded.insert(permission.clone());
+                }
             }
         }
 
@@ -109,9 +111,10 @@ impl PermissionValidator {
 
         // Check if required permission exists and is valid for scope
         if let Some(def) = self.definitions.get(required)
-            && !def.applicable_scopes.contains(&scope.to_string()) {
-                return false;
-            }
+            && !def.applicable_scopes.contains(&scope.to_string())
+        {
+            return false;
+        }
 
         false
     }
@@ -178,16 +181,17 @@ impl PermissionValidator {
 
         for perm_id in &expanded {
             if let Some(def) = self.definitions.get(perm_id)
-                && let Some(required) = &def.requires {
-                    for req_perm in required {
-                        if !expanded.contains(req_perm) {
-                            missing.push(format!(
-                                "Permission '{}' requires '{}' but it was not granted",
-                                perm_id, req_perm
-                            ));
-                        }
+                && let Some(required) = &def.requires
+            {
+                for req_perm in required {
+                    if !expanded.contains(req_perm) {
+                        missing.push(format!(
+                            "Permission '{}' requires '{}' but it was not granted",
+                            perm_id, req_perm
+                        ));
                     }
                 }
+            }
         }
 
         if missing.is_empty() {
@@ -321,7 +325,7 @@ mod tests {
     #[test]
     fn test_validate_dependencies() {
         let validator = PermissionValidator::new(create_test_definitions());
-        
+
         // traces:delete requires traces:read
         let perms = vec!["traces:delete".to_string()];
         let missing = validator.validate_dependencies(&perms).unwrap();
@@ -333,4 +337,3 @@ mod tests {
         assert!(missing.is_empty());
     }
 }
-

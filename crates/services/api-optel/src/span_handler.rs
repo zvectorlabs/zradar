@@ -1,15 +1,15 @@
 //! Job queue span handler - bridges OTLP to job queue
 
 use std::sync::Arc;
-use zradar_traits::JobQueue;
-use zradar_models::RequestContext;
 use tonic::Status;
+use zradar_models::RequestContext;
+use zradar_traits::JobQueue;
 
-use crate::SpanHandler;
 use crate::MetricHandler;
+use crate::SpanHandler;
 
 /// Wrapper to bridge JobQueue to SpanHandler and MetricHandler traits
-/// 
+///
 /// This allows OTLP services to enqueue data for asynchronous processing
 /// rather than inserting directly into storage.
 pub struct JobQueueSpanHandler {
@@ -21,7 +21,7 @@ impl JobQueueSpanHandler {
     pub fn new(queue: Arc<dyn JobQueue>) -> Self {
         Self { queue }
     }
-    
+
     /// Get reference to the underlying job queue
     pub fn queue(&self) -> &Arc<dyn JobQueue> {
         &self.queue
@@ -30,12 +30,9 @@ impl JobQueueSpanHandler {
 
 #[tonic::async_trait]
 impl SpanHandler for JobQueueSpanHandler {
-    async fn handle_raw_otlp(
-        &self,
-        data: &[u8],
-        context: &RequestContext,
-    ) -> Result<(), Status> {
-        self.queue.enqueue(data, context)
+    async fn handle_raw_otlp(&self, data: &[u8], context: &RequestContext) -> Result<(), Status> {
+        self.queue
+            .enqueue(data, context)
             .await
             .map(|_job_id| ())
             .map_err(|e| Status::internal(format!("Failed to enqueue job: {}", e)))
@@ -50,7 +47,7 @@ impl MetricHandler for JobQueueSpanHandler {
         _context: &RequestContext,
     ) -> Result<(), Status> {
         Err(Status::unimplemented(
-            "Metric ingestion via job queue not yet implemented"
+            "Metric ingestion via job queue not yet implemented",
         ))
     }
 }

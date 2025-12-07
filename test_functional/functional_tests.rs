@@ -8,7 +8,7 @@
 //! Or use the test runner: ./scripts/test-rust-functional.sh
 
 // Import the library
-use functional_tests::*;
+pub use functional_tests::*;
 
 // Include all test scenario modules
 // Each module contains #[test] functions that will be discovered by cargo test

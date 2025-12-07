@@ -32,7 +32,7 @@ pub struct CustomRole {
     pub organization_id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub scope: String,  // 'organization' or 'project'
+    pub scope: String, // 'organization' or 'project'
     pub permissions: Vec<String>,
     pub is_system: bool,
     pub color: Option<String>,
@@ -82,29 +82,56 @@ pub struct PermissionInfo {
 #[async_trait]
 pub trait RoleRepository: Send + Sync {
     /// Get permission definitions
-    async fn get_permission_definitions(&self, scope: Option<&str>) -> anyhow::Result<Vec<PermissionDefinition>>;
-    
+    async fn get_permission_definitions(
+        &self,
+        scope: Option<&str>,
+    ) -> anyhow::Result<Vec<PermissionDefinition>>;
+
     /// Get a single permission definition by ID
-    async fn get_permission_definition(&self, id: &str) -> anyhow::Result<Option<PermissionDefinition>>;
-    
+    async fn get_permission_definition(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<PermissionDefinition>>;
+
     /// Create a custom role
-    async fn create_custom_role(&self, org_id: Uuid, req: CreateCustomRoleRequest, created_by: Uuid) -> anyhow::Result<CustomRole>;
-    
+    async fn create_custom_role(
+        &self,
+        org_id: Uuid,
+        req: CreateCustomRoleRequest,
+        created_by: Uuid,
+    ) -> anyhow::Result<CustomRole>;
+
     /// Get a custom role by ID
     async fn get_custom_role(&self, id: Uuid) -> anyhow::Result<Option<CustomRole>>;
-    
+
     /// List custom roles for an organization
-    async fn list_custom_roles(&self, org_id: Uuid, scope: Option<&str>) -> anyhow::Result<Vec<CustomRole>>;
-    
+    async fn list_custom_roles(
+        &self,
+        org_id: Uuid,
+        scope: Option<&str>,
+    ) -> anyhow::Result<Vec<CustomRole>>;
+
     /// Update a custom role
-    async fn update_custom_role(&self, id: Uuid, updates: UpdateCustomRoleRequest) -> anyhow::Result<CustomRole>;
-    
+    async fn update_custom_role(
+        &self,
+        id: Uuid,
+        updates: UpdateCustomRoleRequest,
+    ) -> anyhow::Result<CustomRole>;
+
     /// Delete a custom role
     async fn delete_custom_role(&self, id: Uuid) -> anyhow::Result<()>;
-    
+
     /// Get user permissions at organization level
-    async fn get_user_org_permissions(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<Vec<String>>;
-    
+    async fn get_user_org_permissions(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<String>>;
+
     /// Get user permissions at project level
-    async fn get_user_project_permissions(&self, project_id: Uuid, user_id: Uuid) -> anyhow::Result<Vec<String>>;
+    async fn get_user_project_permissions(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<String>>;
 }

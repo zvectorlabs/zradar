@@ -95,7 +95,7 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .bind(&span.span_id)
             .bind(&span.parent_span_id)
             .bind(span.timestamp)
-            .bind(span.duration_ns as i64)
+            .bind(span.duration_ns)
             .bind(&span.tenant_id)
             .bind(&span.project_id)
             .bind(&span.service_name)
@@ -112,22 +112,22 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .bind(&span.llm_model)
             .bind(&llm_input_jsonb)
             .bind(&llm_output_jsonb)
-            .bind(span.prompt_tokens as i32)
-            .bind(span.completion_tokens as i32)
-            .bind(span.total_tokens as i32)
+            .bind(span.prompt_tokens)
+            .bind(span.completion_tokens)
+            .bind(span.total_tokens)
             .bind(span.prompt_cost_usd)
             .bind(span.completion_cost_usd)
             .bind(span.total_cost_usd)
             .bind(&span.tool_name)
             .bind(&span.tool_call_id)
-            .bind(span.resource_cpu_micros as i64)
-            .bind(span.resource_memory_bytes as i64)
-            .bind(span.resource_memory_peak as i64)
+            .bind(span.resource_cpu_micros)
+            .bind(span.resource_memory_bytes)
+            .bind(span.resource_memory_peak)
             .bind(&span.prompt_id)
             .bind(&span.prompt_name)
-            .bind(span.prompt_version as i32)
+            .bind(span.prompt_version)
             .bind(span.completion_start_time)
-            .bind(span.time_to_first_token_ms as i32)
+            .bind(span.time_to_first_token_ms)
             .bind(&span.agent_version)
             .bind(&span.sdk_version)
             .bind(&span.level)
@@ -135,7 +135,7 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .bind(&attributes_jsonb)
             .bind(span.created_at)
             .bind(span.updated_at)
-            .bind(span.is_deleted as i16)
+            .bind(span.is_deleted)
             .execute(self.client.pool())
             .await
             .context("Failed to insert span")?;
@@ -168,7 +168,7 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .bind(&metric.tenant_id)
             .bind(&metric.project_id)
             .bind(metric.value)
-            .bind(metric.count as i64)
+            .bind(metric.count)
             .bind(metric.sum)
             .bind(metric.min)
             .bind(metric.max)
@@ -448,11 +448,13 @@ impl TelemetryReader for PostgresTelemetryRepository {
         }
 
         if let Some(ref span_types) = filters.span_types {
-            if !span_types.is_empty() {
-                if span_types.len() == 1 {
+            match span_types.len() {
+                0 => {}
+                1 => {
                     param_count += 1;
                     query.push_str(&format!(" AND span_type = ${}", param_count));
-                } else {
+                }
+                _ => {
                     param_count += 1;
                     query.push_str(&format!(" AND span_type = ANY(${})", param_count));
                 }
@@ -525,12 +527,10 @@ impl TelemetryReader for PostgresTelemetryRepository {
             q = q.bind(format!("%{}%", name));
         }
         if let Some(ref span_types) = filters.span_types {
-            if !span_types.is_empty() {
-                if span_types.len() == 1 {
-                    q = q.bind(&span_types[0]);
-                } else {
-                    q = q.bind(span_types);
-                }
+            match span_types.len() {
+                0 => {}
+                1 => q = q.bind(&span_types[0]),
+                _ => q = q.bind(span_types),
             }
         }
 

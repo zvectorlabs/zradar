@@ -12,24 +12,23 @@
 //!
 //! For production multi-node deployments, use `zradar-plugin-s3` instead.
 
-mod storage;
 mod plugin;
+mod storage;
 
-pub use storage::LocalBlockStorage;
 pub use plugin::LocalStoragePlugin;
+pub use storage::LocalBlockStorage;
 
-
-/// Register this plugin with the registry (for dynamic loading)
-/// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
+// /// Register this plugin with the registry (for dynamic loading)
+// /// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
 // #[unsafe(no_mangle)]
 // pub extern "C" fn register_plugin(registry: &PluginRegistry) -> bool {
 //     let plugin = Arc::new(LocalStoragePlugin::new());
-//     
+//
 //     if let Err(e) = registry.register_storage(plugin) {
 //         tracing::error!("Failed to register local storage plugin: {}", e);
 //         return false;
 //     }
-//     
+//
 //     tracing::info!("Registered local storage plugin");
 //     true
 // }
@@ -38,4 +37,3 @@ pub use plugin::LocalStoragePlugin;
 pub fn local_plugin_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
-

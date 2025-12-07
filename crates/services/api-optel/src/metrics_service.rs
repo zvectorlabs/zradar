@@ -1,14 +1,13 @@
 //! OTLP Metrics Service gRPC implementation
 
-use opentelemetry_proto::tonic::collector::metrics::v1::{
-    metrics_service_server::MetricsService,
-    ExportMetricsServiceRequest,
-    ExportMetricsServiceResponse,
-};
-use tonic::{Request, Response, Status};
-use std::sync::Arc;
-use zradar_models::RequestContext;
 use crate::auth::ApiKeyAuth;
+use opentelemetry_proto::tonic::collector::metrics::v1::{
+    ExportMetricsServiceRequest, ExportMetricsServiceResponse,
+    metrics_service_server::MetricsService,
+};
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
+use zradar_models::RequestContext;
 
 /// Callback trait for handling metrics
 #[tonic::async_trait]
@@ -32,7 +31,7 @@ impl<H: MetricHandler> OtlpMetricsService<H> {
     pub fn new(handler: Arc<H>, auth: Option<Arc<ApiKeyAuth>>) -> Self {
         Self { handler, auth }
     }
-    
+
     async fn authenticate<T>(&self, request: &Request<T>) -> Result<RequestContext, Status> {
         if let Some(ref auth) = self.auth {
             auth.validate(request).await
@@ -50,29 +49,28 @@ impl<H: MetricHandler> MetricsService for OtlpMetricsService<H> {
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
         // Authenticate
         let context = self.authenticate(&request).await?;
-        
+
         let req = request.into_inner();
-        
+
         tracing::debug!(
             tenant_id = %context.tenant_id,
             project_id = %context.project_id,
             resource_metrics = req.resource_metrics.len(),
             "Received metrics export request"
         );
-        
+
         // TODO: Implement metrics conversion
         // For now, just acknowledge receipt
-        
+
         tracing::debug!(
             tenant_id = %context.tenant_id,
             project_id = %context.project_id,
             "Successfully processed metrics (conversion not yet implemented)"
         );
-        
+
         // Return success response
         Ok(Response::new(ExportMetricsServiceResponse {
             partial_success: None,
         }))
     }
 }
-

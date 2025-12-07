@@ -1,10 +1,10 @@
 //! # api
-//! 
+//!
 //! REST API control plane for zradar - business logic and HTTP handlers.
 //! No database implementations - those are in plugins.
 //!
 //! ## Architecture (Vertical Slicing)
-//! 
+//!
 //! ```text
 //! api/
 //! ├── organizations/  # Organization domain (types, service, handlers)
@@ -101,7 +101,6 @@ pub use audit::AuditLogger;
 
 // Re-export traits from zradar_traits for convenience
 pub use zradar_traits::{
-    UserRepository, OrganizationRepository, ProjectRepository,
-    ApiKeyRepository, RoleRepository, TelemetryWriter, TelemetryReader,
-    ScoreRepository,
+    ApiKeyRepository, OrganizationRepository, ProjectRepository, RoleRepository, ScoreRepository,
+    TelemetryReader, TelemetryWriter, UserRepository,
 };

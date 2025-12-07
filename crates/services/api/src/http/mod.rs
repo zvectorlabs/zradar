@@ -7,5 +7,5 @@ pub mod extractors;
 pub mod router;
 
 // Re-export main types
-pub use router::{create_admin_router, ApiDoc};
 pub use extractors::AuthenticatedUser;
+pub use router::{ApiDoc, create_admin_router};

@@ -2,15 +2,15 @@
 
 use async_trait::async_trait;
 use chrono::Utc;
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
-use sqlx::Row;
 
-use zradar_traits::{
-    ProjectRepository, Project, ProjectMember, ProjectWithRole,
-    CreateProjectRequest, UpdateProjectRequest, AddProjectMemberRequest,
-};
 use crate::client::PostgresClient;
+use zradar_traits::{
+    AddProjectMemberRequest, CreateProjectRequest, Project, ProjectMember, ProjectRepository,
+    ProjectWithRole, UpdateProjectRequest,
+};
 
 pub struct PostgresProjectRepository {
     client: Arc<PostgresClient>,
@@ -20,7 +20,7 @@ impl PostgresProjectRepository {
     pub fn new(client: Arc<PostgresClient>) -> Self {
         Self { client }
     }
-    
+
     fn row_to_project(row: &sqlx::postgres::PgRow) -> Project {
         Project {
             id: row.get("id"),
@@ -38,7 +38,7 @@ impl PostgresProjectRepository {
             metadata: row.get("metadata"),
         }
     }
-    
+
     fn row_to_member(row: &sqlx::postgres::PgRow) -> ProjectMember {
         ProjectMember {
             id: row.get("id"),
@@ -56,10 +56,14 @@ impl PostgresProjectRepository {
 
 #[async_trait]
 impl ProjectRepository for PostgresProjectRepository {
-    async fn create_project(&self, org_id: Uuid, req: CreateProjectRequest) -> anyhow::Result<Project> {
+    async fn create_project(
+        &self,
+        org_id: Uuid,
+        req: CreateProjectRequest,
+    ) -> anyhow::Result<Project> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         let row = sqlx::query(
             r#"
             INSERT INTO projects (
@@ -69,7 +73,7 @@ impl ProjectRepository for PostgresProjectRepository {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *
-            "#
+            "#,
         )
         .bind(id)
         .bind(org_id)
@@ -86,43 +90,49 @@ impl ProjectRepository for PostgresProjectRepository {
         .bind(serde_json::json!({})) // metadata
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(Self::row_to_project(&row))
     }
-    
+
     async fn get_project(&self, id: Uuid) -> anyhow::Result<Option<Project>> {
         let row = sqlx::query("SELECT * FROM projects WHERE id = $1")
             .bind(id)
             .fetch_optional(self.client.pool())
             .await?;
-        
+
         Ok(row.as_ref().map(Self::row_to_project))
     }
-    
-    async fn get_project_by_slug(&self, org_id: Uuid, slug: &str) -> anyhow::Result<Option<Project>> {
-        let row = sqlx::query(
-            "SELECT * FROM projects WHERE organization_id = $1 AND slug = $2"
-        )
-        .bind(org_id)
-        .bind(slug)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+
+    async fn get_project_by_slug(
+        &self,
+        org_id: Uuid,
+        slug: &str,
+    ) -> anyhow::Result<Option<Project>> {
+        let row = sqlx::query("SELECT * FROM projects WHERE organization_id = $1 AND slug = $2")
+            .bind(org_id)
+            .bind(slug)
+            .fetch_optional(self.client.pool())
+            .await?;
+
         Ok(row.as_ref().map(Self::row_to_project))
     }
-    
+
     async fn list_org_projects(&self, org_id: Uuid) -> anyhow::Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT * FROM projects WHERE organization_id = $1 ORDER BY created_at DESC"
+            "SELECT * FROM projects WHERE organization_id = $1 ORDER BY created_at DESC",
         )
         .bind(org_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(rows.iter().map(Self::row_to_project).collect())
     }
-    
-    async fn list_user_projects(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<Vec<ProjectWithRole>> {
+
+    async fn list_user_projects(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<ProjectWithRole>> {
         let rows = sqlx::query(
             r#"
             SELECT p.*, pm.role, pm.custom_role_id
@@ -130,25 +140,32 @@ impl ProjectRepository for PostgresProjectRepository {
             INNER JOIN project_members pm ON p.id = pm.project_id
             WHERE p.organization_id = $1 AND pm.user_id = $2 AND pm.is_active = true
             ORDER BY p.created_at DESC
-            "#
+            "#,
         )
         .bind(org_id)
         .bind(user_id)
         .fetch_all(self.client.pool())
         .await?;
-        
-        Ok(rows.iter().map(|row| ProjectWithRole {
-            project: Self::row_to_project(row),
-            member_role: row.get("role"),
-            member_permissions: row.try_get("permissions").unwrap_or_default(),
-        }).collect())
+
+        Ok(rows
+            .iter()
+            .map(|row| ProjectWithRole {
+                project: Self::row_to_project(row),
+                member_role: row.get("role"),
+                member_permissions: row.try_get("permissions").unwrap_or_default(),
+            })
+            .collect())
     }
-    
-    async fn update_project(&self, id: Uuid, updates: UpdateProjectRequest) -> anyhow::Result<Project> {
+
+    async fn update_project(
+        &self,
+        id: Uuid,
+        updates: UpdateProjectRequest,
+    ) -> anyhow::Result<Project> {
         let mut query = String::from("UPDATE projects SET updated_at = $1");
         let mut param_count = 2;
         let _bindings: Vec<String> = vec![];
-        
+
         if updates.name.is_some() {
             query.push_str(&format!(", name = ${}", param_count));
             param_count += 1;
@@ -165,11 +182,11 @@ impl ProjectRepository for PostgresProjectRepository {
             query.push_str(&format!(", sampling_rate = ${}", param_count));
             param_count += 1;
         }
-        
+
         query.push_str(&format!(" WHERE id = ${} RETURNING *", param_count));
-        
+
         let mut q = sqlx::query(&query).bind(Utc::now());
-        
+
         if let Some(name) = updates.name {
             q = q.bind(name);
         }
@@ -183,11 +200,11 @@ impl ProjectRepository for PostgresProjectRepository {
             q = q.bind(sampling);
         }
         q = q.bind(id);
-        
+
         let row = q.fetch_one(self.client.pool()).await?;
         Ok(Self::row_to_project(&row))
     }
-    
+
     async fn delete_project(&self, id: Uuid) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM projects WHERE id = $1")
             .bind(id)
@@ -195,11 +212,16 @@ impl ProjectRepository for PostgresProjectRepository {
             .await?;
         Ok(())
     }
-    
-    async fn add_member(&self, project_id: Uuid, user_id: Uuid, req: AddProjectMemberRequest) -> anyhow::Result<ProjectMember> {
+
+    async fn add_member(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+        req: AddProjectMemberRequest,
+    ) -> anyhow::Result<ProjectMember> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         let row = sqlx::query(
             r#"
             INSERT INTO project_members (
@@ -208,35 +230,38 @@ impl ProjectRepository for PostgresProjectRepository {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
-            "#
+            "#,
         )
         .bind(id)
         .bind(project_id)
         .bind(user_id)
         .bind(&req.role)
         .bind(req.custom_role_id)
-        .bind(&req.permissions.unwrap_or_default())
+        .bind(req.permissions.unwrap_or_default())
         .bind(true)
         .bind(None::<Uuid>) // added_by - not in request
         .bind(now)
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(Self::row_to_member(&row))
     }
-    
-    async fn get_member(&self, project_id: Uuid, user_id: Uuid) -> anyhow::Result<Option<ProjectMember>> {
-        let row = sqlx::query(
-            "SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2"
-        )
-        .bind(project_id)
-        .bind(user_id)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+
+    async fn get_member(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<ProjectMember>> {
+        let row =
+            sqlx::query("SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2")
+                .bind(project_id)
+                .bind(user_id)
+                .fetch_optional(self.client.pool())
+                .await?;
+
         Ok(row.as_ref().map(Self::row_to_member))
     }
-    
+
     async fn list_members(&self, project_id: Uuid) -> anyhow::Result<Vec<ProjectMember>> {
         let rows = sqlx::query(
             "SELECT * FROM project_members WHERE project_id = $1 AND is_active = true ORDER BY joined_at"
@@ -244,19 +269,19 @@ impl ProjectRepository for PostgresProjectRepository {
         .bind(project_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(rows.iter().map(Self::row_to_member).collect())
     }
-    
+
     async fn remove_member(&self, project_id: Uuid, user_id: Uuid) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE project_members SET is_active = false WHERE project_id = $1 AND user_id = $2"
+            "UPDATE project_members SET is_active = false WHERE project_id = $1 AND user_id = $2",
         )
         .bind(project_id)
         .bind(user_id)
         .execute(self.client.pool())
         .await?;
-        
+
         Ok(())
     }
 }

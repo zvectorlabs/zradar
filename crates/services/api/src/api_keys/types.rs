@@ -2,7 +2,5 @@
 
 // Re-export from zradar_traits
 pub use zradar_traits::{
-    ApiKey, CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyResponse,
-    ApiKeyRepository,
+    ApiKey, ApiKeyRepository, ApiKeyResponse, CreateApiKeyRequest, CreateApiKeyResponse,
 };
-

@@ -23,3 +23,6 @@ tracing = { workspace = true }
 # Database support (required - this is a migration system!)
 sqlx = { workspace = true }
 
+
+# Async runtime
+tokio = { workspace = true, features = ["sync"] }

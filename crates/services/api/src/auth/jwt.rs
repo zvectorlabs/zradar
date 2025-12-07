@@ -1,13 +1,13 @@
 //! JWT authentication
 
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::errors::{ControlError, Result};
-use crate::domain::users::User;
 use crate::auth::token_auth::TokenAuth;
+use crate::domain::users::User;
+use crate::errors::{ControlError, Result};
 
 /// JWT authentication service
 pub struct JwtAuth {
@@ -18,7 +18,7 @@ pub struct JwtAuth {
 /// JWT claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: Uuid,  // user_id
+    pub sub: Uuid, // user_id
     pub email: String,
     pub exp: usize,
     pub iat: usize,
@@ -73,9 +73,8 @@ impl TokenAuth for JwtAuth {
     fn generate_token(&self, user: &User) -> Result<String> {
         self.generate_token(user)
     }
-    
+
     fn validate_token(&self, token: &str) -> Result<Claims> {
         self.validate_token(token)
     }
 }
-

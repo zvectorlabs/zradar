@@ -1,16 +1,16 @@
 //! Generic worker implementation
-//! 
+//!
 //! Works with any JobQueue and BlockStorage implementation
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use zradar_traits::{JobQueue, BlockStorage, Job, TelemetryWriter};
 use api_optel::OtlpConverter;
 use zradar_models::RequestContext;
+use zradar_traits::{BlockStorage, Job, JobQueue, TelemetryWriter};
 
 /// Generic worker that processes jobs
-/// 
+///
 /// Uses TelemetryWriter trait for flexibility - can be configured with:
 /// - ClickHouseTelemetryWriter (production)
 /// - Mock implementation (testing)
@@ -37,11 +37,11 @@ impl Worker {
             writer,
         }
     }
-    
+
     /// Run worker loop
     pub async fn run(self: Arc<Self>) {
         tracing::info!(worker_id = %self.id, "Worker started");
-        
+
         loop {
             match self.process_next_job().await {
                 Ok(true) => {
@@ -62,13 +62,13 @@ impl Worker {
             }
         }
     }
-    
+
     async fn process_next_job(&self) -> anyhow::Result<bool> {
         // Dequeue job (implementation-agnostic!)
         let Some(job) = self.job_queue.dequeue(&self.id).await? else {
             return Ok(false);
         };
-        
+
         tracing::info!(
             worker_id = %self.id,
             job_id = %job.id,
@@ -76,12 +76,12 @@ impl Worker {
             project_id = %job.project_id,
             "Processing job"
         );
-        
+
         // Process job
         match self.process_job(&job).await {
             Ok(()) => {
                 self.job_queue.complete(job.id).await?;
-                
+
                 // CLEANUP after successful ClickHouse insertion
                 // - Local storage: Deletes file immediately
                 // - S3: No-op (relies on S3 lifecycle policies for auto-deletion after 24h)
@@ -93,7 +93,7 @@ impl Worker {
                         "Failed to cleanup file after processing"
                     );
                 }
-                
+
                 tracing::info!(
                     worker_id = %self.id,
                     job_id = %job.id,
@@ -103,7 +103,7 @@ impl Worker {
             Err(e) => {
                 let error_msg = format!("{}", e);
                 self.job_queue.fail(job.id, &error_msg).await?;
-                
+
                 tracing::error!(
                     worker_id = %self.id,
                     job_id = %job.id,
@@ -112,61 +112,62 @@ impl Worker {
                 );
             }
         }
-        
+
         Ok(true)
     }
-    
+
     async fn process_job(&self, job: &Job) -> anyhow::Result<()> {
         // Download from block storage
         let data = self.block_storage.download(&job.file_path).await?;
-        
+
         tracing::debug!(
             worker_id = %self.id,
             job_id = %job.id,
             size = data.len(),
             "Downloaded job data"
         );
-        
+
         // Deserialize OTLP protobuf
-        use prost::Message;
         use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-        
+        use prost::Message;
+
         let request = ExportTraceServiceRequest::decode(&data[..])?;
-        
+
         tracing::debug!(
             worker_id = %self.id,
             job_id = %job.id,
             resource_spans = request.resource_spans.len(),
             "Decoded OTLP request"
         );
-        
+
         // Create context
         let context = RequestContext {
             tenant_id: job.tenant_id.clone(),
             project_id: job.project_id.clone(),
             permissions: vec![],
         };
-        
+
         // Convert and insert
         let mut all_spans = Vec::new();
         for resource_spans in request.resource_spans {
             let spans = OtlpConverter::convert_resource_spans(resource_spans, &context)?;
             all_spans.extend(spans);
         }
-        
+
         tracing::debug!(
             worker_id = %self.id,
             job_id = %job.id,
             spans = all_spans.len(),
             "Converted spans"
         );
-        
+
         // Insert spans using writer trait (allows different implementations)
         if !all_spans.is_empty() {
-            self.writer.insert_spans(&all_spans)
+            self.writer
+                .insert_spans(&all_spans)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to insert spans: {}", e))?;
-            
+
             tracing::info!(
                 worker_id = %self.id,
                 job_id = %job.id,
@@ -174,7 +175,7 @@ impl Worker {
                 "Inserted spans via TelemetryWriter"
             );
         }
-        
+
         Ok(())
     }
 }
@@ -202,10 +203,10 @@ impl WorkerPool {
                 ))
             })
             .collect();
-        
+
         Self { workers }
     }
-    
+
     /// Start all workers
     pub async fn start(&self) {
         for worker in &self.workers {
@@ -214,8 +215,7 @@ impl WorkerPool {
                 worker.run().await;
             });
         }
-        
+
         tracing::info!(num_workers = self.workers.len(), "Worker pool started");
     }
 }
-

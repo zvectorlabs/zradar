@@ -4,14 +4,11 @@ use std::sync::Arc;
 use uuid::Uuid;
 use zradar_models::EvaluationScore;
 
-use super::types::{
-    CreateScoreRequest, ScoreResponse, ScoreSummaryResponse,
-    ScoreRepository,
-};
+use super::types::{CreateScoreRequest, ScoreRepository, ScoreResponse, ScoreSummaryResponse};
+use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
+use crate::errors::{ControlError, Result};
 use crate::projects::ProjectRepository;
 use crate::rbac::PermissionChecker;
-use crate::audit::{AuditLogger, AuditEvent, AuditStatus};
-use crate::errors::{ControlError, Result};
 
 /// Scores service for evaluation score operations
 pub struct ScoresService {
@@ -46,25 +43,35 @@ impl ScoresService {
         request: CreateScoreRequest,
     ) -> Result<ScoreResponse> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:write",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:write",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
         // Validate request
         if request.name.is_empty() {
-            return Err(ControlError::InvalidInput("Score name is required".to_string()));
+            return Err(ControlError::InvalidInput(
+                "Score name is required".to_string(),
+            ));
         }
         if request.trace_id.is_empty() {
-            return Err(ControlError::InvalidInput("Trace ID is required".to_string()));
+            return Err(ControlError::InvalidInput(
+                "Trace ID is required".to_string(),
+            ));
         }
-        
+
         // Create score
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let score = EvaluationScore {
@@ -93,40 +100,59 @@ impl ScoresService {
             service_name: String::new(),
             agent_name: String::new(),
             user_id: user_id.to_string(),
-            metadata: serde_json::to_string(&request.metadata.clone().unwrap_or(serde_json::json!({})))
-                .unwrap_or_else(|_| "{}".to_string()),
+            metadata: serde_json::to_string(
+                &request.metadata.clone().unwrap_or(serde_json::json!({})),
+            )
+            .unwrap_or_else(|_| "{}".to_string()),
             is_deleted: 0,
         };
-        
+
         // Insert into storage (in test mode, this will automatically sync)
-        self.repository.insert_scores(&[score.clone()]).await?;
-        
+        self.repository
+            .insert_scores(std::slice::from_ref(&score))
+            .await?;
+
         // Audit log
-        self.audit.log(AuditEvent {
-            organization_id: None,
-            user_id: Some(user_id),
-            actor_type: Some("user".to_string()),
-            actor_id: Some(user_id),
-            actor_ip: None,
-            action: "score.created".to_string(),
-            resource_type: Some("score".to_string()),
-            resource_id: None,
-            status: AuditStatus::Success,
-            details: Some(serde_json::json!({
-                "score_id": score.id,
-                "trace_id": score.trace_id,
-                "name": score.name,
-                "value": score.value,
-            })),
-        }).await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
+        self.audit
+            .log(AuditEvent {
+                organization_id: None,
+                user_id: Some(user_id),
+                actor_type: Some("user".to_string()),
+                actor_id: Some(user_id),
+                actor_ip: None,
+                action: "score.created".to_string(),
+                resource_type: Some("score".to_string()),
+                resource_id: None,
+                status: AuditStatus::Success,
+                details: Some(serde_json::json!({
+                    "score_id": score.id,
+                    "trace_id": score.trace_id,
+                    "name": score.name,
+                    "value": score.value,
+                })),
+            })
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
         Ok(ScoreResponse {
             id: score.id,
             project_id,
             trace_id: score.trace_id,
-            span_id: if score.span_id.is_empty() { None } else { Some(score.span_id) },
-            session_id: if score.session_id.is_empty() { None } else { Some(score.session_id) },
-            dataset_run_id: if score.dataset_run_id.is_empty() { None } else { Some(score.dataset_run_id) },
+            span_id: if score.span_id.is_empty() {
+                None
+            } else {
+                Some(score.span_id)
+            },
+            session_id: if score.session_id.is_empty() {
+                None
+            } else {
+                Some(score.session_id)
+            },
+            dataset_run_id: if score.dataset_run_id.is_empty() {
+                None
+            } else {
+                Some(score.dataset_run_id)
+            },
             name: score.name,
             value: score.value,
             data_type: request.data_type,
@@ -148,22 +174,33 @@ impl ScoresService {
         trace_id: &str,
     ) -> Result<Vec<ScoreResponse>> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:read",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
-        let scores = self.repository
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:read",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
+        let scores = self
+            .repository
             .get_trace_scores(&tenant_id, &project_id.to_string(), trace_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
-        Ok(scores.into_iter().map(|s| self.score_to_response(s, project_id)).collect())
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
+        Ok(scores
+            .into_iter()
+            .map(|s| self.score_to_response(s, project_id))
+            .collect())
     }
 
     /// Get scores for a session
@@ -175,22 +212,33 @@ impl ScoresService {
         session_id: &str,
     ) -> Result<Vec<ScoreResponse>> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:read",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
-        let scores = self.repository
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:read",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
+        let scores = self
+            .repository
             .get_session_scores(&tenant_id, &project_id.to_string(), session_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
-        Ok(scores.into_iter().map(|s| self.score_to_response(s, project_id)).collect())
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
+        Ok(scores
+            .into_iter()
+            .map(|s| self.score_to_response(s, project_id))
+            .collect())
     }
 
     /// Get score summary for a trace
@@ -202,28 +250,39 @@ impl ScoresService {
         trace_id: &str,
     ) -> Result<Vec<ScoreSummaryResponse>> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:read",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
-        let summary = self.repository
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:read",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
+        let summary = self
+            .repository
             .get_trace_score_summary(&tenant_id, &project_id.to_string(), trace_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
-        Ok(summary.into_iter().map(|s| ScoreSummaryResponse {
-            name: s.name,
-            avg_value: s.avg_value,
-            min_value: s.min_value,
-            max_value: s.max_value,
-            count: s.count as u64,
-        }).collect())
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
+        Ok(summary
+            .into_iter()
+            .map(|s| ScoreSummaryResponse {
+                name: s.name,
+                avg_value: s.avg_value,
+                min_value: s.min_value,
+                max_value: s.max_value,
+                count: s.count as u64,
+            })
+            .collect())
     }
 
     /// Get single score by ID
@@ -235,22 +294,30 @@ impl ScoresService {
         score_id: &str,
     ) -> Result<ScoreResponse> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:read",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
-        let score = self.repository
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:read",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
+        let score = self
+            .repository
             .get_score_by_id(&tenant_id, &project_id.to_string(), score_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?
             .ok_or_else(|| ControlError::NotFound("Score not found".to_string()))?;
-        
+
         Ok(self.score_to_response(score, project_id))
     }
 
@@ -263,41 +330,54 @@ impl ScoresService {
         score_id: &str,
     ) -> Result<()> {
         // Look up project to get organization_id for RBAC
-        let project = self.project_repository.get_project(project_id).await?
+        let project = self
+            .project_repository
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ControlError::NotFound("Project not found".to_string()))?;
-        
+
         // Check permission with correct org_id
-        self.rbac.check_permission(
-            user_id,
-            project.organization_id,
-            Some(project_id),
-            "scores:delete",
-        ).await.map_err(|e| ControlError::Forbidden(e.to_string()))?;
-        
+        self.rbac
+            .check_permission(
+                user_id,
+                project.organization_id,
+                Some(project_id),
+                "scores:delete",
+            )
+            .await
+            .map_err(|e| ControlError::Forbidden(e.to_string()))?;
+
         // Verify score exists and belongs to tenant/project
-        let _score = self.repository
+        let _score = self
+            .repository
             .get_score_by_id(&tenant_id, &project_id.to_string(), score_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?
             .ok_or_else(|| ControlError::NotFound("Score not found".to_string()))?;
-        
+
         // Delete score
-        self.repository.delete_score(&tenant_id, &project_id.to_string(), score_id)
-            .await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
+        self.repository
+            .delete_score(&tenant_id, &project_id.to_string(), score_id)
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
         // Audit log
-        self.audit.log(AuditEvent {
-            organization_id: None,
-            user_id: Some(user_id),
-            actor_type: Some("user".to_string()),
-            actor_id: Some(user_id),
-            actor_ip: None,
-            action: "score.deleted".to_string(),
-            resource_type: Some("score".to_string()),
-            resource_id: None,
-            status: AuditStatus::Success,
-            details: Some(serde_json::json!({"score_id": score_id})),
-        }).await.map_err(|e| ControlError::Internal(e.to_string()))?;
-        
+        self.audit
+            .log(AuditEvent {
+                organization_id: None,
+                user_id: Some(user_id),
+                actor_type: Some("user".to_string()),
+                actor_id: Some(user_id),
+                actor_ip: None,
+                action: "score.deleted".to_string(),
+                resource_type: Some("score".to_string()),
+                resource_id: None,
+                status: AuditStatus::Success,
+                details: Some(serde_json::json!({"score_id": score_id})),
+            })
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
         Ok(())
     }
 
@@ -307,16 +387,48 @@ impl ScoresService {
             id: score.id,
             project_id,
             trace_id: score.trace_id,
-            span_id: if score.span_id.is_empty() { None } else { Some(score.span_id) },
-            session_id: if score.session_id.is_empty() { None } else { Some(score.session_id) },
-            dataset_run_id: if score.dataset_run_id.is_empty() { None } else { Some(score.dataset_run_id) },
+            span_id: if score.span_id.is_empty() {
+                None
+            } else {
+                Some(score.span_id)
+            },
+            session_id: if score.session_id.is_empty() {
+                None
+            } else {
+                Some(score.session_id)
+            },
+            dataset_run_id: if score.dataset_run_id.is_empty() {
+                None
+            } else {
+                Some(score.dataset_run_id)
+            },
             name: score.name,
             value: score.value,
-            data_type: score.data_type.as_str().try_into().unwrap_or(zradar_models::EvalDataType::Numeric),
-            string_value: if score.string_value.is_empty() { None } else { Some(score.string_value) },
-            source: score.source.as_str().try_into().unwrap_or(zradar_models::EvalSource::Api),
-            comment: if score.comment.is_empty() { None } else { Some(score.comment) },
-            config_id: if score.config_id.is_empty() { None } else { Some(score.config_id) },
+            data_type: score
+                .data_type
+                .as_str()
+                .try_into()
+                .unwrap_or(zradar_models::EvalDataType::Numeric),
+            string_value: if score.string_value.is_empty() {
+                None
+            } else {
+                Some(score.string_value)
+            },
+            source: score
+                .source
+                .as_str()
+                .try_into()
+                .unwrap_or(zradar_models::EvalSource::Api),
+            comment: if score.comment.is_empty() {
+                None
+            } else {
+                Some(score.comment)
+            },
+            config_id: if score.config_id.is_empty() {
+                None
+            } else {
+                Some(score.config_id)
+            },
             metadata: serde_json::from_str(&score.metadata).ok(),
             created_at: chrono::DateTime::from_timestamp_nanos(score.created_at),
         }
@@ -338,11 +450,10 @@ mod tests {
             source: "API".to_string(),
             ..Default::default()
         };
-        
+
         // Note: In a real test, we'd need to instantiate ScoresService with mocks
         // For now, this is just a structure test
         assert_eq!(score.name, "accuracy");
         assert_eq!(score.value, 0.95);
     }
 }
-

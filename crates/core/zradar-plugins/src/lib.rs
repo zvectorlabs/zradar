@@ -31,18 +31,18 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-pub mod plugin;
-pub mod registry;
-pub mod loader;
 pub mod config;
 pub mod error;
+pub mod loader;
+pub mod plugin;
+pub mod registry;
 
 // Re-export key types
-pub use plugin::*;
-pub use registry::PluginRegistry;
-pub use loader::PluginLoader;
 pub use config::PluginConfig;
 pub use error::PluginError;
+pub use loader::PluginLoader;
+pub use plugin::*;
+pub use registry::PluginRegistry;
 
 /// Global plugin registry instance
 use std::sync::OnceLock;
@@ -52,4 +52,3 @@ static GLOBAL_REGISTRY: OnceLock<PluginRegistry> = OnceLock::new();
 pub fn global_registry() -> &'static PluginRegistry {
     GLOBAL_REGISTRY.get_or_init(PluginRegistry::new)
 }
-

@@ -1,8 +1,8 @@
 //! Plugin configuration types
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::plugin::MigrationOptions;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Plugin system configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -10,19 +10,19 @@ pub struct PluginConfig {
     /// Directory to scan for plugin .so/.dylib files
     #[serde(default = "default_plugin_dir")]
     pub plugin_dir: String,
-    
+
     /// Plugins to load (in order)
     #[serde(default)]
     pub enabled: Vec<String>,
-    
+
     /// Backend assignments
     #[serde(default)]
     pub backends: BackendConfig,
-    
+
     /// Global migration settings
     #[serde(default)]
     pub migrations: MigrationConfig,
-    
+
     /// Plugin-specific configurations
     #[serde(default, flatten)]
     pub configs: HashMap<String, serde_json::Value>,
@@ -34,11 +34,11 @@ pub struct MigrationConfig {
     /// Run migrations automatically on plugin initialization
     #[serde(default)]
     pub auto_migrate: bool,
-    
+
     /// Fail startup if checksums don't match
     #[serde(default = "default_true")]
     pub strict_checksums: bool,
-    
+
     /// Per-plugin migration directories
     #[serde(default)]
     pub plugin_migrations: HashMap<String, PluginMigrationConfig>,
@@ -77,23 +77,23 @@ pub struct BackendConfig {
     /// Storage backend (default: "postgres")
     #[serde(default = "default_postgres")]
     pub storage: String,
-    
+
     /// Job queue backend (default: "postgres")
     #[serde(default = "default_postgres")]
     pub queue: String,
-    
+
     /// Telemetry writer backend (default: "postgres")
     #[serde(default = "default_postgres")]
     pub telemetry_writer: String,
-    
+
     /// Telemetry reader backend (default: "postgres")
     #[serde(default = "default_postgres")]
     pub telemetry_reader: String,
-    
+
     /// Cache backend (default: "memory")
     #[serde(default = "default_memory")]
     pub cache: String,
-    
+
     /// Auth backend (default: "postgres")
     #[serde(default = "default_postgres")]
     pub auth: String,
@@ -127,18 +127,19 @@ impl PluginConfig {
         let config: Self = toml::from_str(&content)?;
         Ok(config)
     }
-    
+
     /// Get configuration for a specific plugin
     pub fn get_plugin_config(&self, name: &str) -> serde_json::Value {
-        self.configs.get(name)
+        self.configs
+            .get(name)
             .cloned()
             .unwrap_or_else(|| serde_json::json!({}))
     }
-    
+
     /// Get migration options for a specific plugin
     pub fn get_migration_options(&self, plugin_name: &str) -> MigrationOptions {
         let plugin_config = self.migrations.plugin_migrations.get(plugin_name);
-        
+
         MigrationOptions {
             migrations_dir: plugin_config
                 .map(|c| c.migrations_dir.clone())
@@ -151,4 +152,3 @@ impl PluginConfig {
         }
     }
 }
-

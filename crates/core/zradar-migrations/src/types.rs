@@ -85,4 +85,3 @@ pub struct PluginMigrationStatus {
     pub last_migration: Option<String>,
     pub last_applied_at: Option<DateTime<Utc>>,
 }
-

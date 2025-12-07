@@ -2,9 +2,6 @@
 
 // Re-export from zradar_traits
 pub use zradar_traits::{
-    PermissionDefinition, CustomRole,
-    CreateCustomRoleRequest, UpdateCustomRoleRequest,
-    RiskAssessment, PermissionInfo,
-    RoleRepository,
+    CreateCustomRoleRequest, CustomRole, PermissionDefinition, PermissionInfo, RiskAssessment,
+    RoleRepository, UpdateCustomRoleRequest,
 };
-

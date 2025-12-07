@@ -11,8 +11,7 @@ use crate::errors::Result;
 pub trait ApiKeyValidator: Send + Sync {
     /// Validate an API key and return request context
     async fn validate(&self, key: &str) -> Result<RequestContext>;
-    
+
     /// Revoke an API key (invalidate cache)
     async fn revoke(&self, key_id: Uuid) -> Result<()>;
 }
-

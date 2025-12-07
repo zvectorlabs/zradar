@@ -8,12 +8,12 @@ use std::time::Duration;
 pub async fn wait_for_server(url: &str, timeout_secs: u64) -> Result<()> {
     let client = Client::new();
     let start = std::time::Instant::now();
-    
+
     loop {
         if start.elapsed().as_secs() > timeout_secs {
             anyhow::bail!("Server not ready after {} seconds", timeout_secs);
         }
-        
+
         match client.get(format!("{}/health", url)).send().await {
             Ok(resp) if resp.status().is_success() => return Ok(()),
             _ => tokio::time::sleep(Duration::from_millis(500)).await,
@@ -22,21 +22,25 @@ pub async fn wait_for_server(url: &str, timeout_secs: u64) -> Result<()> {
 }
 
 /// Wait for a condition to be true with timeout
-pub async fn wait_for_condition<F>(mut condition: F, timeout_secs: u64, check_interval_ms: u64) -> Result<()>
+pub async fn wait_for_condition<F>(
+    mut condition: F,
+    timeout_secs: u64,
+    check_interval_ms: u64,
+) -> Result<()>
 where
     F: FnMut() -> bool,
 {
     let start = std::time::Instant::now();
-    
+
     loop {
         if condition() {
             return Ok(());
         }
-        
+
         if start.elapsed().as_secs() > timeout_secs {
             anyhow::bail!("Condition not met after {} seconds", timeout_secs);
         }
-        
+
         tokio::time::sleep(Duration::from_millis(check_interval_ms)).await;
     }
 }
@@ -52,7 +56,7 @@ where
     Fut: std::future::Future<Output = Result<T>>,
 {
     let mut delay = initial_delay_ms;
-    
+
     for attempt in 1..=max_attempts {
         match operation().await {
             Ok(result) => return Ok(result),
@@ -63,7 +67,7 @@ where
             }
         }
     }
-    
+
     anyhow::bail!("Max retry attempts reached")
 }
 
@@ -72,9 +76,8 @@ pub fn parse_uuid_from_json(value: &serde_json::Value, key: &str) -> Result<uuid
     let uuid_str = value[key]
         .as_str()
         .with_context(|| format!("Missing or invalid '{}' field", key))?;
-    
-    uuid::Uuid::parse_str(uuid_str)
-        .with_context(|| format!("Invalid UUID format for '{}'", key))
+
+    uuid::Uuid::parse_str(uuid_str).with_context(|| format!("Invalid UUID format for '{}'", key))
 }
 
 /// Extract string from JSON value
@@ -144,7 +147,7 @@ pub fn assert_json_eq(
     let actual = value
         .get(key)
         .with_context(|| format!("Missing key: {}", key))?;
-    
+
     if actual != expected {
         anyhow::bail!(
             "Value mismatch at '{}': expected {:?}, got {:?}",
@@ -153,7 +156,7 @@ pub fn assert_json_eq(
             actual
         );
     }
-    
+
     Ok(())
 }
 
@@ -172,4 +175,3 @@ pub fn assert_not_empty<T>(collection: &[T], message: &str) -> Result<()> {
     }
     Ok(())
 }
-

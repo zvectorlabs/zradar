@@ -2,29 +2,29 @@
 
 use async_trait::async_trait;
 use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
     RequestPartsExt,
+    extract::FromRequestParts,
+    http::{StatusCode, request::Parts},
 };
 use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    headers::{Authorization, authorization::Bearer},
 };
 
-use crate::domain::users::{User, UserRepository};
 use crate::auth::TokenAuth;
-use std::sync::Arc;
+use crate::domain::users::{User, UserRepository};
 use std::ops::Deref;
+use std::sync::Arc;
 
 /// Authenticated user extracted from JWT token
-/// 
+///
 /// Wrapper around User to allow implementing FromRequestParts
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser(pub User);
 
 impl Deref for AuthenticatedUser {
     type Target = User;
-    
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -47,18 +47,28 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // Get JwtAuth from extensions
-        let jwt_auth = parts.extensions.get::<Arc<dyn TokenAuth>>()
+        let jwt_auth = parts
+            .extensions
+            .get::<Arc<dyn TokenAuth>>()
             .ok_or_else(|| {
                 tracing::error!("JwtAuth not found in request extensions");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Authentication service not configured".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Authentication service not configured".to_string(),
+                )
             })?
             .clone();
 
         // Get UserRepository from extensions
-        let user_storage = parts.extensions.get::<Arc<dyn UserRepository>>()
+        let user_storage = parts
+            .extensions
+            .get::<Arc<dyn UserRepository>>()
             .ok_or_else(|| {
                 tracing::error!("UserRepository not found in request extensions");
-                (StatusCode::INTERNAL_SERVER_ERROR, "User storage not configured".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "User storage not configured".to_string(),
+                )
             })?
             .clone();
 
@@ -67,22 +77,31 @@ where
             .extract::<TypedHeader<Authorization<Bearer>>>()
             .await
             .map_err(|_| {
-                (StatusCode::UNAUTHORIZED, "Missing or invalid Authorization header".to_string())
+                (
+                    StatusCode::UNAUTHORIZED,
+                    "Missing or invalid Authorization header".to_string(),
+                )
             })?;
 
         // Validate JWT token
-        let claims = jwt_auth.validate_token(bearer.token())
-            .map_err(|e| {
-                tracing::warn!("JWT validation failed: {}", e);
-                (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string())
-            })?;
+        let claims = jwt_auth.validate_token(bearer.token()).map_err(|e| {
+            tracing::warn!("JWT validation failed: {}", e);
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid or expired token".to_string(),
+            )
+        })?;
 
         // Load user from database
-        let user = user_storage.get_user(claims.sub)
+        let user = user_storage
+            .get_user(claims.sub)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to load user: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load user".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load user".to_string(),
+                )
             })?
             .ok_or_else(|| {
                 tracing::warn!(user_id = %claims.sub, "User not found");
@@ -91,7 +110,10 @@ where
 
         // Check if user is active
         if !user.is_active {
-            return Err((StatusCode::FORBIDDEN, "User account is not active".to_string()));
+            return Err((
+                StatusCode::FORBIDDEN,
+                "User account is not active".to_string(),
+            ));
         }
 
         Ok(AuthenticatedUser(user))

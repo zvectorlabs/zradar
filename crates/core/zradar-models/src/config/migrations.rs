@@ -17,9 +17,6 @@ fn default_auto_migrate() -> bool {
 
 impl Default for MigrationsConfig {
     fn default() -> Self {
-        Self {
-            auto_migrate: true,
-        }
+        Self { auto_migrate: true }
     }
 }
-

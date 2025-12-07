@@ -1,7 +1,7 @@
 //! Evaluation score data model
 
-use serde::{Deserialize, Serialize};
 use clickhouse::Row;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Evaluation score for traces/spans
@@ -11,40 +11,40 @@ pub struct EvaluationScore {
     pub id: String,
     pub tenant_id: String,
     pub project_id: String,
-    
+
     // Timing (nanoseconds for Rust, converted to DateTime64(3) for ClickHouse)
     pub timestamp: i64,
     pub created_at: i64,
     pub updated_at: i64,
     pub event_ts: i64,
-    
+
     // Entity Association
     pub trace_id: String,
-    pub span_id: String,  // Empty string if not applicable (links to spans.span_id)
+    pub span_id: String, // Empty string if not applicable (links to spans.span_id)
     pub session_id: String,
     pub dataset_run_id: String,
-    
+
     // Score Data
     pub name: String,
     pub value: f64,
-    pub data_type: String,  // Will be converted to/from EvalDataType
+    pub data_type: String, // Will be converted to/from EvalDataType
     pub string_value: String,
-    
+
     // Evaluation Metadata
-    pub source: String,  // Will be converted to/from EvalSource
+    pub source: String, // Will be converted to/from EvalSource
     pub comment: String,
     pub author_user_id: String,
     pub config_id: String,
     pub eval_execution_trace_id: String,
     pub queue_id: String,
     pub environment: String,
-    
+
     // Additional Context
     pub service_name: String,
     pub agent_name: String,
     pub user_id: String,
-    pub metadata: String,  // JSON string
-    
+    pub metadata: String, // JSON string
+
     // Event Sourcing
     pub is_deleted: i16,
 }
@@ -70,7 +70,7 @@ impl From<EvalDataType> for String {
 
 impl TryFrom<String> for EvalDataType {
     type Error = String;
-    
+
     fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
             "NUMERIC" => Ok(EvalDataType::Numeric),
@@ -83,7 +83,7 @@ impl TryFrom<String> for EvalDataType {
 
 impl TryFrom<&str> for EvalDataType {
     type Error = String;
-    
+
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
             "NUMERIC" => Ok(EvalDataType::Numeric),
@@ -98,9 +98,9 @@ impl TryFrom<&str> for EvalDataType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvalSource {
-    Annotation,  // Manual human annotation
-    Api,         // Direct API call
-    Eval,        // Automated evaluation
+    Annotation, // Manual human annotation
+    Api,        // Direct API call
+    Eval,       // Automated evaluation
 }
 
 impl From<EvalSource> for String {
@@ -115,7 +115,7 @@ impl From<EvalSource> for String {
 
 impl TryFrom<String> for EvalSource {
     type Error = String;
-    
+
     fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
             "ANNOTATION" => Ok(EvalSource::Annotation),
@@ -128,7 +128,7 @@ impl TryFrom<String> for EvalSource {
 
 impl TryFrom<&str> for EvalSource {
     type Error = String;
-    
+
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
             "ANNOTATION" => Ok(EvalSource::Annotation),
@@ -249,14 +249,8 @@ mod tests {
             EvalSource::try_from("ANNOTATION").unwrap(),
             EvalSource::Annotation
         );
-        assert_eq!(
-            EvalSource::try_from("API").unwrap(),
-            EvalSource::Api
-        );
-        assert_eq!(
-            EvalSource::try_from("EVAL").unwrap(),
-            EvalSource::Eval
-        );
+        assert_eq!(EvalSource::try_from("API").unwrap(), EvalSource::Api);
+        assert_eq!(EvalSource::try_from("EVAL").unwrap(), EvalSource::Eval);
         assert!(EvalSource::try_from("INVALID").is_err());
     }
 
@@ -312,4 +306,3 @@ mod tests {
         assert_eq!(score, cloned);
     }
 }
-

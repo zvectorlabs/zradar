@@ -18,22 +18,21 @@ impl S3BlockStorage {
             .region(aws_sdk_s3::config::Region::new(region))
             .load()
             .await;
-        
+
         let client = Client::new(&config);
-        
+
         Ok(Self { client, bucket })
     }
-    
+
     /// Create from configuration
     pub async fn from_config(config: &serde_json::Value) -> anyhow::Result<Self> {
-        let bucket = config["bucket"].as_str()
+        let bucket = config["bucket"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("S3 bucket required"))?
             .to_string();
-        
-        let region = config["region"].as_str()
-            .unwrap_or("us-east-1")
-            .to_string();
-        
+
+        let region = config["region"].as_str().unwrap_or("us-east-1").to_string();
+
         Self::new(bucket, region).await
     }
 }
@@ -42,7 +41,7 @@ impl S3BlockStorage {
 impl BlockStorage for S3BlockStorage {
     async fn upload(&self, key: &str, data: &[u8]) -> anyhow::Result<String> {
         let body = ByteStream::from(data.to_vec());
-        
+
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -50,22 +49,23 @@ impl BlockStorage for S3BlockStorage {
             .body(body)
             .send()
             .await?;
-        
+
         Ok(format!("s3://{}/{}", self.bucket, key))
     }
-    
+
     async fn download(&self, key: &str) -> anyhow::Result<Vec<u8>> {
-        let resp = self.client
+        let resp = self
+            .client
             .get_object()
             .bucket(&self.bucket)
             .key(key)
             .send()
             .await?;
-        
+
         let data = resp.body.collect().await?;
         Ok(data.into_bytes().to_vec())
     }
-    
+
     async fn delete(&self, key: &str) -> anyhow::Result<()> {
         self.client
             .delete_object()
@@ -73,12 +73,13 @@ impl BlockStorage for S3BlockStorage {
             .key(key)
             .send()
             .await?;
-        
+
         Ok(())
     }
-    
+
     async fn exists(&self, key: &str) -> anyhow::Result<bool> {
-        match self.client
+        match self
+            .client
             .head_object()
             .bucket(&self.bucket)
             .key(key)
@@ -89,11 +90,10 @@ impl BlockStorage for S3BlockStorage {
             Err(_) => Ok(false),
         }
     }
-    
+
     async fn cleanup(&self, key: &str) -> anyhow::Result<()> {
         // S3 uses lifecycle policies - just log
         tracing::debug!(key = %key, "S3 cleanup (relies on lifecycle policy)");
         Ok(())
     }
 }
-

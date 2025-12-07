@@ -1,41 +1,41 @@
 //! Configuration loading from TOML and environment
 
-use serde::Deserialize;
-use anyhow::Result;
 use super::*;
+use anyhow::Result;
+use serde::Deserialize;
 
 /// Main configuration structure
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(default = "default_otlp_port")]
     pub otlp_port: u16,
-    
+
     #[serde(default = "default_query_api_port")]
     pub query_api_port: u16,
-    
+
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    
+
     #[serde(default = "default_batch_timeout")]
     pub batch_timeout_seconds: u64,
-    
+
     pub clickhouse: ClickHouseConfig,
-    
+
     #[serde(default)]
     pub postgres: Option<PostgresConfig>,
-    
+
     #[serde(default)]
     pub admin_api: Option<AdminApiConfig>,
-    
+
     #[serde(default)]
     pub auth: AuthConfig,
-    
+
     #[serde(default)]
     pub ingestor: Option<IngestorConfig>,
-    
+
     #[serde(default)]
     pub workers: Option<WorkersConfig>,
-    
+
     #[serde(default)]
     pub migrations: Option<MigrationsConfig>,
 }
@@ -70,8 +70,7 @@ impl Config {
                         .unwrap_or_else(|_| "http://localhost:8123".to_string()),
                     user: std::env::var("CLICKHOUSE_USER")
                         .unwrap_or_else(|_| "default".to_string()),
-                    password: std::env::var("CLICKHOUSE_PASSWORD")
-                        .unwrap_or_default(),
+                    password: std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_default(),
                     database: std::env::var("CLICKHOUSE_DATABASE")
                         .unwrap_or_else(|_| "telemetry".to_string()),
                     max_connections: std::env::var("CLICKHOUSE_MAX_CONNECTIONS")
@@ -87,7 +86,7 @@ impl Config {
                 migrations: None,
             }
         };
-        
+
         // Override migration settings from environment variables
         if let Some(ref mut migrations) = config.migrations {
             if let Ok(val) = std::env::var("AUTO_MIGRATE") {
@@ -100,14 +99,21 @@ impl Config {
             }
             config.migrations = Some(migrations);
         }
-        
+
         Ok(config)
     }
 }
 
 // Default functions
-fn default_otlp_port() -> u16 { 4317 }
-fn default_query_api_port() -> u16 { 8080 }
-fn default_batch_size() -> usize { 1000 }
-fn default_batch_timeout() -> u64 { 10 }
-
+fn default_otlp_port() -> u16 {
+    4317
+}
+fn default_query_api_port() -> u16 {
+    8080
+}
+fn default_batch_size() -> usize {
+    1000
+}
+fn default_batch_timeout() -> u64 {
+    10
+}

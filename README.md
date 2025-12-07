@@ -141,6 +141,23 @@ RUST_LOG=debug cargo run --bin zradar-worker
 cargo test
 ```
 
+### Development Hooks
+
+To ensure code quality and consistent commit messages, please install the git hooks:
+
+```bash
+# Install hooks
+cp scripts/hooks/* .git/hooks/
+chmod +x .git/hooks/*
+```
+
+These hooks will check:
+- Code formatting (`cargo fmt`)
+- Clippy warnings (`cargo clippy`)
+- Compilation (`cargo check`)
+- Commit message format (Conventional Commits)
+
+
 ## Documentation
 
 - [Configuration Example](config.toml.example)

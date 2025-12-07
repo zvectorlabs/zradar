@@ -5,14 +5,14 @@
 use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 // OTLP
-use tonic::transport::Server;
-use tonic::codec::CompressionEncoding;
-use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
 use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
+use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
+use tonic::codec::CompressionEncoding;
+use tonic::transport::Server;
 
 // Axum
 use axum::Router;
@@ -20,31 +20,26 @@ use tower_http::compression::CompressionLayer;
 
 // Control plane
 use api::{
+    api_keys::service::ApiKeyService,
     // Auth
-    auth::{JwtAuth, ApiKeyAuth as DbApiKeyAuth},
+    auth::{ApiKeyAuth as DbApiKeyAuth, JwtAuth},
     // HTTP router
     http::create_admin_router,
-    // Services from domain modules
-    users::AuthService,
     organizations::OrganizationService,
     projects::ProjectService,
-    api_keys::service::ApiKeyService,
-    roles::RoleService,
-    telemetry::QueryService,
-    scores::ScoresService,
     // RBAC
     rbac::RbacService,
+    roles::RoleService,
+    scores::ScoresService,
+    telemetry::QueryService,
+    // Services from domain modules
+    users::AuthService,
 };
 
 // Plugins - individual repositories
 use zradar_plugin_postgres::{
-    PostgresClient,
-    PostgresUserRepository,
-    PostgresOrganizationRepository,
-    PostgresProjectRepository,
-    PostgresApiKeyRepository,
-    PostgresRoleRepository,
-    PostgresAuditLogger,
+    PostgresApiKeyRepository, PostgresAuditLogger, PostgresClient, PostgresOrganizationRepository,
+    PostgresProjectRepository, PostgresRoleRepository, PostgresUserRepository,
     migrations::PostgresMigrationProvider,
 };
 // Note: ClickHouse removed - using only Postgres for now
@@ -57,10 +52,13 @@ use zradar_migrations::MigrationRegistry;
 // Local modules
 mod health;
 
+use api_optel::{
+    ApiKeyAuth as GrpcApiKeyAuth, DirectSpanHandler, JobQueueSpanHandler, OtlpMetricsService,
+    OtlpTraceService,
+};
 use zradar_models::Config;
-use api_optel::{OtlpTraceService, OtlpMetricsService, ApiKeyAuth as GrpcApiKeyAuth, JobQueueSpanHandler, DirectSpanHandler};
-use zradar_plugin_postgres::PostgresJobQueue;
 use zradar_plugin_local::LocalBlockStorage;
+use zradar_plugin_postgres::PostgresJobQueue;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -68,7 +66,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,zradar=debug"))
+                .unwrap_or_else(|_| EnvFilter::new("info,zradar=debug")),
         )
         .init();
 
@@ -84,7 +82,7 @@ async fn main() -> Result<()> {
 
     let registry = PluginRegistry::new();
     let plugin_loader = PluginLoader::default();
-    
+
     // Load plugin configuration if it exists
     let plugins_config_path = "config/plugins.toml";
     if std::path::Path::new(plugins_config_path).exists() {
@@ -101,56 +99,66 @@ async fn main() -> Result<()> {
     } else {
         info!("⏭️  No plugins config found, using defaults");
     }
-    
-    info!("📦 Plugin registry: {} plugins available", 
-        registry.list_all_plugins().len());
+
+    info!(
+        "📦 Plugin registry: {} plugins available",
+        registry.list_all_plugins().len()
+    );
 
     // ========================================================================
     // Database Connections
     // ========================================================================
 
     // Connect to PostgreSQL
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-    
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
     let pg_pool = PgPoolOptions::new()
-        .max_connections(config.postgres.as_ref().map(|p| p.max_connections).unwrap_or(20) as u32)
+        .max_connections(
+            config
+                .postgres
+                .as_ref()
+                .map(|p| p.max_connections)
+                .unwrap_or(20) as u32,
+        )
         .connect(&database_url)
         .await
         .expect("Failed to connect to PostgreSQL");
-    
+
     info!("✅ Connected to PostgreSQL");
 
     // ========================================================================
     // Migration System - Centralized Registry
     // ========================================================================
-    
+
     info!("🔄 Initializing migration registry...");
-    
+
     let pg_pool_arc = Arc::new(pg_pool.clone());
     let migration_registry = MigrationRegistry::new(pg_pool_arc.clone())
         .await
         .expect("Failed to initialize migration registry");
-    
+
     // Register PostgreSQL migration provider
     let postgres_provider = PostgresMigrationProvider::new(pg_pool_arc.clone());
-    migration_registry.register_plugin(Box::new(postgres_provider));
-    
+    migration_registry
+        .register_plugin(Box::new(postgres_provider))
+        .await;
+
     // Run migrations if enabled (or on first run)
-    let auto_migrate = config.migrations.as_ref()
+    let auto_migrate = config
+        .migrations
+        .as_ref()
         .map(|m| m.auto_migrate)
         .unwrap_or(true);
-    
+
     info!("🔄 Running migrations (auto_migrate: {})...", auto_migrate);
-    
+
     match migration_registry.run_all_migrations(auto_migrate).await {
         Ok(summary) => {
             info!(
                 "✅ Migration completed: {} successful, {} failed",
-                summary.successful,
-                summary.failed
+                summary.successful, summary.failed
             );
-            
+
             for result in &summary.plugin_results {
                 info!(
                     "  📦 {}: {} migrations applied in {}ms ({})",
@@ -160,7 +168,7 @@ async fn main() -> Result<()> {
                     result.status
                 );
             }
-            
+
             if summary.failed > 0 {
                 error!("❌ Some migrations failed");
                 for error in &summary.errors {
@@ -184,7 +192,7 @@ async fn main() -> Result<()> {
 
     let pg_pool = Arc::new(pg_pool);
     let pg_client = Arc::new(PostgresClient::from_pool(pg_pool.clone()));
-    
+
     // Individual repositories
     let user_repo = Arc::new(PostgresUserRepository::new(pg_client.clone()));
     let org_repo = Arc::new(PostgresOrganizationRepository::new(pg_client.clone()));
@@ -202,16 +210,20 @@ async fn main() -> Result<()> {
     // Authentication Services
     // ========================================================================
 
-    let jwt_secret = config.admin_api.as_ref()
+    let jwt_secret = config
+        .admin_api
+        .as_ref()
         .and_then(|a| a.jwt_secret.clone())
         .unwrap_or_else(|| "default-secret-change-me".to_string());
-    
-    let jwt_expiry_hours = config.admin_api.as_ref()
+
+    let jwt_expiry_hours = config
+        .admin_api
+        .as_ref()
         .and_then(|a| a.jwt_expiry_hours)
         .unwrap_or(24);
 
     let jwt_auth = Arc::new(JwtAuth::new(jwt_secret, jwt_expiry_hours));
-    
+
     let cache_ttl = config.auth.cache_ttl_seconds.unwrap_or(300);
 
     let db_api_key_auth = Arc::new(DbApiKeyAuth::new(
@@ -220,7 +232,7 @@ async fn main() -> Result<()> {
         1000,
         cache_ttl,
     ));
-    
+
     info!("✅ Authentication services initialized");
 
     // ========================================================================
@@ -262,13 +274,17 @@ async fn main() -> Result<()> {
     });
 
     // Telemetry query service (using Postgres)
-    let telemetry_repo = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(pg_client.clone()));
+    let telemetry_repo = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(
+        pg_client.clone(),
+    ));
     let query_service = Arc::new(QueryService::new(
         telemetry_repo as Arc<dyn zradar_traits::TelemetryReader>,
     ));
 
     // Scores service (using Postgres)
-    let score_repo = Arc::new(zradar_plugin_postgres::PostgresScoreRepository::new(pg_client.clone()));
+    let score_repo = Arc::new(zradar_plugin_postgres::PostgresScoreRepository::new(
+        pg_client.clone(),
+    ));
     let scores_service = Arc::new(ScoresService::new(
         score_repo as Arc<dyn zradar_traits::ScoreRepository>,
         project_repo.clone(),
@@ -282,39 +298,41 @@ async fn main() -> Result<()> {
     // OTLP Data Plane (Job Queue or Direct Write)
     // ========================================================================
 
-    let ingestor_config = config.ingestor.as_ref()
+    let ingestor_config = config
+        .ingestor
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Ingestor configuration required"))?;
-    
+
     let grpc_api_key_auth = Arc::new(GrpcApiKeyAuth::new(db_api_key_auth.clone()));
-    
+
     let otlp_port = config.otlp_port;
-    let admin_port = config.admin_api.as_ref()
+    let admin_port = config
+        .admin_api
+        .as_ref()
         .and_then(|a| a.admin_api_port)
         .unwrap_or(8080);
-    
+
     // Check if we should skip job queue and write directly
     if ingestor_config.skip_job {
         // Direct write mode - bypass job queue entirely
         info!("⚠️  SKIP_JOB enabled - spans will be written directly to persistence");
         info!("   This mode skips job queue for immediate consistency");
         info!("   Recommended only for development/testing or low-volume deployments");
-        
+
         // Create telemetry writer for direct persistence
-        let telemetry_writer = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(pg_client.clone()));
-        let span_handler = Arc::new(DirectSpanHandler::new(
-            telemetry_writer as Arc<dyn zradar_traits::TelemetryWriter>
+        let telemetry_writer = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(
+            pg_client.clone(),
         ));
-        
-        let trace_service = OtlpTraceService::new(
-            span_handler.clone(),
-            Some(grpc_api_key_auth.clone()),
-        );
-        
-        let metrics_service = OtlpMetricsService::new(
-            span_handler.clone(),
-            Some(grpc_api_key_auth.clone()),
-        );
-        
+        let span_handler = Arc::new(DirectSpanHandler::new(
+            telemetry_writer as Arc<dyn zradar_traits::TelemetryWriter>,
+        ));
+
+        let trace_service =
+            OtlpTraceService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
+
+        let metrics_service =
+            OtlpMetricsService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
+
         info!("✅ OTLP services initialized (direct write mode)");
 
         // Start servers
@@ -326,12 +344,12 @@ async fn main() -> Result<()> {
                 .add_service(
                     TraceServiceServer::new(trace_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
                 )
                 .serve(otlp_addr)
                 .await
@@ -343,7 +361,7 @@ async fn main() -> Result<()> {
 
         let admin_addr = format!("0.0.0.0:{}", admin_port);
         let health_router = health::create_health_router(Some(pg_pool.clone()));
-        
+
         let admin_api = create_admin_router(
             auth_service,
             org_service,
@@ -355,16 +373,16 @@ async fn main() -> Result<()> {
             jwt_auth.clone(),
             user_repo.clone(),
         );
-        
+
         let app = Router::new()
             .merge(health_router)
             .merge(admin_api)
             .layer(CompressionLayer::new());
-        
+
         let admin_server = async move {
             info!("🎧 Admin API listening on http://{}", admin_addr);
             info!("✨ Swagger UI: http://localhost:{}/swagger-ui/", admin_port);
-            
+
             let listener = tokio::net::TcpListener::bind(&admin_addr).await?;
             axum::serve(listener, app)
                 .await
@@ -390,30 +408,32 @@ async fn main() -> Result<()> {
         }
     } else {
         // Job queue mode - enqueue for async processing by workers
-        
+
         // Initialize block storage (from plugin)
-        let storage_path = ingestor_config.storage.local.as_ref()
+        let storage_path = ingestor_config
+            .storage
+            .local
+            .as_ref()
             .map(|l| l.path.as_str())
             .unwrap_or("./data/trace-batches");
-        
+
         let block_storage = Arc::new(LocalBlockStorage::new(storage_path));
         info!("✅ Block storage initialized: local ({})", storage_path);
-        
+
         // Initialize job queue (from plugin)
-        let job_queue = Arc::new(PostgresJobQueue::new(pg_pool.clone(), block_storage.clone()));
+        let job_queue = Arc::new(PostgresJobQueue::new(
+            pg_pool.clone(),
+            block_storage.clone(),
+        ));
         info!("✅ Job queue initialized: postgres (NO workers - use zradar-worker)");
 
         let span_handler = Arc::new(JobQueueSpanHandler::new(job_queue.clone()));
 
-        let trace_service = OtlpTraceService::new(
-            span_handler.clone(),
-            Some(grpc_api_key_auth.clone()),
-        );
-        
-        let metrics_service = OtlpMetricsService::new(
-            span_handler.clone(),
-            Some(grpc_api_key_auth.clone()),
-        );
+        let trace_service =
+            OtlpTraceService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
+
+        let metrics_service =
+            OtlpMetricsService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
 
         info!("✅ OTLP services initialized (job queue mode)");
 
@@ -426,12 +446,12 @@ async fn main() -> Result<()> {
                 .add_service(
                     TraceServiceServer::new(trace_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
                 )
                 .serve(otlp_addr)
                 .await
@@ -443,7 +463,7 @@ async fn main() -> Result<()> {
 
         let admin_addr = format!("0.0.0.0:{}", admin_port);
         let health_router = health::create_health_router(Some(pg_pool.clone()));
-        
+
         let admin_api = create_admin_router(
             auth_service,
             org_service,
@@ -455,16 +475,16 @@ async fn main() -> Result<()> {
             jwt_auth.clone(),
             user_repo.clone(),
         );
-        
+
         let app = Router::new()
             .merge(health_router)
             .merge(admin_api)
             .layer(CompressionLayer::new());
-        
+
         let admin_server = async move {
             info!("🎧 Admin API listening on http://{}", admin_addr);
             info!("✨ Swagger UI: http://localhost:{}/swagger-ui/", admin_port);
-            
+
             let listener = tokio::net::TcpListener::bind(&admin_addr).await?;
             axum::serve(listener, app)
                 .await

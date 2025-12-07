@@ -93,30 +93,30 @@ impl From<ApiKey> for ApiKeyResponse {
 pub trait ApiKeyRepository: Send + Sync {
     /// Create a new API key
     async fn create_key(
-        &self, 
-        org_id: Uuid, 
-        project_id: Uuid, 
-        key_hash: String, 
-        key_prefix: String, 
-        req: CreateApiKeyRequest, 
-        created_by: Uuid
+        &self,
+        org_id: Uuid,
+        project_id: Uuid,
+        key_hash: String,
+        key_prefix: String,
+        req: CreateApiKeyRequest,
+        created_by: Uuid,
     ) -> anyhow::Result<ApiKey>;
-    
+
     /// Get API key by ID
     async fn get_key(&self, id: Uuid) -> anyhow::Result<Option<ApiKey>>;
-    
+
     /// Get API key by hash
     async fn get_key_by_hash(&self, hash: &str) -> anyhow::Result<Option<ApiKey>>;
-    
+
     /// List API keys for a project
     async fn list_keys(&self, org_id: Uuid, project_id: Uuid) -> anyhow::Result<Vec<ApiKey>>;
-    
+
     /// Revoke (deactivate) an API key
     async fn revoke_key(&self, id: Uuid) -> anyhow::Result<()>;
-    
+
     /// Delete an API key
     async fn delete_key(&self, id: Uuid) -> anyhow::Result<()>;
-    
+
     /// Update last used timestamp
     async fn update_last_used(&self, id: Uuid) -> anyhow::Result<()>;
 }

@@ -3,5 +3,5 @@
 pub mod mock;
 
 // Re-export from traits
-pub use zradar_traits::{AuditLogger, AuditLog, AuditEvent, AuditStatus};
 pub use mock::MockAuditLogger;
+pub use zradar_traits::{AuditEvent, AuditLog, AuditLogger, AuditStatus};

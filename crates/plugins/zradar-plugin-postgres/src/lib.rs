@@ -20,37 +20,30 @@
 //! use `zradar-plugin-clickhouse` instead.
 
 pub mod client;
-pub mod repositories;
+pub mod compression;
 pub mod migrations;
 pub mod plugin;
-pub mod compression;
+pub mod repositories;
 
 pub use client::PostgresClient;
 pub use plugin::PostgresPlugin;
 
 // Re-export individual repositories for direct use
 pub use repositories::{
-    PostgresUserRepository,
-    PostgresOrganizationRepository,
-    PostgresProjectRepository,
-    PostgresApiKeyRepository,
-    PostgresRoleRepository,
-    PostgresAuditLogger,
-    PostgresJobQueue,
-    PostgresTelemetryRepository,
-    PostgresScoreRepository,
+    PostgresApiKeyRepository, PostgresAuditLogger, PostgresJobQueue,
+    PostgresOrganizationRepository, PostgresProjectRepository, PostgresRoleRepository,
+    PostgresScoreRepository, PostgresTelemetryRepository, PostgresUserRepository,
 };
 
-
-/// Register this plugin with the registry (for dynamic loading)
-/// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
+// Register this plugin with the registry (for dynamic loading)
+// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
 // #[unsafe(no_mangle)]
 // pub extern "C" fn register_plugin(registry: &PluginRegistry) -> bool {
 //     let plugin = Arc::new(PostgresPlugin::new());
-//     
+//
 //     // PostgreSQL is the default for everything
 //     tracing::info!("Registering PostgreSQL plugin as default implementation");
-//     
+//
 //     true
 // }
 
@@ -58,4 +51,3 @@ pub use repositories::{
 pub fn postgres_plugin_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
-

@@ -14,11 +14,7 @@ impl Default for RequestContext {
         Self {
             tenant_id: "default".to_string(),
             project_id: "default".to_string(),
-            permissions: vec![
-                "write:traces".to_string(),
-                "write:metrics".to_string(),
-            ],
+            permissions: vec!["write:traces".to_string(), "write:metrics".to_string()],
         }
     }
 }
-

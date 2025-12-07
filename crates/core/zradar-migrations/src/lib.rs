@@ -1,15 +1,15 @@
 //! # zradar-migrations
-//! 
+//!
 //! Centralized migration registry system for zradar plugins.
-//! 
+//!
 //! This crate provides:
 //! - `MigrationRegistry`: Central registry that tracks all plugin migrations in PostgreSQL
 //! - `MigrationProvider`: Trait that plugins implement to provide migration discovery and execution
 //! - Auto-migration on startup with single configuration flag
 //! - Multi-database support (PostgreSQL, ClickHouse, etc.)
-//! 
+//!
 //! ## Architecture
-//! 
+//!
 //! ```text
 //! ┌─────────────────────────────────────────────────┐
 //! │           zradar-server/worker                  │
@@ -44,4 +44,3 @@ mod types;
 pub use provider::MigrationProvider;
 pub use registry::MigrationRegistry;
 pub use types::*;
-

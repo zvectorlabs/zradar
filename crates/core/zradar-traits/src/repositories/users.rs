@@ -37,7 +37,12 @@ pub struct UpdateUserRequest {
 /// Repository trait for user persistence
 #[async_trait]
 pub trait UserRepository: Send + Sync {
-    async fn create_user(&self, email: String, password_hash: String, full_name: Option<String>) -> anyhow::Result<User>;
+    async fn create_user(
+        &self,
+        email: String,
+        password_hash: String,
+        full_name: Option<String>,
+    ) -> anyhow::Result<User>;
     async fn get_user(&self, id: Uuid) -> anyhow::Result<Option<User>>;
     async fn get_user_by_email(&self, email: &str) -> anyhow::Result<Option<User>>;
     async fn update_user(&self, id: Uuid, updates: UpdateUserRequest) -> anyhow::Result<User>;

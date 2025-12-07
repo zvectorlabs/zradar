@@ -1,7 +1,6 @@
 //! Organization API tests
 
-use crate::*;
-use anyhow::Result;
+use functional_tests::*;
 
 #[tokio::test]
 #[ignore]
@@ -215,7 +214,7 @@ async fn test_organization_members_list_includes_user_details() -> Result<()> {
 
     // We need a separate client to register the new user, or just use the admin client if registration is open
     // Using admin client to register
-    let new_user = client
+    let _new_user = client
         .register(&new_user_email, &new_user_password, new_user_name)
         .await?;
 

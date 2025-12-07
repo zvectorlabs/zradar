@@ -159,7 +159,7 @@ impl QueryService {
         // Parse and validate span_types
         let span_types = filters
             .parse_span_types()
-            .map_err(|e| ControlError::InvalidInput(e))?;
+            .map_err(ControlError::InvalidInput)?;
 
         // Convert API filters to storage filters
         let storage_filters = StorageSpanFilters {

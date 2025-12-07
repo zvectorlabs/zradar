@@ -9,7 +9,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::{service::*, types::*};
-use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
+use crate::audit::{AuditEvent, AuditStatus};
 use crate::auth::{ApiKeyAuth, DefaultKeyGenerator};
 use crate::errors::{ControlError, Result};
 use crate::http::extractors::AuthenticatedUser;

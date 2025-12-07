@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use super::types::*;
+use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
 use crate::auth::TokenAuth;
-use crate::audit::{AuditLogger, AuditEvent, AuditStatus};
 use crate::errors::{ControlError, Result};
 
 /// Authentication service for user management
@@ -32,12 +32,21 @@ impl AuthService {
     pub async fn register(&self, req: RegisterRequest) -> Result<AuthResponse> {
         // Validate email format
         if !req.email.contains('@') {
-            return Err(ControlError::InvalidInput("Invalid email format".to_string()));
+            return Err(ControlError::InvalidInput(
+                "Invalid email format".to_string(),
+            ));
         }
 
         // Check if user already exists
-        if self.user_storage.get_user_by_email(&req.email).await?.is_some() {
-            return Err(ControlError::Conflict("Email already registered".to_string()));
+        if self
+            .user_storage
+            .get_user_by_email(&req.email)
+            .await?
+            .is_some()
+        {
+            return Err(ControlError::Conflict(
+                "Email already registered".to_string(),
+            ));
         }
 
         // Hash password
@@ -54,18 +63,21 @@ impl AuthService {
         let token = self.jwt_auth.generate_token(&user)?;
 
         // Log registration
-        let _ = self.audit.log(AuditEvent {
-            organization_id: None,
-            user_id: Some(user.id),
-            actor_type: Some("user".to_string()),
-            actor_id: Some(user.id),
-            actor_ip: None,
-            action: "user.registered".to_string(),
-            resource_type: Some("user".to_string()),
-            resource_id: Some(user.id),
-            status: AuditStatus::Success,
-            details: None,
-        }).await;
+        let _ = self
+            .audit
+            .log(AuditEvent {
+                organization_id: None,
+                user_id: Some(user.id),
+                actor_type: Some("user".to_string()),
+                actor_id: Some(user.id),
+                actor_ip: None,
+                action: "user.registered".to_string(),
+                resource_type: Some("user".to_string()),
+                resource_id: Some(user.id),
+                status: AuditStatus::Success,
+                details: None,
+            })
+            .await;
 
         tracing::info!(user_id = %user.id, email = %user.email, "User registered");
 
@@ -81,19 +93,26 @@ impl AuthService {
         let user = match self.user_storage.get_user_by_email(&req.email).await? {
             Some(u) => u,
             None => {
-                let _ = self.audit.log(AuditEvent {
-                    organization_id: None,
-                    user_id: None,
-                    actor_type: Some("user".to_string()),
-                    actor_id: None,
-                    actor_ip: None,
-                    action: "user.login_failed".to_string(),
-                    resource_type: Some("user".to_string()),
-                    resource_id: None,
-                    status: AuditStatus::Failure,
-                    details: Some(serde_json::json!({"reason": "user_not_found", "email": req.email})),
-                }).await;
-                return Err(ControlError::AuthenticationFailed("Invalid email or password".to_string()));
+                let _ = self
+                    .audit
+                    .log(AuditEvent {
+                        organization_id: None,
+                        user_id: None,
+                        actor_type: Some("user".to_string()),
+                        actor_id: None,
+                        actor_ip: None,
+                        action: "user.login_failed".to_string(),
+                        resource_type: Some("user".to_string()),
+                        resource_id: None,
+                        status: AuditStatus::Failure,
+                        details: Some(
+                            serde_json::json!({"reason": "user_not_found", "email": req.email}),
+                        ),
+                    })
+                    .await;
+                return Err(ControlError::AuthenticationFailed(
+                    "Invalid email or password".to_string(),
+                ));
             }
         };
 
@@ -102,18 +121,21 @@ impl AuthService {
             .map_err(|_| ControlError::PasswordHash)?;
 
         if !valid {
-            let _ = self.audit.log(AuditEvent {
-                organization_id: None,
-                user_id: Some(user.id),
-                actor_type: Some("user".to_string()),
-                actor_id: Some(user.id),
-                actor_ip: None,
-                action: "user.login_failed".to_string(),
-                resource_type: Some("user".to_string()),
-                resource_id: Some(user.id),
-                status: AuditStatus::Failure,
-                details: Some(serde_json::json!({"reason": "invalid_password"})),
-            }).await;
+            let _ = self
+                .audit
+                .log(AuditEvent {
+                    organization_id: None,
+                    user_id: Some(user.id),
+                    actor_type: Some("user".to_string()),
+                    actor_id: Some(user.id),
+                    actor_ip: None,
+                    action: "user.login_failed".to_string(),
+                    resource_type: Some("user".to_string()),
+                    resource_id: Some(user.id),
+                    status: AuditStatus::Failure,
+                    details: Some(serde_json::json!({"reason": "invalid_password"})),
+                })
+                .await;
 
             return Err(ControlError::AuthenticationFailed(
                 "Invalid email or password".to_string(),
@@ -134,18 +156,21 @@ impl AuthService {
         let token = self.jwt_auth.generate_token(&user)?;
 
         // Log successful login
-        let _ = self.audit.log(AuditEvent {
-            organization_id: None,
-            user_id: Some(user.id),
-            actor_type: Some("user".to_string()),
-            actor_id: Some(user.id),
-            actor_ip: None,
-            action: "user.login".to_string(),
-            resource_type: Some("user".to_string()),
-            resource_id: Some(user.id),
-            status: AuditStatus::Success,
-            details: None,
-        }).await;
+        let _ = self
+            .audit
+            .log(AuditEvent {
+                organization_id: None,
+                user_id: Some(user.id),
+                actor_type: Some("user".to_string()),
+                actor_id: Some(user.id),
+                actor_ip: None,
+                action: "user.login".to_string(),
+                resource_type: Some("user".to_string()),
+                resource_id: Some(user.id),
+                status: AuditStatus::Success,
+                details: None,
+            })
+            .await;
 
         tracing::info!(user_id = %user.id, email = %user.email, "User logged in");
 
@@ -160,4 +185,3 @@ impl AuthService {
         user.into()
     }
 }
-

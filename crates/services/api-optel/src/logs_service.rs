@@ -1,16 +1,14 @@
 //! OTLP Logs Service gRPC implementation with evaluation score extraction
 
-use opentelemetry_proto::tonic::collector::logs::v1::{
-    logs_service_server::LogsService,
-    ExportLogsServiceRequest,
-    ExportLogsServiceResponse,
-};
-use opentelemetry_proto::tonic::logs::v1::LogRecord;
-use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
-use tonic::{Request, Response, Status};
-use std::sync::Arc;
-use zradar_models::{RequestContext, EvaluationScore};
 use crate::auth::ApiKeyAuth;
+use opentelemetry_proto::tonic::collector::logs::v1::{
+    ExportLogsServiceRequest, ExportLogsServiceResponse, logs_service_server::LogsService,
+};
+use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
+use opentelemetry_proto::tonic::logs::v1::LogRecord;
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
+use zradar_models::{EvaluationScore, RequestContext};
 
 const SCORE_ATTRIBUTE_PREFIX: &str = "score.";
 
@@ -18,7 +16,7 @@ const SCORE_ATTRIBUTE_PREFIX: &str = "score.";
 #[tonic::async_trait]
 pub trait ScoreHandler: Send + Sync + 'static {
     /// Handle an evaluation score extracted from OTLP logs
-    /// 
+    ///
     /// # Arguments
     /// * `score` - The evaluation score
     /// * `context` - Request context (tenant_id, project_id, etc.)
@@ -40,7 +38,7 @@ impl<H: ScoreHandler> OtlpLogsService<H> {
     pub fn new(handler: Arc<H>, auth: Option<Arc<ApiKeyAuth>>) -> Self {
         Self { handler, auth }
     }
-    
+
     async fn authenticate<T>(&self, request: &Request<T>) -> Result<RequestContext, Status> {
         if let Some(ref auth) = self.auth {
             auth.validate(request).await
@@ -49,29 +47,31 @@ impl<H: ScoreHandler> OtlpLogsService<H> {
             Ok(RequestContext::default())
         }
     }
-    
+
     /// Parse an evaluation score from a log record
     fn parse_score(&self, log: &LogRecord, context: &RequestContext) -> Option<EvaluationScore> {
-        let mut score = EvaluationScore::default();
-        score.tenant_id = context.tenant_id.clone();
-        score.project_id = context.project_id.clone();
-        
+        let mut score = EvaluationScore {
+            tenant_id: context.tenant_id.clone(),
+            project_id: context.project_id.clone(),
+            ..Default::default()
+        };
+
         let mut has_score_attrs = false;
         let mut has_required_fields = false;
-        
+
         // Extract attributes
         for attr in &log.attributes {
             let key = &attr.key;
-            
+
             if !key.starts_with(SCORE_ATTRIBUTE_PREFIX) {
                 continue;
             }
-            
+
             has_score_attrs = true;
-            
+
             let field = &key[SCORE_ATTRIBUTE_PREFIX.len()..];
             let value = attr.value.as_ref()?.value.as_ref()?;
-            
+
             match field {
                 "id" => {
                     score.id = get_string_value(value);
@@ -141,21 +141,25 @@ impl<H: ScoreHandler> OtlpLogsService<H> {
                 }
             }
         }
-        
+
         // Set timestamps
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         score.timestamp = log.time_unix_nano as i64;
         score.created_at = now;
         score.updated_at = now;
         score.event_ts = now;
-        
+
         // Generate ID if not provided
         if score.id.is_empty() {
             score.id = format!("eval_{}", uuid::Uuid::new_v4());
         }
-        
+
         // Validate required fields
-        if has_score_attrs && has_required_fields && !score.name.is_empty() && !score.trace_id.is_empty() {
+        if has_score_attrs
+            && has_required_fields
+            && !score.name.is_empty()
+            && !score.trace_id.is_empty()
+        {
             Some(score)
         } else {
             None
@@ -192,18 +196,18 @@ impl<H: ScoreHandler> LogsService for OtlpLogsService<H> {
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
         // Authenticate
         let context = self.authenticate(&request).await?;
-        
+
         let req = request.into_inner();
-        
+
         tracing::debug!(
             tenant_id = %context.tenant_id,
             project_id = %context.project_id,
             resource_logs = req.resource_logs.len(),
             "Received logs export request"
         );
-        
+
         let mut score_count = 0;
-        
+
         // Process each log record
         for resource_logs in req.resource_logs {
             for scope_logs in resource_logs.scope_logs {
@@ -216,14 +220,14 @@ impl<H: ScoreHandler> LogsService for OtlpLogsService<H> {
                 }
             }
         }
-        
+
         tracing::debug!(
             tenant_id = %context.tenant_id,
             project_id = %context.project_id,
             scores_extracted = score_count,
             "Successfully processed logs"
         );
-        
+
         // Return success response
         Ok(Response::new(ExportLogsServiceResponse {
             partial_success: None,
@@ -237,7 +241,10 @@ mod tests {
 
     #[test]
     fn test_get_string_value() {
-        assert_eq!(get_string_value(&AnyValue::StringValue("test".to_string())), "test");
+        assert_eq!(
+            get_string_value(&AnyValue::StringValue("test".to_string())),
+            "test"
+        );
         assert_eq!(get_string_value(&AnyValue::IntValue(42)), "42");
         assert_eq!(get_string_value(&AnyValue::DoubleValue(3.14)), "3.14");
         assert_eq!(get_string_value(&AnyValue::BoolValue(true)), "true");
@@ -247,7 +254,10 @@ mod tests {
     fn test_get_double_value() {
         assert_eq!(get_double_value(&AnyValue::DoubleValue(3.14)), 3.14);
         assert_eq!(get_double_value(&AnyValue::IntValue(42)), 42.0);
-        assert_eq!(get_double_value(&AnyValue::StringValue("3.14".to_string())), 3.14);
+        assert_eq!(
+            get_double_value(&AnyValue::StringValue("3.14".to_string())),
+            3.14
+        );
     }
 
     #[test]
@@ -255,4 +265,3 @@ mod tests {
         assert_eq!(SCORE_ATTRIBUTE_PREFIX, "score.");
     }
 }
-

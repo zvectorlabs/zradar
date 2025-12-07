@@ -48,12 +48,12 @@ help:
 # =============================================================================
 
 # Start development environment (hot reload, direct DB access)
-dev: ensure-sqlx-cache
+dev: hook ensure-sqlx-cache
 	@echo "🔧 Starting development environment..."
 	@./docker-start.sh dev
 
 # Start development environment and follow logs
-dev-logs: ensure-sqlx-cache
+dev-logs: hook ensure-sqlx-cache
 	@echo "🔧 Starting development environment with log following..."
 	@./docker-start.sh dev follow
 
@@ -231,6 +231,20 @@ sqlx-prepare:
 		DATABASE_URL="postgres://zradar:$${POSTGRES_PASSWORD:-dev_password}@localhost:5432/zradar" cargo sqlx prepare --workspace'
 	@echo "✅ SQLx query cache generated in .sqlx/"
 	@echo "💡 Tip: Commit .sqlx/ to git for faster builds"
+
+# Install/Update git hooks
+hook:
+	@echo "🪝 Checking git hooks..."
+	@mkdir -p .git/hooks
+	@for hook in pre-commit commit-msg; do \
+		if [ ! -f .git/hooks/$$hook ] || ! cmp -s scripts/hooks/$$hook .git/hooks/$$hook; then \
+			echo "📦 Installing $$hook hook..."; \
+			cp scripts/hooks/$$hook .git/hooks/$$hook; \
+			chmod +x .git/hooks/$$hook; \
+		else \
+			echo "✅ $$hook hook is up to date"; \
+		fi \
+	done
 
 # =============================================================================
 # LOCAL RUST DEVELOPMENT (without Docker)

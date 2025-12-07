@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use zradar_traits::{BlockStorage, JobQueue};
 use crate::error::Result;
+use zradar_traits::{BlockStorage, JobQueue};
 
 /// Plugin type identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -89,16 +89,16 @@ pub struct ConfigField {
 pub trait Plugin: Send + Sync + 'static {
     /// Get plugin metadata
     fn metadata(&self) -> &PluginMetadata;
-    
+
     /// Validate configuration before initialization
     fn validate_config(&self, config: &serde_json::Value) -> Result<()>;
-    
+
     /// Initialize the plugin with configuration
     async fn initialize(&self, config: &serde_json::Value) -> Result<()>;
-    
+
     /// Health check
     async fn health_check(&self) -> Result<bool>;
-    
+
     /// Shutdown the plugin gracefully
     async fn shutdown(&self) -> Result<()>;
 }
@@ -118,31 +118,35 @@ pub trait QueuePlugin: Plugin {
 }
 
 /// Telemetry writer plugin trait
-/// 
+///
 /// Note: Uses anyhow::Result to avoid dependency on zradar-control errors
 #[async_trait]
 pub trait TelemetryWriterPlugin: Plugin {
     /// Insert spans
     async fn insert_spans(&self, spans: &[zradar_models::Span]) -> anyhow::Result<()>;
-    
+
     /// Insert metrics
     async fn insert_metrics(&self, metrics: &[zradar_models::Metric]) -> anyhow::Result<()>;
 }
 
 /// Telemetry reader plugin trait
-/// 
+///
 /// Note: Returns raw JSON to avoid type coupling
 #[async_trait]
 pub trait TelemetryReaderPlugin: Plugin {
     /// Query traces with filters (returns JSON)
     async fn query_traces(&self, filters: serde_json::Value) -> anyhow::Result<serde_json::Value>;
-    
+
     /// Get trace detail (returns JSON)
-    async fn get_trace_detail(&self, project_id: uuid::Uuid, trace_id: &str) -> anyhow::Result<Option<serde_json::Value>>;
-    
+    async fn get_trace_detail(
+        &self,
+        project_id: uuid::Uuid,
+        trace_id: &str,
+    ) -> anyhow::Result<Option<serde_json::Value>>;
+
     /// Query spans (returns JSON)
     async fn query_spans(&self, filters: serde_json::Value) -> anyhow::Result<serde_json::Value>;
-    
+
     /// Get analytics (returns JSON)
     async fn get_analytics(&self, query: serde_json::Value) -> anyhow::Result<serde_json::Value>;
 }
@@ -152,13 +156,13 @@ pub trait TelemetryReaderPlugin: Plugin {
 pub trait CachePlugin: Plugin {
     /// Get value from cache
     async fn get(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>>;
-    
+
     /// Set value in cache with TTL
     async fn set(&self, key: &str, value: &[u8], ttl_seconds: Option<u64>) -> anyhow::Result<()>;
-    
+
     /// Delete value from cache
     async fn delete(&self, key: &str) -> anyhow::Result<()>;
-    
+
     /// Check if key exists
     async fn exists(&self, key: &str) -> anyhow::Result<bool>;
 }
@@ -207,11 +211,11 @@ pub struct MigrationOptions {
 }
 
 /// Migratable plugin trait
-/// 
+///
 /// Implement this for plugins that manage database schemas.
-/// 
+///
 /// ## Migration File Format
-/// 
+///
 /// Migrations are SQL files named with version prefix:
 /// ```text
 /// migrations/
@@ -219,9 +223,9 @@ pub struct MigrationOptions {
 ///   002_add_indexes.sql
 ///   003_add_partitions.sql
 /// ```
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```ignore
 /// #[async_trait]
 /// impl MigratablePlugin for ClickHousePlugin {
@@ -238,21 +242,25 @@ pub struct MigrationOptions {
 #[async_trait]
 pub trait MigratablePlugin: Plugin {
     /// Run pending migrations
-    /// 
+    ///
     /// Returns list of applied migrations in order.
-    async fn run_migrations(&self, options: &MigrationOptions) -> anyhow::Result<Vec<AppliedMigration>>;
-    
+    async fn run_migrations(
+        &self,
+        options: &MigrationOptions,
+    ) -> anyhow::Result<Vec<AppliedMigration>>;
+
     /// Get migration status without applying
-    async fn migration_status(&self, options: &MigrationOptions) -> anyhow::Result<MigrationStatus>;
-    
+    async fn migration_status(&self, options: &MigrationOptions)
+    -> anyhow::Result<MigrationStatus>;
+
     /// Get list of applied migrations
     async fn applied_migrations(&self) -> anyhow::Result<Vec<AppliedMigration>>;
-    
+
     /// Verify all applied migration checksums
     async fn verify_checksums(&self, options: &MigrationOptions) -> anyhow::Result<bool>;
-    
+
     /// Rollback last N migrations (if supported)
-    /// 
+    ///
     /// Not all databases support rollback. Returns error if not supported.
     async fn rollback(&self, _count: usize) -> anyhow::Result<()> {
         anyhow::bail!("Rollback not supported by this plugin")
@@ -260,41 +268,41 @@ pub trait MigratablePlugin: Plugin {
 }
 
 /// Score storage plugin trait (for evaluation scores)
-/// 
+///
 /// Plugins that store evaluation/scoring data implement this.
 #[async_trait]
 pub trait ScoreStoragePlugin: Plugin + MigratablePlugin {
     /// Insert evaluation scores
     async fn insert_scores(&self, scores: &[zradar_models::EvaluationScore]) -> anyhow::Result<()>;
-    
+
     /// Get scores for a trace
     async fn get_trace_scores(
         &self,
         project_id: uuid::Uuid,
         trace_id: &str,
     ) -> anyhow::Result<Vec<zradar_models::EvaluationScore>>;
-    
+
     /// Get scores for a session
     async fn get_session_scores(
         &self,
         project_id: uuid::Uuid,
         session_id: &str,
     ) -> anyhow::Result<Vec<zradar_models::EvaluationScore>>;
-    
+
     /// Get score summary for a trace
     async fn get_trace_score_summary(
         &self,
         project_id: uuid::Uuid,
         trace_id: &str,
     ) -> anyhow::Result<Option<serde_json::Value>>;
-    
+
     /// Get a specific score by ID
     async fn get_score_by_id(
         &self,
         project_id: uuid::Uuid,
         score_id: uuid::Uuid,
     ) -> anyhow::Result<Option<zradar_models::EvaluationScore>>;
-    
+
     /// Soft delete a score
     async fn soft_delete_score(
         &self,
@@ -317,4 +325,3 @@ pub type TelemetryWriterPluginFactory = fn() -> Box<dyn TelemetryWriterPlugin>;
 
 /// Telemetry reader plugin factory
 pub type TelemetryReaderPluginFactory = fn() -> Box<dyn TelemetryReaderPlugin>;
-

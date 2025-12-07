@@ -6,11 +6,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::domain::PermissionDefinition;
+use crate::domain::roles::RoleRepository;
 use crate::errors::{ControlError, Result};
 use crate::permissions::PermissionValidator;
 use crate::rbac::PermissionChecker;
-use crate::domain::roles::RoleRepository;
-use crate::domain::PermissionDefinition;
 
 /// Cache entry for user permissions
 #[derive(Clone)]
@@ -41,20 +41,16 @@ impl RbacService {
     pub async fn initialize(&self) -> Result<()> {
         let definitions = self.storage.get_permission_definitions(None).await?;
         let validator = PermissionValidator::new(definitions);
-        
+
         let mut guard = self.validator.write().await;
         *guard = Some(validator);
-        
+
         tracing::info!("RBAC service initialized with permission definitions");
         Ok(())
     }
 
     /// Check if user is organization owner
-    pub async fn is_org_owner(
-        &self,
-        user_id: Uuid,
-        org_id: Uuid,
-    ) -> Result<bool> {
+    pub async fn is_org_owner(&self, user_id: Uuid, org_id: Uuid) -> Result<bool> {
         // Owner has all permissions
         self.check_permission(user_id, org_id, None, "*").await
     }
@@ -84,7 +80,10 @@ impl RbacService {
     }
 
     /// Assess risk of a permission set
-    pub async fn assess_risk(&self, permissions: &[String]) -> Result<crate::domain::RiskAssessment> {
+    pub async fn assess_risk(
+        &self,
+        permissions: &[String],
+    ) -> Result<crate::domain::RiskAssessment> {
         let validator_guard = self.validator.read().await;
         let validator = validator_guard
             .as_ref()
@@ -94,7 +93,10 @@ impl RbacService {
     }
 
     /// List all available permissions for a scope
-    pub async fn list_permissions_by_scope(&self, scope: &str) -> Result<Vec<PermissionDefinition>> {
+    pub async fn list_permissions_by_scope(
+        &self,
+        scope: &str,
+    ) -> Result<Vec<PermissionDefinition>> {
         Ok(self.storage.get_permission_definitions(Some(scope)).await?)
     }
 }
@@ -108,14 +110,20 @@ impl PermissionChecker for RbacService {
         project_id: Option<Uuid>,
         permission: &str,
     ) -> Result<bool> {
-        let permissions = self.get_user_permissions(user_id, org_id, project_id).await?;
-        
+        let permissions = self
+            .get_user_permissions(user_id, org_id, project_id)
+            .await?;
+
         let validator_guard = self.validator.read().await;
         let validator = validator_guard
             .as_ref()
             .ok_or_else(|| ControlError::Internal("RBAC not initialized".to_string()))?;
 
-        let scope = if project_id.is_some() { "project" } else { "organization" };
+        let scope = if project_id.is_some() {
+            "project"
+        } else {
+            "organization"
+        };
         let has_perm = validator.has_permission(&permissions, permission, scope);
 
         if !has_perm {
@@ -138,7 +146,10 @@ impl PermissionChecker for RbacService {
         project_id: Option<Uuid>,
         permission: &str,
     ) -> Result<()> {
-        if !self.check_permission(user_id, org_id, project_id, permission).await? {
+        if !self
+            .check_permission(user_id, org_id, project_id, permission)
+            .await?
+        {
             return Err(ControlError::Forbidden(format!(
                 "Missing required permission: {}",
                 permission
@@ -156,12 +167,18 @@ impl PermissionChecker for RbacService {
         let mut all_permissions = HashSet::new();
 
         // 1. Get organization-level permissions
-        let org_perms = self.storage.get_user_org_permissions(org_id, user_id).await?;
+        let org_perms = self
+            .storage
+            .get_user_org_permissions(org_id, user_id)
+            .await?;
         all_permissions.extend(org_perms);
 
         // 2. Get project-level permissions if project specified
         if let Some(project_id) = project_id {
-            let project_perms = self.storage.get_user_project_permissions(project_id, user_id).await?;
+            let project_perms = self
+                .storage
+                .get_user_project_permissions(project_id, user_id)
+                .await?;
             all_permissions.extend(project_perms);
         }
 
@@ -172,8 +189,10 @@ impl PermissionChecker for RbacService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{PermissionDefinition, CustomRole, CreateCustomRoleRequest, UpdateCustomRoleRequest};
     use crate::domain::roles::RoleRepository;
+    use crate::domain::{
+        CreateCustomRoleRequest, CustomRole, PermissionDefinition, UpdateCustomRoleRequest,
+    };
     use async_trait::async_trait;
     use chrono::Utc;
 
@@ -184,7 +203,10 @@ mod tests {
 
     #[async_trait]
     impl RoleRepository for MockRoleStorage {
-        async fn get_permission_definitions(&self, _scope: Option<&str>) -> anyhow::Result<Vec<PermissionDefinition>> {
+        async fn get_permission_definitions(
+            &self,
+            _scope: Option<&str>,
+        ) -> anyhow::Result<Vec<PermissionDefinition>> {
             Ok(vec![
                 PermissionDefinition {
                     id: "traces:read".to_string(),
@@ -213,11 +235,19 @@ mod tests {
             ])
         }
 
-        async fn get_permission_definition(&self, _id: &str) -> anyhow::Result<Option<PermissionDefinition>> {
+        async fn get_permission_definition(
+            &self,
+            _id: &str,
+        ) -> anyhow::Result<Option<PermissionDefinition>> {
             Ok(None)
         }
 
-        async fn create_custom_role(&self, org_id: Uuid, req: CreateCustomRoleRequest, created_by: Uuid) -> anyhow::Result<CustomRole> {
+        async fn create_custom_role(
+            &self,
+            org_id: Uuid,
+            req: CreateCustomRoleRequest,
+            created_by: Uuid,
+        ) -> anyhow::Result<CustomRole> {
             Ok(CustomRole {
                 id: Uuid::new_v4(),
                 organization_id: org_id,
@@ -237,11 +267,19 @@ mod tests {
             Ok(None)
         }
 
-        async fn list_custom_roles(&self, _org_id: Uuid, _scope: Option<&str>) -> anyhow::Result<Vec<CustomRole>> {
+        async fn list_custom_roles(
+            &self,
+            _org_id: Uuid,
+            _scope: Option<&str>,
+        ) -> anyhow::Result<Vec<CustomRole>> {
             Ok(vec![])
         }
 
-        async fn update_custom_role(&self, id: Uuid, updates: UpdateCustomRoleRequest) -> anyhow::Result<CustomRole> {
+        async fn update_custom_role(
+            &self,
+            id: Uuid,
+            updates: UpdateCustomRoleRequest,
+        ) -> anyhow::Result<CustomRole> {
             Ok(CustomRole {
                 id,
                 organization_id: Uuid::new_v4(),
@@ -261,11 +299,19 @@ mod tests {
             Ok(())
         }
 
-        async fn get_user_org_permissions(&self, _org_id: Uuid, _user_id: Uuid) -> anyhow::Result<Vec<String>> {
+        async fn get_user_org_permissions(
+            &self,
+            _org_id: Uuid,
+            _user_id: Uuid,
+        ) -> anyhow::Result<Vec<String>> {
             Ok(self.org_permissions.clone())
         }
 
-        async fn get_user_project_permissions(&self, _project_id: Uuid, _user_id: Uuid) -> anyhow::Result<Vec<String>> {
+        async fn get_user_project_permissions(
+            &self,
+            _project_id: Uuid,
+            _user_id: Uuid,
+        ) -> anyhow::Result<Vec<String>> {
             Ok(self.project_permissions.clone())
         }
     }
@@ -284,8 +330,16 @@ mod tests {
         let org_id = Uuid::new_v4();
         let project_id = Some(Uuid::new_v4());
 
-        assert!(rbac.check_permission(user_id, org_id, project_id, "traces:read").await.unwrap());
-        assert!(rbac.check_permission(user_id, org_id, project_id, "traces:write").await.unwrap());
+        assert!(
+            rbac.check_permission(user_id, org_id, project_id, "traces:read")
+                .await
+                .unwrap()
+        );
+        assert!(
+            rbac.check_permission(user_id, org_id, project_id, "traces:write")
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -303,9 +357,11 @@ mod tests {
         let project_id = Some(Uuid::new_v4());
 
         // Should have both org and project permissions
-        let perms = rbac.get_user_permissions(user_id, org_id, project_id).await.unwrap();
+        let perms = rbac
+            .get_user_permissions(user_id, org_id, project_id)
+            .await
+            .unwrap();
         assert!(perms.contains(&"traces:read".to_string()));
         assert!(perms.contains(&"traces:write".to_string()));
     }
 }
-

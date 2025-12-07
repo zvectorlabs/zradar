@@ -51,7 +51,7 @@ pub struct UpdateOrganizationRequest {
 /// Organization member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
-#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+#[derive(sqlx::FromRow)]
 pub struct OrganizationMember {
     pub id: Uuid,
     pub organization_id: Uuid,
@@ -85,14 +85,31 @@ pub struct OrganizationWithRole {
 /// Repository trait for organization persistence
 #[async_trait]
 pub trait OrganizationRepository: Send + Sync {
-    async fn create_org(&self, owner_id: Uuid, req: CreateOrganizationRequest) -> anyhow::Result<Organization>;
+    async fn create_org(
+        &self,
+        owner_id: Uuid,
+        req: CreateOrganizationRequest,
+    ) -> anyhow::Result<Organization>;
     async fn get_org(&self, id: Uuid) -> anyhow::Result<Option<Organization>>;
     async fn get_org_by_slug(&self, slug: &str) -> anyhow::Result<Option<Organization>>;
     async fn list_user_orgs(&self, user_id: Uuid) -> anyhow::Result<Vec<OrganizationWithRole>>;
-    async fn update_org(&self, id: Uuid, updates: UpdateOrganizationRequest) -> anyhow::Result<Organization>;
+    async fn update_org(
+        &self,
+        id: Uuid,
+        updates: UpdateOrganizationRequest,
+    ) -> anyhow::Result<Organization>;
     async fn delete_org(&self, id: Uuid) -> anyhow::Result<()>;
-    async fn add_member(&self, org_id: Uuid, user_id: Uuid, req: AddMemberRequest) -> anyhow::Result<OrganizationMember>;
-    async fn get_member(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<Option<OrganizationMember>>;
+    async fn add_member(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        req: AddMemberRequest,
+    ) -> anyhow::Result<OrganizationMember>;
+    async fn get_member(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<OrganizationMember>>;
     async fn list_members(&self, org_id: Uuid) -> anyhow::Result<Vec<OrganizationMember>>;
     async fn remove_member(&self, org_id: Uuid, user_id: Uuid) -> anyhow::Result<()>;
 }

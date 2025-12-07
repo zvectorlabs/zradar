@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 // Re-export from zradar_traits
-pub use zradar_traits::{User, UpdateUserRequest, UserRepository};
+pub use zradar_traits::{UpdateUserRequest, User, UserRepository};
 
 // ============================================================================
 // HTTP-specific types (not in traits)
@@ -70,4 +70,3 @@ impl From<User> for UserResponse {
 pub struct RefreshResponse {
     pub token: String,
 }
-

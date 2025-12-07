@@ -1,9 +1,8 @@
 //! Roles module router
 
 use axum::{
-    Router,
-    routing::{get, post, put, delete},
-    Extension,
+    Extension, Router,
+    routing::{delete, get, post, put},
 };
 use std::sync::Arc;
 
@@ -18,14 +17,22 @@ pub fn router(
     user_storage: Arc<dyn UserRepository>,
 ) -> Router {
     Router::new()
-        .route("/api/v1/organizations/:org_id/roles", post(handlers::create_role))
-        .route("/api/v1/organizations/:org_id/roles", get(handlers::list_roles))
+        .route(
+            "/api/v1/organizations/:org_id/roles",
+            post(handlers::create_role),
+        )
+        .route(
+            "/api/v1/organizations/:org_id/roles",
+            get(handlers::list_roles),
+        )
         .route("/api/v1/roles/:role_id", get(handlers::get_custom_role))
         .route("/api/v1/roles/:role_id", put(handlers::update_custom_role))
-        .route("/api/v1/roles/:role_id", delete(handlers::delete_custom_role))
+        .route(
+            "/api/v1/roles/:role_id",
+            delete(handlers::delete_custom_role),
+        )
         .route("/api/v1/permissions", get(handlers::list_permissions))
         .with_state(service)
         .layer(Extension(jwt_auth))
         .layer(Extension(user_storage))
 }
-

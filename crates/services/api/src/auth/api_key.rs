@@ -9,10 +9,10 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::api_keys::service::ApiKeyValidator;
+use crate::audit::{AuditEvent, AuditLogger, AuditStatus};
 use crate::auth::api_key_validator::ApiKeyValidator as AuthApiKeyValidator;
-use crate::errors::{ControlError, Result};
-use crate::audit::{AuditEvent, AuditStatus, AuditLogger};
 use crate::domain::api_keys::ApiKeyRepository;
+use crate::errors::{ControlError, Result};
 
 /// Cached API key information
 #[derive(Clone)]
@@ -51,7 +51,7 @@ impl ApiKeyAuth {
         cache_ttl_secs: u64,
     ) -> Self {
         let cache_size = NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::new(1000).unwrap());
-        
+
         Self {
             storage,
             audit,
@@ -67,26 +67,30 @@ impl ApiKeyAuth {
 
         // Check cache first
         if let Some(cached) = self.get_from_cache(&key_hash).await
-            && self.is_cache_valid(&cached) {
-                tracing::debug!(key_id = %cached.key_id, "API key found in cache");
-                
-                // Async update last_used_at (fire and forget)
-                let storage = self.storage.clone();
-                let key_id = cached.key_id;
-                tokio::spawn(async move {
-                    let _ = storage.update_last_used(key_id).await;
-                });
+            && self.is_cache_valid(&cached)
+        {
+            tracing::debug!(key_id = %cached.key_id, "API key found in cache");
 
-                return Ok(RequestContext {
-                    organization_id: cached.organization_id,
-                    project_id: cached.project_id,
-                    key_id: cached.key_id,
-                    permissions: cached.permissions,
-                });
-            }
+            // Async update last_used_at (fire and forget)
+            let storage = self.storage.clone();
+            let key_id = cached.key_id;
+            tokio::spawn(async move {
+                let _ = storage.update_last_used(key_id).await;
+            });
+
+            return Ok(RequestContext {
+                organization_id: cached.organization_id,
+                project_id: cached.project_id,
+                key_id: cached.key_id,
+                permissions: cached.permissions,
+            });
+        }
 
         // Not in cache or expired - fetch from database
-        let api_key = self.storage.get_key_by_hash(&key_hash).await?
+        let api_key = self
+            .storage
+            .get_key_by_hash(&key_hash)
+            .await?
             .ok_or_else(|| {
                 tracing::warn!("API key validation failed: key not found");
                 ControlError::Unauthorized("Invalid API key".to_string())
@@ -94,20 +98,27 @@ impl ApiKeyAuth {
 
         // Check if key is active
         if !api_key.is_active {
-            self.log_auth_failure(None, None, "API key is inactive").await;
-            return Err(ControlError::Unauthorized("API key is inactive".to_string()));
+            self.log_auth_failure(None, None, "API key is inactive")
+                .await;
+            return Err(ControlError::Unauthorized(
+                "API key is inactive".to_string(),
+            ));
         }
 
         // Check if key has expired
         if let Some(expires_at) = api_key.expires_at
-            && expires_at < Utc::now() {
-                self.log_auth_failure(
-                    Some(api_key.organization_id),
-                    Some(api_key.id),
-                    "API key has expired"
-                ).await;
-                return Err(ControlError::Unauthorized("API key has expired".to_string()));
-            }
+            && expires_at < Utc::now()
+        {
+            self.log_auth_failure(
+                Some(api_key.organization_id),
+                Some(api_key.id),
+                "API key has expired",
+            )
+            .await;
+            return Err(ControlError::Unauthorized(
+                "API key has expired".to_string(),
+            ));
+        }
 
         // Cache the key info
         let cached_info = CachedKeyInfo {
@@ -149,7 +160,7 @@ impl ApiKeyAuth {
         // For lookups, use a fast hash (not bcrypt)
         // In production, you'd want to use bcrypt::hash for storage
         // but for lookups we use SHA256
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(key.as_bytes());
         format!("{:x}", hasher.finalize())
@@ -157,14 +168,12 @@ impl ApiKeyAuth {
 
     /// Hash a key for storage (using bcrypt)
     pub fn hash_key_for_storage(key: &str) -> Result<String> {
-        bcrypt::hash(key, bcrypt::DEFAULT_COST)
-            .map_err(|_| ControlError::PasswordHash)
+        bcrypt::hash(key, bcrypt::DEFAULT_COST).map_err(|_| ControlError::PasswordHash)
     }
 
     /// Verify a key against a bcrypt hash
     pub fn verify_key(key: &str, hash: &str) -> Result<bool> {
-        bcrypt::verify(key, hash)
-            .map_err(|_| ControlError::PasswordHash)
+        bcrypt::verify(key, hash).map_err(|_| ControlError::PasswordHash)
     }
 
     /// Generate a new API key
@@ -175,7 +184,7 @@ impl ApiKeyAuth {
             .take(32)
             .map(char::from)
             .collect();
-        
+
         format!("{}_{}", prefix, random_part)
     }
 
@@ -201,7 +210,7 @@ impl ApiKeyAuth {
             .filter(|(_, info)| info.key_id == key_id)
             .map(|(key, _)| key.clone())
             .collect();
-        
+
         for key in keys_to_remove {
             cache.pop(&key);
             tracing::debug!(key_id = %key_id, "Invalidated cache entry for API key");
@@ -221,9 +230,10 @@ impl ApiKeyAuth {
 
         // Check expiration
         if let Some(expires_at) = cached.expires_at
-            && expires_at < Utc::now() {
-                return false;
-            }
+            && expires_at < Utc::now()
+        {
+            return false;
+        }
 
         true
     }
@@ -258,7 +268,7 @@ impl AuthApiKeyValidator for ApiKeyAuth {
     async fn validate(&self, key: &str) -> Result<RequestContext> {
         self.validate(key).await
     }
-    
+
     async fn revoke(&self, key_id: Uuid) -> Result<()> {
         self.invalidate_cache_by_key_id(key_id).await;
         Ok(())
@@ -300,4 +310,3 @@ mod tests {
         assert_eq!(hash1.len(), 64); // SHA256 produces 64 hex chars
     }
 }
-

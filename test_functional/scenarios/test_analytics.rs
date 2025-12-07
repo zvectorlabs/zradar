@@ -1,8 +1,8 @@
-use crate::*;
-use anyhow::Result;
+use functional_tests::*;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct AnalyticsResult {
     #[allow(dead_code)]
     timestamp: String,
@@ -11,6 +11,7 @@ struct AnalyticsResult {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct MetricsSummary {
     total_traces: i64,
     error_rate: f64,
@@ -68,26 +69,25 @@ async fn test_analytics_endpoints() -> Result<()> {
         otlp_client.build_test_trace("test-service", &trace_id, &span_id, "error-span");
 
     // Modify status to Error (code 2)
-    if let Some(res_span) = request.resource_spans.get_mut(0) {
-        if let Some(scope_span) = res_span.scope_spans.get_mut(0) {
-            if let Some(span) = scope_span.spans.get_mut(0) {
-                span.status = Some(opentelemetry_proto::tonic::trace::v1::Status {
-                    message: "Something went wrong".to_string(),
-                    code: 2, // STATUS_CODE_ERROR
-                });
-                // Also update http.status_code attribute if present
-                if let Some(attr) = span
-                    .attributes
-                    .iter_mut()
-                    .find(|kv| kv.key == "http.status_code")
-                {
-                    attr.value = Some(opentelemetry_proto::tonic::common::v1::AnyValue {
-                        value: Some(
-                            opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(500),
-                        ),
-                    });
-                }
-            }
+    if let Some(res_span) = request.resource_spans.get_mut(0)
+        && let Some(scope_span) = res_span.scope_spans.get_mut(0)
+        && let Some(span) = scope_span.spans.get_mut(0)
+    {
+        span.status = Some(opentelemetry_proto::tonic::trace::v1::Status {
+            message: "Something went wrong".to_string(),
+            code: 2, // STATUS_CODE_ERROR
+        });
+        // Also update http.status_code attribute if present
+        if let Some(attr) = span
+            .attributes
+            .iter_mut()
+            .find(|kv| kv.key == "http.status_code")
+        {
+            attr.value = Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                value: Some(
+                    opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(500),
+                ),
+            });
         }
     }
     otlp_client.export_traces(request).await?;

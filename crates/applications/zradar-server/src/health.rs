@@ -1,14 +1,14 @@
 //! Health check endpoints for zradar server
 
 use axum::{
+    Router,
     http::StatusCode,
     response::{IntoResponse, Json},
-    Router,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use sqlx::PgPool;
+use std::sync::Arc;
 
 /// Health check response
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,9 +53,7 @@ pub async fn liveness() -> impl IntoResponse {
 }
 
 /// Readiness probe - checks dependencies
-pub async fn readiness(
-    pg_pool: Option<Arc<PgPool>>,
-) -> impl IntoResponse {
+pub async fn readiness(pg_pool: Option<Arc<PgPool>>) -> impl IntoResponse {
     let mut checks = ReadinessChecks {
         database: CheckStatus::Unhealthy,
         clickhouse: CheckStatus::Healthy, // TODO: Actually check ClickHouse
@@ -63,10 +61,7 @@ pub async fn readiness(
 
     // Check PostgreSQL connection
     if let Some(pool) = pg_pool {
-        match sqlx::query("SELECT 1")
-            .fetch_one(pool.as_ref())
-            .await
-        {
+        match sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await {
             Ok(_) => checks.database = CheckStatus::Healthy,
             Err(_) => checks.database = CheckStatus::Unhealthy,
         }
@@ -81,10 +76,7 @@ pub async fn readiness(
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    (status_code, Json(ReadinessResponse {
-        ready,
-        checks,
-    }))
+    (status_code, Json(ReadinessResponse { ready, checks }))
 }
 
 /// Create health check router
@@ -92,10 +84,13 @@ pub fn create_health_router(pg_pool: Option<Arc<PgPool>>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/health/live", get(liveness))
-        .route("/health/ready", get({
-            let pool = pg_pool.clone();
-            move || readiness(pool.clone())
-        }))
+        .route(
+            "/health/ready",
+            get({
+                let pool = pg_pool.clone();
+                move || readiness(pool.clone())
+            }),
+        )
 }
 
 #[cfg(test)]
@@ -121,4 +116,3 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }
-

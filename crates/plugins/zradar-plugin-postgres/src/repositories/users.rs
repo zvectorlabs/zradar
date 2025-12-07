@@ -5,8 +5,8 @@ use sqlx::FromRow;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use zradar_traits::{UserRepository, User, UpdateUserRequest};
 use crate::client::PostgresClient;
+use zradar_traits::{UpdateUserRequest, User, UserRepository};
 
 /// PostgreSQL row type for users
 #[derive(Debug, Clone, FromRow)]
@@ -71,32 +71,28 @@ impl UserRepository for PostgresUserRepository {
         .bind(&full_name)
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(row.into())
     }
-    
+
     async fn get_user(&self, id: Uuid) -> anyhow::Result<Option<User>> {
-        let row = sqlx::query_as::<_, UserRow>(
-            "SELECT * FROM users WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+        let row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE id = $1")
+            .bind(id)
+            .fetch_optional(self.client.pool())
+            .await?;
+
         Ok(row.map(Into::into))
     }
-    
+
     async fn get_user_by_email(&self, email: &str) -> anyhow::Result<Option<User>> {
-        let row = sqlx::query_as::<_, UserRow>(
-            "SELECT * FROM users WHERE email = $1",
-        )
-        .bind(email)
-        .fetch_optional(self.client.pool())
-        .await?;
-        
+        let row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(self.client.pool())
+            .await?;
+
         Ok(row.map(Into::into))
     }
-    
+
     async fn update_user(&self, id: Uuid, updates: UpdateUserRequest) -> anyhow::Result<User> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
@@ -113,19 +109,16 @@ impl UserRepository for PostgresUserRepository {
         .bind(updates.metadata)
         .fetch_one(self.client.pool())
         .await?;
-        
+
         Ok(row.into())
     }
-    
+
     async fn update_last_login(&self, id: Uuid) -> anyhow::Result<()> {
-        sqlx::query(
-            "UPDATE users SET last_login_at = NOW() WHERE id = $1",
-        )
-        .bind(id)
-        .execute(self.client.pool())
-        .await?;
-        
+        sqlx::query("UPDATE users SET last_login_at = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(self.client.pool())
+            .await?;
+
         Ok(())
     }
 }
-

@@ -2,7 +2,7 @@
 
 // Re-export domain types and traits from core
 pub use zradar_models::{EvalDataType, EvalSource};
-pub use zradar_traits::{ScoreSummary, ScoreRepository};
+pub use zradar_traits::{ScoreRepository, ScoreSummary};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateScoreRequest {
     pub trace_id: String,
-    pub span_id: Option<String>,  // Links to spans.span_id
+    pub span_id: Option<String>, // Links to spans.span_id
     pub session_id: Option<String>,
     pub dataset_run_id: Option<String>,
     pub name: String,
@@ -32,7 +32,7 @@ pub struct ScoreResponse {
     pub id: String,
     pub project_id: Uuid,
     pub trace_id: String,
-    pub span_id: Option<String>,  // Links to spans.span_id
+    pub span_id: Option<String>, // Links to spans.span_id
     pub session_id: Option<String>,
     pub dataset_run_id: Option<String>,
     pub name: String,
@@ -55,4 +55,3 @@ pub struct ScoreSummaryResponse {
     pub max_value: f64,
     pub count: u64,
 }
-

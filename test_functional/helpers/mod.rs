@@ -14,4 +14,3 @@ pub use api_client::ApiClient;
 pub use fixtures::*;
 pub use grpc_client::OtlpClient;
 pub use test_helpers::*;
-

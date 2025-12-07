@@ -11,12 +11,12 @@
 //!   - Supports 1000+ workers, 100K+ jobs/sec
 
 mod cache;
-mod plugin;
 mod hybrid_queue;
+mod plugin;
 
 pub use cache::RedisCache;
-pub use plugin::RedisPlugin;
 pub use hybrid_queue::HybridQueue;
+pub use plugin::RedisPlugin;
 
 use std::sync::Arc;
 use zradar_plugins::PluginRegistry;
@@ -25,18 +25,18 @@ use zradar_plugins::PluginRegistry;
 #[unsafe(no_mangle)]
 pub extern "C" fn register_plugin(registry: &PluginRegistry) -> bool {
     let plugin = Arc::new(RedisPlugin::new());
-    
+
     if let Err(e) = registry.register_cache(plugin) {
         tracing::error!(error = %e, "Failed to register Redis plugin");
         return false;
     }
-    
+
     tracing::info!("Redis plugin registered successfully");
     true
 }
 
 #[unsafe(no_mangle)]
+#[allow(improper_ctypes_definitions)]
 pub extern "C" fn plugin_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
-

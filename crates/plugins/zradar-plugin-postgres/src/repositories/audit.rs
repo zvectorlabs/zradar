@@ -1,10 +1,10 @@
 //! PostgreSQL audit logger implementation
 
+use crate::client::PostgresClient;
 use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
-use zradar_traits::{AuditLogger, AuditEvent, AuditLog};
-use crate::client::PostgresClient;
+use zradar_traits::{AuditEvent, AuditLog, AuditLogger};
 
 pub struct PostgresAuditLogger {
     client: Arc<PostgresClient>,
@@ -39,13 +39,17 @@ impl AuditLogger for PostgresAuditLogger {
         .bind(&event.details)
         .execute(self.client.pool())
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn get_logs(&self, org_id: Option<Uuid>, limit: Option<i64>) -> anyhow::Result<Vec<AuditLog>> {
+
+    async fn get_logs(
+        &self,
+        org_id: Option<Uuid>,
+        limit: Option<i64>,
+    ) -> anyhow::Result<Vec<AuditLog>> {
         let limit = limit.unwrap_or(100);
-        
+
         let rows = if let Some(org_id) = org_id {
             sqlx::query_as::<_, AuditLogRow>(
                 r#"
@@ -75,7 +79,7 @@ impl AuditLogger for PostgresAuditLogger {
             .fetch_all(self.client.pool())
             .await?
         };
-        
+
         Ok(rows.into_iter().map(Into::into).collect())
     }
 }

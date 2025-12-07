@@ -1,10 +1,10 @@
 //! PostgreSQL-only job queue implementation
-//! 
+//!
 //! Best for:
 //! - Small to medium scale (up to 50 workers)
 //! - Simple deployment (no Redis needed)
 //! - Complete durability (everything in PostgreSQL)
-//! 
+//!
 //! Performance:
 //! - Enqueue: ~10ms
 //! - Dequeue: ~10ms
@@ -15,8 +15,10 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use zradar_traits::{JobQueue, BlockStorage, Job, JobStatus, JobType, QueueStats, generate_sharded_path};
 use zradar_models::RequestContext;
+use zradar_traits::{
+    BlockStorage, Job, JobQueue, JobStatus, JobType, QueueStats, generate_sharded_path,
+};
 
 /// PostgreSQL-only job queue implementation
 pub struct PostgresJobQueue {
@@ -27,37 +29,39 @@ pub struct PostgresJobQueue {
 impl PostgresJobQueue {
     /// Create new PostgreSQL job queue
     pub fn new(pg_pool: Arc<PgPool>, block_storage: Arc<dyn BlockStorage>) -> Self {
-        Self { pg_pool, block_storage }
+        Self {
+            pg_pool,
+            block_storage,
+        }
     }
-    
+
     /// Create from raw pool (convenience)
     pub fn from_pool(pg_pool: PgPool, block_storage: Arc<dyn BlockStorage>) -> Self {
-        Self { pg_pool: Arc::new(pg_pool), block_storage }
+        Self {
+            pg_pool: Arc::new(pg_pool),
+            block_storage,
+        }
     }
 }
 
 #[async_trait]
 impl JobQueue for PostgresJobQueue {
-    async fn enqueue(
-        &self,
-        data: &[u8],
-        context: &RequestContext,
-    ) -> anyhow::Result<Uuid> {
+    async fn enqueue(&self, data: &[u8], context: &RequestContext) -> anyhow::Result<Uuid> {
         let job_id = Uuid::new_v4();
-        
+
         // Use hybrid sharded path (9 levels)
         let key = generate_sharded_path(&job_id);
-        
+
         // 1. Upload to block storage
         let file_path = self.block_storage.upload(&key, data).await?;
-        
+
         // 2. Insert into PostgreSQL
         sqlx::query(
             r#"
             INSERT INTO ingestion_jobs 
             (id, job_type, status, file_path, tenant_id, project_id, created_at, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
-            "#
+            "#,
         )
         .bind(job_id)
         .bind("trace_ingestion")
@@ -68,7 +72,7 @@ impl JobQueue for PostgresJobQueue {
         .bind(serde_json::json!({}))
         .execute(self.pg_pool.as_ref())
         .await?;
-        
+
         tracing::info!(
             job_id = %job_id,
             tenant_id = %context.tenant_id,
@@ -76,10 +80,10 @@ impl JobQueue for PostgresJobQueue {
             size = data.len(),
             "Job enqueued (PostgreSQL)"
         );
-        
+
         Ok(job_id)
     }
-    
+
     async fn dequeue(&self, worker_id: &str) -> anyhow::Result<Option<Job>> {
         // Use SKIP LOCKED for lock-free dequeue
         let result = sqlx::query_as::<_, JobRow>(
@@ -99,19 +103,19 @@ impl JobQueue for PostgresJobQueue {
                 id, job_type, status, file_path, tenant_id, project_id,
                 created_at, started_at, completed_at, retry_count, 
                 error_message, metadata
-            "#
+            "#,
         )
         .bind(worker_id)
         .fetch_optional(self.pg_pool.as_ref())
         .await?;
-        
+
         Ok(result.map(|row| {
             tracing::debug!(
                 job_id = %row.id,
                 worker_id = worker_id,
                 "Job dequeued"
             );
-            
+
             Job {
                 id: row.id,
                 job_type: JobType::TraceIngestion,
@@ -128,7 +132,7 @@ impl JobQueue for PostgresJobQueue {
             }
         }))
     }
-    
+
     async fn complete(&self, job_id: Uuid) -> anyhow::Result<()> {
         sqlx::query(
             r#"
@@ -136,33 +140,32 @@ impl JobQueue for PostgresJobQueue {
             SET status = 'completed', 
                 completed_at = NOW() 
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(job_id)
         .execute(self.pg_pool.as_ref())
         .await?;
-        
+
         tracing::info!(job_id = %job_id, "Job completed");
-        
+
         Ok(())
     }
-    
+
     async fn fail(&self, job_id: Uuid, error: &str) -> anyhow::Result<()> {
         // Get current retry count
-        let record = sqlx::query_scalar::<_, i32>(
-            "SELECT retry_count FROM ingestion_jobs WHERE id = $1"
-        )
-        .bind(job_id)
-        .fetch_one(self.pg_pool.as_ref())
-        .await?;
-        
+        let record =
+            sqlx::query_scalar::<_, i32>("SELECT retry_count FROM ingestion_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(self.pg_pool.as_ref())
+                .await?;
+
         const MAX_RETRIES: i32 = 3;
         let new_status = if record < MAX_RETRIES {
-            "pending"  // Retry
+            "pending" // Retry
         } else {
-            "failed"   // Give up
+            "failed" // Give up
         };
-        
+
         sqlx::query(
             r#"
             UPDATE ingestion_jobs
@@ -170,14 +173,14 @@ impl JobQueue for PostgresJobQueue {
                 error_message = $3,
                 retry_count = retry_count + 1
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(job_id)
         .bind(new_status)
         .bind(error)
         .execute(self.pg_pool.as_ref())
         .await?;
-        
+
         if new_status == "pending" {
             tracing::warn!(
                 job_id = %job_id,
@@ -192,10 +195,10 @@ impl JobQueue for PostgresJobQueue {
                 "Job failed permanently"
             );
         }
-        
+
         Ok(())
     }
-    
+
     async fn get_stats(&self) -> anyhow::Result<QueueStats> {
         let stats = sqlx::query_as::<_, StatsRow>(
             r#"
@@ -207,11 +210,11 @@ impl JobQueue for PostgresJobQueue {
                 COUNT(*) FILTER (WHERE status = 'retrying') as retrying
             FROM ingestion_jobs
             WHERE created_at > NOW() - INTERVAL '1 hour'
-            "#
+            "#,
         )
         .fetch_one(self.pg_pool.as_ref())
         .await?;
-        
+
         Ok(QueueStats {
             pending: stats.pending.unwrap_or(0) as u64,
             processing: stats.processing.unwrap_or(0) as u64,
@@ -220,7 +223,7 @@ impl JobQueue for PostgresJobQueue {
             retrying: stats.retrying.unwrap_or(0) as u64,
         })
     }
-    
+
     async fn health_check(&self) -> anyhow::Result<bool> {
         sqlx::query("SELECT 1")
             .execute(self.pg_pool.as_ref())
@@ -233,8 +236,8 @@ impl JobQueue for PostgresJobQueue {
 #[derive(sqlx::FromRow)]
 struct JobRow {
     id: Uuid,
-    job_type: String,
-    status: String,
+    _job_type: String,
+    _status: String,
     file_path: String,
     tenant_id: String,
     project_id: String,

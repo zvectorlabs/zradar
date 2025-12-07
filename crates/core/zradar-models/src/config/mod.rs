@@ -1,18 +1,16 @@
 //! Configuration management
 
-mod database;
 mod auth;
+mod database;
 mod ingestor;
-mod migrations;
 mod loader;
+mod migrations;
 
 // Re-export all config types
+pub use auth::{AdminApiConfig, ApiKeyConfig, AuthConfig};
 pub use database::{ClickHouseConfig, PostgresConfig};
-pub use auth::{AuthConfig, ApiKeyConfig, AdminApiConfig};
 pub use ingestor::{
-    IngestorConfig, WorkersConfig, StorageConfig, 
-    LocalStorageConfig, S3StorageConfig, RedisConfig
+    IngestorConfig, LocalStorageConfig, RedisConfig, S3StorageConfig, StorageConfig, WorkersConfig,
 };
-pub use migrations::MigrationsConfig;
 pub use loader::Config;
-
+pub use migrations::MigrationsConfig;

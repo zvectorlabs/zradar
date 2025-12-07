@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use zradar_traits::{AuditLogger, AuditEvent, AuditLog};
+use zradar_traits::{AuditEvent, AuditLog, AuditLogger};
 
 /// Mock audit logger for testing
 #[derive(Default)]
@@ -29,7 +29,11 @@ impl AuditLogger for MockAuditLogger {
         Ok(())
     }
 
-    async fn get_logs(&self, _org_id: Option<Uuid>, _limit: Option<i64>) -> anyhow::Result<Vec<AuditLog>> {
+    async fn get_logs(
+        &self,
+        _org_id: Option<Uuid>,
+        _limit: Option<i64>,
+    ) -> anyhow::Result<Vec<AuditLog>> {
         Ok(vec![])
     }
 }

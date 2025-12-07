@@ -1,9 +1,8 @@
 //! User/Auth module router
 
 use axum::{
-    Router,
+    Extension, Router,
     routing::{get, post},
-    Extension,
 };
 use std::sync::Arc;
 
@@ -26,4 +25,3 @@ pub fn router(
         .layer(Extension(jwt_auth))
         .layer(Extension(user_storage))
 }
-

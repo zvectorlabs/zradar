@@ -15,13 +15,13 @@ pub struct AuditLog {
     pub id: Uuid,
     pub organization_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
-    pub actor_type: Option<String>,  // 'user', 'api_key', 'system'
+    pub actor_type: Option<String>, // 'user', 'api_key', 'system'
     pub actor_id: Option<Uuid>,
     pub actor_ip: Option<String>,
     pub action: String,
     pub resource_type: Option<String>,
     pub resource_id: Option<Uuid>,
-    pub status: String,  // 'success', 'failure', 'permission_denied'
+    pub status: String, // 'success', 'failure', 'permission_denied'
     pub details: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
@@ -65,7 +65,11 @@ impl AuditStatus {
 pub trait AuditLogger: Send + Sync {
     /// Log an audit event
     async fn log(&self, event: AuditEvent) -> anyhow::Result<()>;
-    
+
     /// Get audit logs with optional organization filter
-    async fn get_logs(&self, org_id: Option<Uuid>, limit: Option<i64>) -> anyhow::Result<Vec<AuditLog>>;
+    async fn get_logs(
+        &self,
+        org_id: Option<Uuid>,
+        limit: Option<i64>,
+    ) -> anyhow::Result<Vec<AuditLog>>;
 }

@@ -1,12 +1,12 @@
 //! PostgreSQL scores repository implementation
 
 use async_trait::async_trait;
-use std::sync::Arc;
 use sqlx;
+use std::sync::Arc;
 
-use zradar_traits::{ScoreRepository, ScoreSummary};
-use zradar_models::EvaluationScore;
 use crate::client::PostgresClient;
+use zradar_models::EvaluationScore;
+use zradar_traits::{ScoreRepository, ScoreSummary};
 
 pub struct PostgresScoreRepository {
     client: Arc<PostgresClient>,
@@ -24,7 +24,7 @@ impl ScoreRepository for PostgresScoreRepository {
         if scores.is_empty() {
             return Ok(());
         }
-        
+
         for score in scores {
             sqlx::query(
                 r#"
@@ -74,11 +74,16 @@ impl ScoreRepository for PostgresScoreRepository {
             .execute(self.client.pool())
             .await?;
         }
-        
+
         Ok(())
     }
-    
-    async fn get_trace_scores(&self, tenant_id: &str, project_id: &str, trace_id: &str) -> anyhow::Result<Vec<EvaluationScore>> {
+
+    async fn get_trace_scores(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        trace_id: &str,
+    ) -> anyhow::Result<Vec<EvaluationScore>> {
         let scores = sqlx::query_as::<_, EvaluationScore>(
             r#"
             SELECT * FROM evaluation_scores
@@ -91,11 +96,16 @@ impl ScoreRepository for PostgresScoreRepository {
         .bind(trace_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(scores)
     }
-    
-    async fn get_session_scores(&self, tenant_id: &str, project_id: &str, session_id: &str) -> anyhow::Result<Vec<EvaluationScore>> {
+
+    async fn get_session_scores(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<EvaluationScore>> {
         let scores = sqlx::query_as::<_, EvaluationScore>(
             r#"
             SELECT * FROM evaluation_scores
@@ -108,11 +118,16 @@ impl ScoreRepository for PostgresScoreRepository {
         .bind(session_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(scores)
     }
-    
-    async fn get_trace_score_summary(&self, tenant_id: &str, project_id: &str, trace_id: &str) -> anyhow::Result<Vec<ScoreSummary>> {
+
+    async fn get_trace_score_summary(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        trace_id: &str,
+    ) -> anyhow::Result<Vec<ScoreSummary>> {
         let summary = sqlx::query_as::<_, ScoreSummary>(
             r#"
             SELECT
@@ -131,11 +146,16 @@ impl ScoreRepository for PostgresScoreRepository {
         .bind(trace_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         Ok(summary)
     }
-    
-    async fn get_score_by_id(&self, tenant_id: &str, project_id: &str, score_id: &str) -> anyhow::Result<Option<EvaluationScore>> {
+
+    async fn get_score_by_id(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        score_id: &str,
+    ) -> anyhow::Result<Option<EvaluationScore>> {
         let score = sqlx::query_as::<_, EvaluationScore>(
             r#"
             SELECT * FROM evaluation_scores
@@ -147,11 +167,16 @@ impl ScoreRepository for PostgresScoreRepository {
         .bind(score_id)
         .fetch_optional(self.client.pool())
         .await?;
-        
+
         Ok(score)
     }
-    
-    async fn delete_score(&self, tenant_id: &str, project_id: &str, score_id: &str) -> anyhow::Result<()> {
+
+    async fn delete_score(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        score_id: &str,
+    ) -> anyhow::Result<()> {
         sqlx::query(
             r#"
             UPDATE evaluation_scores
@@ -165,7 +190,7 @@ impl ScoreRepository for PostgresScoreRepository {
         .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
         .execute(self.client.pool())
         .await?;
-        
+
         Ok(())
     }
 }

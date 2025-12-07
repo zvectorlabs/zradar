@@ -1,26 +1,24 @@
 //! Functional test library for zradar
-//! 
+//!
 //! This library provides utilities for black-box API testing of zradar services.
 //! All tests verify behavior through public API endpoints only, without direct
 //! database access.
 
 pub mod helpers;
-pub mod scenarios;
 
 // Re-export main helpers for convenience
-pub use helpers::{ApiClient, OtlpClient, TestDataGenerator, TestFixture};
 pub use helpers::test_helpers::{
-    wait_for_server, generate_test_id, parse_uuid_from_json,
-    get_string_from_json, get_bool_from_json, get_i64_from_json,
-    format_trace_id, format_span_id,
-    assert_json_has_key, assert_json_eq, assert_starts_with, assert_not_empty,
+    assert_json_eq, assert_json_has_key, assert_not_empty, assert_starts_with, format_span_id,
+    format_trace_id, generate_test_id, get_bool_from_json, get_i64_from_json, get_string_from_json,
+    parse_uuid_from_json, wait_for_server,
 };
+pub use helpers::{ApiClient, OtlpClient, TestDataGenerator, TestFixture};
 
 // Re-export Result and common types for test scenarios
 pub use anyhow::Result;
-pub use serde_json::{json, Value};
-pub use std::time::Duration;
 pub use hex;
+pub use serde_json::{Value, json};
+pub use std::time::Duration;
 
 /// Test configuration loaded from environment variables
 #[derive(Debug, Clone)]
@@ -60,38 +58,45 @@ impl TestContext {
         let config = TestConfig::from_env();
         let api_client = ApiClient::new(config.api_url.clone());
         let otlp_client = OtlpClient::new(config.grpc_url.clone());
-        
+
         Self {
             config,
             api_client,
             otlp_client,
         }
     }
-    
+
     /// Login as admin and return authenticated client
     /// If login fails, attempts to register the admin user first
     pub async fn login_as_admin(&self) -> Result<ApiClient> {
         let mut client = ApiClient::new(self.config.api_url.clone());
-        
+
         // Try to login first
-        match client.login(&self.config.admin_email, &self.config.admin_password).await {
-            Ok(_) => return Ok(client),
+        match client
+            .login(&self.config.admin_email, &self.config.admin_password)
+            .await
+        {
+            Ok(_) => Ok(client),
             Err(_) => {
                 // Login failed, try to register the admin user
                 println!("Admin user not found, registering...");
-                let _ = client.register(
-                    &self.config.admin_email,
-                    &self.config.admin_password,
-                    "Test Admin"
-                ).await?;
-                
+                let _ = client
+                    .register(
+                        &self.config.admin_email,
+                        &self.config.admin_password,
+                        "Test Admin",
+                    )
+                    .await?;
+
                 // Now try to login again
-                client.login(&self.config.admin_email, &self.config.admin_password).await?;
+                client
+                    .login(&self.config.admin_email, &self.config.admin_password)
+                    .await?;
                 Ok(client)
             }
         }
     }
-    
+
     /// Wait for server to be ready
     pub async fn wait_for_ready(&self, timeout_secs: u64) -> Result<()> {
         wait_for_server(&self.config.api_url, timeout_secs).await
@@ -103,5 +108,3 @@ impl Default for TestContext {
         Self::new()
     }
 }
-
-

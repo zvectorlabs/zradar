@@ -13,44 +13,34 @@
 
 // Re-export from new modules for backward compatibility
 pub use crate::users::{
-    User, UserResponse, RegisterRequest, LoginRequest, AuthResponse, UserRepository
+    AuthResponse, LoginRequest, RegisterRequest, User, UserRepository, UserResponse,
 };
 
 pub use crate::organizations::{
-    Organization, OrganizationMember, OrganizationWithRole,
-    CreateOrganizationRequest, UpdateOrganizationRequest, AddOrganizationMemberRequest,
-    OrganizationRepository,
+    AddOrganizationMemberRequest, CreateOrganizationRequest, Organization, OrganizationMember,
+    OrganizationRepository, OrganizationWithRole, UpdateOrganizationRequest,
 };
 
 pub use crate::projects::{
-    Project, ProjectMember, ProjectWithRole,
-    CreateProjectRequest, UpdateProjectRequest, AddProjectMemberRequest,
-    ProjectRepository,
+    AddProjectMemberRequest, CreateProjectRequest, Project, ProjectMember, ProjectRepository,
+    ProjectWithRole, UpdateProjectRequest,
 };
 
 pub use crate::api_keys::{
-    ApiKey, CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyResponse,
-    ApiKeyRepository,
+    ApiKey, ApiKeyRepository, ApiKeyResponse, CreateApiKeyRequest, CreateApiKeyResponse,
 };
 
 pub use crate::roles::{
-    PermissionDefinition, CustomRole,
-    CreateCustomRoleRequest, UpdateCustomRoleRequest,
-    RiskAssessment, PermissionInfo,
-    RoleRepository,
+    CreateCustomRoleRequest, CustomRole, PermissionDefinition, PermissionInfo, RiskAssessment,
+    RoleRepository, UpdateCustomRoleRequest,
 };
 
 pub use crate::telemetry::{
-    TraceQueryFilters, SpanQueryFilters, AnalyticsQuery, TopNQuery,
-    TraceSummary, TraceDetail, SpanDetail,
-    AnalyticsResult, TopEndpoint,
-    TelemetryWriter,
+    AnalyticsQuery, AnalyticsResult, SpanDetail, SpanQueryFilters, TelemetryWriter, TopEndpoint,
+    TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary,
 };
 
-pub use crate::scores::{
-    CreateScoreRequest, ScoreResponse, ScoreSummaryResponse,
-    ScoreRepository,
-};
+pub use crate::scores::{CreateScoreRequest, ScoreRepository, ScoreResponse, ScoreSummaryResponse};
 
 // Keep old submodules temporarily
 pub mod organizations {
