@@ -157,16 +157,13 @@ pub async fn delete_organization(
     tag = "Organizations"
 )]
 pub async fn add_organization_member(
-    State(_service): State<Arc<OrganizationService>>,
-    _user: AuthenticatedUser,
-    Path(_org_id): Path<Uuid>,
-    Json(_req): Json<AddOrganizationMemberRequest>,
+    State(service): State<Arc<OrganizationService>>,
+    user: AuthenticatedUser,
+    Path(org_id): Path<Uuid>,
+    Json(req): Json<AddOrganizationMemberRequest>,
 ) -> Result<(StatusCode, Json<OrganizationMember>)> {
-    // TODO: Implement user lookup and add member
-    use crate::errors::ControlError;
-    Err(ControlError::Internal(
-        "User lookup not yet implemented".to_string(),
-    ))
+    let member = service.add_member(user.id, org_id, req).await?;
+    Ok((StatusCode::CREATED, Json(member)))
 }
 
 /// List organization members
@@ -177,7 +174,7 @@ pub async fn add_organization_member(
         ("org_id" = Uuid, Path, description = "Organization ID")
     ),
     responses(
-        (status = 200, description = "List of members", body = Vec<OrganizationMember>),
+        (status = 200, description = "List of members", body = Vec<OrganizationMemberResponse>),
         (status = 404, description = "Organization not found"),
         (status = 403, description = "Insufficient permissions"),
     ),
@@ -190,7 +187,7 @@ pub async fn list_organization_members(
     State(service): State<Arc<OrganizationService>>,
     user: AuthenticatedUser,
     Path(org_id): Path<Uuid>,
-) -> Result<Json<Vec<OrganizationMember>>> {
+) -> Result<Json<Vec<OrganizationMemberResponse>>> {
     let members = service.list_members(user.id, org_id).await?;
     Ok(Json(members))
 }

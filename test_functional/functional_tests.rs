@@ -1,10 +1,10 @@
 //! Functional tests for zradar
-//! 
+//!
 //! These are black-box API tests that verify zradar behavior through
 //! public HTTP and gRPC endpoints only. No direct database access.
 //!
 //! Run with: cargo test --test functional_tests -- --ignored
-//! 
+//!
 //! Or use the test runner: ./scripts/test-rust-functional.sh
 
 // Import the library
@@ -44,3 +44,6 @@ mod test_telemetry_storage;
 
 #[path = "scenarios/test_span_types.rs"]
 mod test_span_types;
+
+#[path = "scenarios/test_analytics.rs"]
+mod test_analytics;

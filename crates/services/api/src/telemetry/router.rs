@@ -1,10 +1,6 @@
 //! Telemetry/Query module router
 
-use axum::{
-    Router,
-    routing::get,
-    Extension,
-};
+use axum::{Extension, Router, routing::get};
 use std::sync::Arc;
 
 use super::{QueryService, handlers};
@@ -22,10 +18,19 @@ pub fn router(
         .route("/api/v1/traces/:trace_id", get(handlers::get_trace))
         .route("/api/v1/spans", get(handlers::query_spans))
         .route("/api/v1/analytics", get(handlers::get_analytics))
-        .route("/api/v1/analytics/top-endpoints", get(handlers::get_top_endpoints))
-        .route("/api/v1/analytics/errors", get(handlers::get_error_breakdown))
+        .route(
+            "/api/v1/analytics/metrics",
+            get(handlers::get_metrics_summary),
+        )
+        .route(
+            "/api/v1/analytics/top-endpoints",
+            get(handlers::get_top_endpoints),
+        )
+        .route(
+            "/api/v1/analytics/errors",
+            get(handlers::get_error_breakdown),
+        )
         .with_state(service)
         .layer(Extension(jwt_auth))
         .layer(Extension(user_storage))
 }
-

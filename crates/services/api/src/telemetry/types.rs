@@ -40,11 +40,8 @@ impl SpanQueryFilters {
     /// Parse and validate span_types
     pub fn parse_span_types(&self) -> Result<Option<Vec<String>>, String> {
         if let Some(ref types_str) = self.span_types {
-            let types: Vec<String> = types_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .collect();
-            
+            let types: Vec<String> = types_str.split(',').map(|s| s.trim().to_string()).collect();
+
             // Validate each type
             for t in &types {
                 if !zradar_models::Span::validate_span_type(t) {
@@ -66,7 +63,7 @@ impl SpanQueryFilters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_single_span_type() {
         let params = SpanQueryFilters {
@@ -83,7 +80,7 @@ mod tests {
         let result = params.parse_span_types().unwrap();
         assert_eq!(result, Some(vec!["GENERATION".to_string()]));
     }
-    
+
     #[test]
     fn test_parse_multiple_span_types() {
         let params = SpanQueryFilters {
@@ -98,13 +95,16 @@ mod tests {
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
-        assert_eq!(result, Some(vec![
-            "GENERATION".to_string(),
-            "TOOL".to_string(),
-            "AGENT".to_string()
-        ]));
+        assert_eq!(
+            result,
+            Some(vec![
+                "GENERATION".to_string(),
+                "TOOL".to_string(),
+                "AGENT".to_string()
+            ])
+        );
     }
-    
+
     #[test]
     fn test_parse_invalid_span_type() {
         let params = SpanQueryFilters {
@@ -120,7 +120,7 @@ mod tests {
         };
         assert!(params.parse_span_types().is_err());
     }
-    
+
     #[test]
     fn test_parse_span_types_with_whitespace() {
         let params = SpanQueryFilters {
@@ -135,10 +135,10 @@ mod tests {
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
-        assert_eq!(result, Some(vec![
-            "GENERATION".to_string(),
-            "TOOL".to_string()
-        ]));
+        assert_eq!(
+            result,
+            Some(vec!["GENERATION".to_string(), "TOOL".to_string()])
+        );
     }
 }
 
@@ -146,9 +146,9 @@ mod tests {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AnalyticsQuery {
     pub project_id: String,
-    pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
-    pub metric: String,
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+    pub metric: Option<String>,
     pub group_by: Option<Vec<String>>,
     pub filters: Option<HashMap<String, String>>,
 }
@@ -191,7 +191,7 @@ pub struct SpanDetail {
     pub parent_span_id: Option<String>,
     pub service_name: String,
     pub operation_name: String,
-    pub span_type: String,  // SPAN, EVENT, GENERATION, AGENT, TOOL, etc.
+    pub span_type: String, // SPAN, EVENT, GENERATION, AGENT, TOOL, etc.
     pub start_time: DateTime<Utc>,
     pub duration_ms: i64,
     pub status: String,
@@ -199,11 +199,21 @@ pub struct SpanDetail {
 }
 
 /// Analytics result
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema, Default)]
 pub struct AnalyticsResult {
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: String,
     pub value: f64,
     pub groups: Option<HashMap<String, String>>,
+}
+
+/// Metrics summary
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetricsSummary {
+    pub total_traces: i64,
+    pub error_rate: f64,
+    pub p50_latency: f64,
+    pub p90_latency: f64,
+    pub p99_latency: f64,
 }
 
 /// Top endpoint
@@ -246,4 +256,3 @@ pub struct ErrorBreakdown {
 // Note: We no longer define a TelemetryReader trait at the API level.
 // The service layer (QueryService) handles conversion between API DTOs and storage calls.
 // Storage implementations use zradar_traits::TelemetryReader.
-

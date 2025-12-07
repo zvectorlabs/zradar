@@ -1,17 +1,16 @@
 //! PostgreSQL telemetry repository with JSONB storage
 
-use async_trait::async_trait;
-use std::sync::Arc;
-use sqlx;
-use zradar_traits::{
-    TelemetryReader, TelemetryWriter,
-    TraceQueryFilters, SpanQueryFilters,
-    TraceSummary, PaginatedResponse,
-};
-use zradar_models::{Span, Metric};
 use crate::client::PostgresClient;
-use uuid::Uuid;
 use anyhow::Context;
+use async_trait::async_trait;
+use sqlx;
+use std::sync::Arc;
+use uuid::Uuid;
+use zradar_models::{Metric, Span};
+use zradar_traits::{
+    PaginatedResponse, SpanQueryFilters, TelemetryReader, TelemetryWriter, TraceQueryFilters,
+    TraceSummary,
+};
 
 pub struct PostgresTelemetryRepository {
     client: Arc<PostgresClient>,
@@ -29,7 +28,7 @@ impl TelemetryWriter for PostgresTelemetryRepository {
         if spans.is_empty() {
             return Ok(());
         }
-        
+
         for span in spans {
             // Convert strings to JSONB: parse as JSON if valid, otherwise wrap as JSON string
             let llm_input_jsonb: Option<serde_json::Value> = if span.llm_input.is_empty() {
@@ -44,7 +43,7 @@ impl TelemetryWriter for PostgresTelemetryRepository {
                     }
                 }
             };
-            
+
             let llm_output_jsonb: Option<serde_json::Value> = if span.llm_output.is_empty() {
                 None
             } else {
@@ -53,19 +52,20 @@ impl TelemetryWriter for PostgresTelemetryRepository {
                     Err(_) => Some(serde_json::Value::String(span.llm_output.clone())),
                 }
             };
-            
-            let model_parameters_jsonb: Option<serde_json::Value> = if span.model_parameters.is_empty() {
-                None
-            } else {
-                serde_json::from_str(&span.model_parameters).ok()
-            };
-            
+
+            let model_parameters_jsonb: Option<serde_json::Value> =
+                if span.model_parameters.is_empty() {
+                    None
+                } else {
+                    serde_json::from_str(&span.model_parameters).ok()
+                };
+
             let attributes_jsonb: Option<serde_json::Value> = if span.attributes.is_empty() {
                 None
             } else {
                 serde_json::from_str(&span.attributes).ok()
             };
-            
+
             sqlx::query(
                 r#"
                 INSERT INTO spans (
@@ -140,16 +140,16 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .await
             .context("Failed to insert span")?;
         }
-        
+
         tracing::debug!("Inserted {} spans (with JSONB storage)", spans.len());
         Ok(())
     }
-    
+
     async fn insert_metrics(&self, metrics: &[Metric]) -> anyhow::Result<()> {
         if metrics.is_empty() {
             return Ok(());
         }
-        
+
         for metric in metrics {
             sqlx::query(
                 r#"
@@ -180,18 +180,24 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .execute(self.client.pool())
             .await?;
         }
-        
+
         Ok(())
     }
 }
 
 #[async_trait]
 impl TelemetryReader for PostgresTelemetryRepository {
-    async fn query_traces(&self, filters: TraceQueryFilters) -> anyhow::Result<PaginatedResponse<TraceSummary>> {
-        let project_id = filters.project_id.map(|p| p.to_string()).unwrap_or_default();
+    async fn query_traces(
+        &self,
+        filters: TraceQueryFilters,
+    ) -> anyhow::Result<PaginatedResponse<TraceSummary>> {
+        let project_id = filters
+            .project_id
+            .map(|p| p.to_string())
+            .unwrap_or_default();
         let limit = filters.pagination.limit.unwrap_or(100);
         let offset = filters.pagination.offset.unwrap_or(0);
-        
+
         // Build dynamic query based on filters
         let mut query = String::from(
             r#"
@@ -206,29 +212,28 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 MAX(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END)::SMALLINT as has_error
             FROM spans
             WHERE project_id = $1 AND is_deleted = 0
-            "#
+            "#,
         );
-        
+
         let mut param_count = 1;
-        
+
         if filters.service_name.is_some() {
             param_count += 1;
             query.push_str(&format!(" AND service_name = ${}", param_count));
         }
-        
+
         if let Some(_time_range) = &filters.time_range {
             param_count += 1;
             query.push_str(&format!(" AND timestamp >= ${}", param_count));
             param_count += 1;
             query.push_str(&format!(" AND timestamp <= ${}", param_count));
         }
-        
+
         query.push_str(" GROUP BY trace_id ORDER BY start_time DESC");
         query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
-        
-        let mut q = sqlx::query_as::<_, TraceSummary>(&query)
-            .bind(&project_id);
-        
+
+        let mut q = sqlx::query_as::<_, TraceSummary>(&query).bind(&project_id);
+
         if let Some(service) = &filters.service_name {
             q = q.bind(service);
         }
@@ -236,9 +241,9 @@ impl TelemetryReader for PostgresTelemetryRepository {
             q = q.bind(time_range.start);
             q = q.bind(time_range.end);
         }
-        
+
         let traces = q.fetch_all(self.client.pool()).await?;
-        
+
         Ok(PaginatedResponse {
             total: traces.len() as u64,
             items: traces,
@@ -246,8 +251,12 @@ impl TelemetryReader for PostgresTelemetryRepository {
             offset,
         })
     }
-    
-    async fn get_trace_detail(&self, project_id: Uuid, trace_id: &str) -> anyhow::Result<Option<Vec<Span>>> {
+
+    async fn get_trace_detail(
+        &self,
+        project_id: Uuid,
+        trace_id: &str,
+    ) -> anyhow::Result<Option<Vec<Span>>> {
         // Custom struct to handle JSONB fields
         #[derive(sqlx::FromRow)]
         struct SpanRow {
@@ -301,7 +310,7 @@ impl TelemetryReader for PostgresTelemetryRepository {
             updated_at: i64,
             is_deleted: i16,
         }
-        
+
         let rows = sqlx::query_as::<_, SpanRow>(
             r#"
             SELECT 
@@ -329,13 +338,14 @@ impl TelemetryReader for PostgresTelemetryRepository {
         .bind(trace_id)
         .fetch_all(self.client.pool())
         .await?;
-        
+
         if rows.is_empty() {
             return Ok(None);
         }
-        
+
         // Convert to Span (JSONB fields are already strings)
-        let spans: Vec<Span> = rows.into_iter()
+        let spans: Vec<Span> = rows
+            .into_iter()
             .map(|row| Span {
                 trace_id: row.trace_id,
                 span_id: row.span_id,
@@ -377,22 +387,30 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 agent_version: row.agent_version,
                 sdk_version: row.sdk_version,
                 level: row.level,
-                model_parameters: row.model_parameters_text.unwrap_or_else(|| "{}".to_string()),
+                model_parameters: row
+                    .model_parameters_text
+                    .unwrap_or_else(|| "{}".to_string()),
                 attributes: row.attributes_text.unwrap_or_else(|| "{}".to_string()),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
                 is_deleted: row.is_deleted,
             })
             .collect();
-        
+
         Ok(Some(spans))
     }
-    
-    async fn query_spans(&self, filters: SpanQueryFilters) -> anyhow::Result<PaginatedResponse<Span>> {
-        let project_id = filters.project_id.map(|p| p.to_string()).unwrap_or_default();
+
+    async fn query_spans(
+        &self,
+        filters: SpanQueryFilters,
+    ) -> anyhow::Result<PaginatedResponse<Span>> {
+        let project_id = filters
+            .project_id
+            .map(|p| p.to_string())
+            .unwrap_or_default();
         let limit = filters.pagination.limit.unwrap_or(100);
         let offset = filters.pagination.offset.unwrap_or(0);
-        
+
         // Build SELECT clause with explicit columns (JSONB cast to text)
         let select_clause = r#"
             trace_id, span_id, parent_span_id, timestamp, duration_ns,
@@ -411,24 +429,24 @@ impl TelemetryReader for PostgresTelemetryRepository {
             attributes::text as attributes,
             created_at, updated_at, is_deleted
         "#;
-        
+
         let mut query = format!(
             "SELECT {} FROM spans WHERE project_id = $1 AND is_deleted = 0",
             select_clause
         );
-        
+
         let mut param_count = 1;
-        
+
         if filters.trace_id.is_some() {
             param_count += 1;
             query.push_str(&format!(" AND trace_id = ${}", param_count));
         }
-        
+
         if filters.span_name.is_some() {
             param_count += 1;
             query.push_str(&format!(" AND span_name ILIKE ${}", param_count));
         }
-        
+
         if let Some(ref span_types) = filters.span_types {
             if !span_types.is_empty() {
                 if span_types.len() == 1 {
@@ -440,10 +458,10 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 }
             }
         }
-        
+
         query.push_str(" ORDER BY timestamp DESC");
         query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
-        
+
         // Use SpanRow struct to handle JSONB fields
         #[derive(sqlx::FromRow)]
         struct SpanRow {
@@ -497,10 +515,9 @@ impl TelemetryReader for PostgresTelemetryRepository {
             updated_at: i64,
             is_deleted: i16,
         }
-        
-        let mut q = sqlx::query_as::<_, SpanRow>(&query)
-            .bind(&project_id);
-        
+
+        let mut q = sqlx::query_as::<_, SpanRow>(&query).bind(&project_id);
+
         if let Some(trace_id) = &filters.trace_id {
             q = q.bind(trace_id);
         }
@@ -516,11 +533,12 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 }
             }
         }
-        
+
         let rows = q.fetch_all(self.client.pool()).await?;
-        
+
         // Convert to Span (JSONB fields are already strings)
-        let items: Vec<Span> = rows.into_iter()
+        let items: Vec<Span> = rows
+            .into_iter()
             .map(|row| Span {
                 trace_id: row.trace_id,
                 span_id: row.span_id,
@@ -562,7 +580,9 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 agent_version: row.agent_version,
                 sdk_version: row.sdk_version,
                 level: row.level,
-                model_parameters: row.model_parameters_text.unwrap_or_else(|| "{}".to_string()),
+                model_parameters: row
+                    .model_parameters_text
+                    .unwrap_or_else(|| "{}".to_string()),
                 attributes: row.attributes_text.unwrap_or_else(|| "{}".to_string()),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
@@ -570,7 +590,7 @@ impl TelemetryReader for PostgresTelemetryRepository {
             })
             .collect();
         let total = items.len() as u64;
-        
+
         Ok(PaginatedResponse {
             total,
             items,
@@ -578,7 +598,7 @@ impl TelemetryReader for PostgresTelemetryRepository {
             offset,
         })
     }
-    
+
     async fn get_span(&self, project_id: Uuid, span_id: &str) -> anyhow::Result<Option<Span>> {
         // Use SpanRow struct to handle JSONB fields
         #[derive(sqlx::FromRow)]
@@ -633,7 +653,7 @@ impl TelemetryReader for PostgresTelemetryRepository {
             updated_at: i64,
             is_deleted: i16,
         }
-        
+
         let row = sqlx::query_as::<_, SpanRow>(
             r#"
             SELECT 
@@ -660,7 +680,7 @@ impl TelemetryReader for PostgresTelemetryRepository {
         .bind(span_id)
         .fetch_optional(self.client.pool())
         .await?;
-        
+
         if let Some(row) = row {
             Ok(Some(Span {
                 trace_id: row.trace_id,
@@ -703,7 +723,9 @@ impl TelemetryReader for PostgresTelemetryRepository {
                 agent_version: row.agent_version,
                 sdk_version: row.sdk_version,
                 level: row.level,
-                model_parameters: row.model_parameters_text.unwrap_or_else(|| "{}".to_string()),
+                model_parameters: row
+                    .model_parameters_text
+                    .unwrap_or_else(|| "{}".to_string()),
                 attributes: row.attributes_text.unwrap_or_else(|| "{}".to_string()),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
@@ -711,6 +733,106 @@ impl TelemetryReader for PostgresTelemetryRepository {
             }))
         } else {
             Ok(None)
+        }
+    }
+}
+
+use zradar_traits::repositories::telemetry::{AnalyticsReader, MetricsSummary, TimeSeriesPoint};
+
+#[async_trait]
+impl AnalyticsReader for PostgresTelemetryRepository {
+    async fn get_daily_trace_counts(
+        &self,
+        project_id: Uuid,
+        start: i64,
+        end: i64,
+    ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
+        // Postgres implementation for daily trace counts
+        let query = r#"
+            SELECT 
+                to_char(to_timestamp(timestamp / 1000000000)::date, 'YYYY-MM-DD"T"00:00:00"Z"') as timestamp,
+                COUNT(*)::FLOAT8 as value
+            FROM spans
+            WHERE project_id = $1 
+              AND timestamp >= $2 
+              AND timestamp <= $3
+              AND parent_span_id = '' -- Only count root spans
+            GROUP BY to_timestamp(timestamp / 1000000000)::date
+            ORDER BY timestamp ASC
+        "#;
+
+        #[derive(sqlx::FromRow)]
+        struct PointRow {
+            timestamp: String,
+            value: f64,
+        }
+
+        let rows = sqlx::query_as::<_, PointRow>(query)
+            .bind(project_id.to_string())
+            .bind(start)
+            .bind(end)
+            .fetch_all(self.client.pool())
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| TimeSeriesPoint {
+                timestamp: r.timestamp,
+                value: r.value,
+            })
+            .collect())
+    }
+
+    async fn get_metrics_summary(
+        &self,
+        project_id: Uuid,
+        start: i64,
+        end: i64,
+    ) -> anyhow::Result<MetricsSummary> {
+        // Postgres implementation for metrics summary
+        // Note: Percentile calculations in Postgres are more complex/slow without extensions like t-digest,
+        // so we'll use simple approximations or just AVG for now for dev purposes if percentiles are hard.
+        // Actually, let's use percentile_cont.
+        let query = r#"
+            SELECT 
+                COUNT(*)::BIGINT as total_traces,
+                (COUNT(*) FILTER (WHERE status_code = 'ERROR'))::FLOAT8 / NULLIF(COUNT(*), 0) as error_rate,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ns)::FLOAT8 / 1000000 as p50_latency,
+                percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ns)::FLOAT8 / 1000000 as p90_latency,
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ns)::FLOAT8 / 1000000 as p99_latency
+            FROM spans
+            WHERE project_id = $1
+              AND timestamp >= $2
+              AND timestamp <= $3
+              AND parent_span_id = ''
+        "#;
+
+        #[derive(sqlx::FromRow)]
+        struct SummaryRow {
+            total_traces: i64,
+            error_rate: Option<f64>,
+            p50_latency: Option<f64>,
+            p90_latency: Option<f64>,
+            p99_latency: Option<f64>,
+        }
+
+        let row = sqlx::query_as::<_, SummaryRow>(query)
+            .bind(project_id.to_string())
+            .bind(start)
+            .bind(end)
+            .fetch_optional(self.client.pool())
+            .await?;
+
+        if let Some(r) = row {
+            Ok(MetricsSummary {
+                total_traces: r.total_traces,
+                error_rate: r.error_rate.unwrap_or(0.0),
+                p50_latency: r.p50_latency.unwrap_or(0.0),
+                p90_latency: r.p90_latency.unwrap_or(0.0),
+                p99_latency: r.p99_latency.unwrap_or(0.0),
+            })
+        } else {
+            Ok(MetricsSummary::default())
         }
     }
 }

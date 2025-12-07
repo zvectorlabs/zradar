@@ -149,6 +149,35 @@ pub async fn get_analytics(
     Ok(Json(results))
 }
 
+/// Get metrics summary
+#[utoipa::path(
+    get,
+    path = "/api/v1/analytics/metrics",
+    params(
+        ("project_id" = String, Query, description = "Project ID"),
+        ("start" = String, Query, description = "Start time (ISO 8601)"),
+        ("end" = String, Query, description = "End time (ISO 8601)"),
+    ),
+    responses(
+        (status = 200, description = "Metrics summary retrieved", body = MetricsSummary),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "Analytics"
+)]
+pub async fn get_metrics_summary(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Query(query): Query<AnalyticsQuery>,
+) -> Result<Json<MetricsSummary>> {
+    let summary = service
+        .get_metrics_summary(user.id, Uuid::nil(), query)
+        .await?;
+    Ok(Json(summary))
+}
+
 /// Get top endpoints
 #[utoipa::path(
     get,
