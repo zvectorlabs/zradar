@@ -39,22 +39,153 @@ impl ParquetTelemetryReader {
 impl AnalyticsReader for ParquetTelemetryReader {
     async fn get_daily_trace_counts(
         &self,
-        _project_id: Uuid,
-        _start: i64,
-        _end: i64,
+        project_id: Uuid,
+        start: i64,
+        end: i64,
     ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
-        // TODO: implement Parquet-backed daily trace counts
-        Ok(vec![])
+        let file_filter = FileListFilter {
+            project_id: Some(project_id),
+            signal_type: Some("traces".to_string()),
+            time_range_start: Some(start / 1_000),
+            time_range_end: Some(end / 1_000),
+            deleted: Some(false),
+            ..Default::default()
+        };
+
+        // Bucket by day (86_400_000_000_000 ns per day), count distinct trace_ids.
+        let day_ns: i64 = 86_400_000_000_000;
+        let sql = format!(
+            r#"SELECT
+                (MIN(timestamp) / {day_ns}) * {day_ns} AS day_bucket,
+                COUNT(DISTINCT trace_id) AS cnt
+            FROM spans
+            WHERE project_id = '{project_id}'
+              AND timestamp >= {start}
+              AND timestamp <= {end}
+            GROUP BY (timestamp / {day_ns})
+            ORDER BY day_bucket"#
+        );
+
+        let batches = self
+            .reader
+            .query_parquet(file_filter, &sql)
+            .await
+            .context("Failed to query daily trace counts")?;
+
+        let mut points = Vec::new();
+        for batch in &batches {
+            let n = batch.num_rows();
+            if n == 0 {
+                continue;
+            }
+            let bucket_col = batch
+                .column_by_name("day_bucket")
+                .ok_or_else(|| anyhow!("missing column: day_bucket"))?
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(|| anyhow!("day_bucket is not Int64Array"))?;
+            let cnt_col = extract_count_col(batch)?;
+
+            for i in 0..n {
+                // Convert nanoseconds → RFC3339 date string
+                let ts_secs = bucket_col.value(i) / 1_000_000_000;
+                let dt = chrono::DateTime::from_timestamp(ts_secs, 0)
+                    .unwrap_or_default()
+                    .to_rfc3339();
+                points.push(TimeSeriesPoint {
+                    timestamp: dt,
+                    value: cnt_col.value(i) as f64,
+                });
+            }
+        }
+
+        Ok(points)
     }
 
     async fn get_metrics_summary(
         &self,
-        _project_id: Uuid,
-        _start: i64,
-        _end: i64,
+        project_id: Uuid,
+        start: i64,
+        end: i64,
     ) -> anyhow::Result<MetricsSummary> {
-        // TODO: implement Parquet-backed metrics summary
-        Ok(MetricsSummary::default())
+        let file_filter = FileListFilter {
+            project_id: Some(project_id),
+            signal_type: Some("traces".to_string()),
+            time_range_start: Some(start / 1_000),
+            time_range_end: Some(end / 1_000),
+            deleted: Some(false),
+            ..Default::default()
+        };
+
+        let sql = format!(
+            r#"SELECT
+                COUNT(DISTINCT trace_id)                                              AS total_traces,
+                SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END)               AS error_count,
+                approx_percentile_cont(CAST(duration_ns AS DOUBLE), 0.50) / 1000000.0 AS p50_ms,
+                approx_percentile_cont(CAST(duration_ns AS DOUBLE), 0.90) / 1000000.0 AS p90_ms,
+                approx_percentile_cont(CAST(duration_ns AS DOUBLE), 0.99) / 1000000.0 AS p99_ms
+            FROM spans
+            WHERE project_id = '{project_id}'
+              AND parent_span_id = ''
+              AND timestamp >= {start}
+              AND timestamp <= {end}"#
+        );
+
+        let batches = self
+            .reader
+            .query_parquet(file_filter, &sql)
+            .await
+            .context("Failed to query metrics summary")?;
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        if total_rows == 0 {
+            return Ok(MetricsSummary::default());
+        }
+
+        let batch = &batches[0];
+        let total_traces = batch
+            .column_by_name("total_traces")
+            .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+            .map(|a| a.value(0))
+            .unwrap_or(0);
+
+        let error_count = batch
+            .column_by_name("error_count")
+            .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+            .map(|a| a.value(0))
+            .unwrap_or(0);
+
+        let p50 = batch
+            .column_by_name("p50_ms")
+            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+            .map(|a| a.value(0))
+            .unwrap_or(0.0);
+
+        let p90 = batch
+            .column_by_name("p90_ms")
+            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+            .map(|a| a.value(0))
+            .unwrap_or(0.0);
+
+        let p99 = batch
+            .column_by_name("p99_ms")
+            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+            .map(|a| a.value(0))
+            .unwrap_or(0.0);
+
+        let error_rate = if total_traces > 0 {
+            error_count as f64 / total_traces as f64
+        } else {
+            0.0
+        };
+
+        Ok(MetricsSummary {
+            total_traces,
+            error_rate,
+            p50_latency: p50,
+            p90_latency: p90,
+            p99_latency: p99,
+        })
     }
 }
 
@@ -637,6 +768,16 @@ fn extract_count(batches: &[RecordBatch]) -> Option<u64> {
         }
     }
     Some(0)
+}
+
+/// Extract a `cnt` Int64Array column from a single RecordBatch.
+fn extract_count_col(batch: &RecordBatch) -> anyhow::Result<&Int64Array> {
+    batch
+        .column_by_name("cnt")
+        .ok_or_else(|| anyhow!("missing column: cnt"))?
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .ok_or_else(|| anyhow!("cnt is not Int64Array"))
 }
 
 /// Convert `RecordBatch`es returned by the aggregation query into `TraceSummary`.
