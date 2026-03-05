@@ -26,14 +26,15 @@ async fn test_analytics_endpoints() -> Result<()> {
     // Login as admin
     let api_client = ctx.login_as_admin().await?;
 
-    // 1. Create organization and project
+    // 1. Create organization and project (unique names via TestFixture)
+    let fixture = TestFixture::new();
     let org = api_client
-        .create_organization("analytics-org", "Analytics Org")
+        .create_organization(&fixture.org_name, &fixture.org_display_name)
         .await?;
     let org_id = crate::helpers::test_helpers::parse_uuid_from_json(&org, "id")?;
 
     let project = api_client
-        .create_project(&org_id, "analytics-project", "Analytics Project")
+        .create_project(&org_id, &fixture.project_name, &fixture.project_display_name)
         .await?;
     let project_id = crate::helpers::test_helpers::parse_uuid_from_json(&project, "id")?;
 
