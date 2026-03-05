@@ -26,8 +26,9 @@ pub use job_queue::{Job, JobQueue, JobStatus, JobType, QueueStats, generate_shar
 
 // Re-export repository traits
 pub use repositories::{
-    ApiKeyRepository, AuditLogger, OrganizationRepository, ProjectRepository, RoleRepository,
-    ScoreRepository, TelemetryReader, TelemetryWriter, UserRepository,
+    AnalyticsReader, ApiKeyRepository, AuditLogger, FileListRepository, OrganizationRepository,
+    ProjectRepository, RoleRepository, ScoreRepository, TelemetryReader, TelemetryWriter,
+    UserRepository,
 };
 
 // Re-export entity types
@@ -63,9 +64,15 @@ pub use repositories::{
     RiskAssessment,
     // Scores
     ScoreSummary,
+    // Telemetry
+    LogQueryFilters,
+    MetricPoint,
+    MetricQueryFilters,
+    MetricSeriesFilters,
+    MetricsSummary,
     SpanQueryFilters,
     TimeRange,
-    // Telemetry
+    TimeSeriesPoint,
     TraceQueryFilters,
     TraceSummary,
     UpdateCustomRoleRequest,

@@ -1,6 +1,7 @@
 //! Organization API tests
 
-use functional_tests::*;
+#[allow(unused_imports)]
+use crate::*;
 
 #[tokio::test]
 #[ignore]

@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use sqlx;
 use std::sync::Arc;
 use uuid::Uuid;
-use zradar_models::{Metric, Span};
+use zradar_models::{LogRecord, Metric, Span};
 use zradar_traits::{
-    PaginatedResponse, SpanQueryFilters, TelemetryReader, TelemetryWriter, TraceQueryFilters,
-    TraceSummary,
+    LogQueryFilters, MetricPoint, MetricQueryFilters, MetricSeriesFilters, PaginatedResponse,
+    SpanQueryFilters, TelemetryReader, TelemetryWriter, TraceQueryFilters, TraceSummary,
 };
 
 pub struct PostgresTelemetryRepository {
@@ -181,6 +181,10 @@ impl TelemetryWriter for PostgresTelemetryRepository {
             .await?;
         }
 
+        Ok(())
+    }
+
+    async fn insert_logs(&self, _logs: &[LogRecord]) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -447,17 +451,15 @@ impl TelemetryReader for PostgresTelemetryRepository {
             query.push_str(&format!(" AND span_name ILIKE ${}", param_count));
         }
 
-        if let Some(ref span_types) = filters.span_types {
-            match span_types.len() {
-                0 => {}
-                1 => {
-                    param_count += 1;
-                    query.push_str(&format!(" AND span_type = ${}", param_count));
-                }
-                _ => {
-                    param_count += 1;
-                    query.push_str(&format!(" AND span_type = ANY(${})", param_count));
-                }
+        if let Some(ref span_types) = filters.span_types
+            && !span_types.is_empty()
+        {
+            if span_types.len() == 1 {
+                param_count += 1;
+                query.push_str(&format!(" AND span_type = ${}", param_count));
+            } else {
+                param_count += 1;
+                query.push_str(&format!(" AND span_type = ANY(${})", param_count));
             }
         }
 
@@ -526,11 +528,13 @@ impl TelemetryReader for PostgresTelemetryRepository {
         if let Some(name) = &filters.span_name {
             q = q.bind(format!("%{}%", name));
         }
-        if let Some(ref span_types) = filters.span_types {
-            match span_types.len() {
-                0 => {}
-                1 => q = q.bind(&span_types[0]),
-                _ => q = q.bind(span_types),
+        if let Some(ref span_types) = filters.span_types
+            && !span_types.is_empty()
+        {
+            if span_types.len() == 1 {
+                q = q.bind(&span_types[0]);
+            } else {
+                q = q.bind(span_types);
             }
         }
 
@@ -734,6 +738,45 @@ impl TelemetryReader for PostgresTelemetryRepository {
         } else {
             Ok(None)
         }
+    }
+
+    async fn query_logs(
+        &self,
+        _filters: LogQueryFilters,
+    ) -> anyhow::Result<PaginatedResponse<LogRecord>> {
+        Ok(PaginatedResponse {
+            items: vec![],
+            total: 0,
+            limit: 0,
+            offset: 0,
+        })
+    }
+
+    async fn get_log(
+        &self,
+        _project_id: Uuid,
+        _log_id: &str,
+    ) -> anyhow::Result<Option<LogRecord>> {
+        Ok(None)
+    }
+
+    async fn query_metrics(
+        &self,
+        _filters: MetricQueryFilters,
+    ) -> anyhow::Result<PaginatedResponse<Metric>> {
+        Ok(PaginatedResponse {
+            items: vec![],
+            total: 0,
+            limit: 0,
+            offset: 0,
+        })
+    }
+
+    async fn query_metric_series(
+        &self,
+        _filters: MetricSeriesFilters,
+    ) -> anyhow::Result<Vec<MetricPoint>> {
+        Ok(vec![])
     }
 }
 

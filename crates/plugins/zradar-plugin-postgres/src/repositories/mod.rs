@@ -4,6 +4,7 @@
 
 pub mod api_keys;
 pub mod audit;
+pub mod file_list;
 pub mod job_queue;
 pub mod organizations;
 pub mod projects;
@@ -14,6 +15,7 @@ pub mod users;
 
 pub use api_keys::PostgresApiKeyRepository;
 pub use audit::PostgresAuditLogger;
+pub use file_list::PostgresFileListRepository;
 pub use job_queue::PostgresJobQueue;
 pub use organizations::PostgresOrganizationRepository;
 pub use projects::PostgresProjectRepository;

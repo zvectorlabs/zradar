@@ -1,6 +1,8 @@
 //! Health endpoint tests
 
-use functional_tests::*;
+#[allow(unused_imports)]
+use crate::*;
+
 #[tokio::test]
 #[ignore]
 async fn test_health_endpoint_returns_ok() -> Result<()> {

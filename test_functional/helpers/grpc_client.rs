@@ -1,9 +1,19 @@
 //! gRPC client for testing OTLP endpoints
 
 use anyhow::{Context, Result};
-use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::collector::logs::v1::logs_service_client::LogsServiceClient;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_client::MetricsServiceClient;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_client::TraceServiceClient;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue};
+use opentelemetry_proto::tonic::logs::v1::{LogRecord as OtlpLogRecord, ResourceLogs, ScopeLogs};
+use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+use opentelemetry_proto::tonic::metrics::v1::number_data_point;
+use opentelemetry_proto::tonic::metrics::v1::{
+    Gauge, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, Status};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -171,6 +181,264 @@ impl OtlpClient {
 
         ExportTraceServiceRequest {
             resource_spans: vec![resource_spans],
+        }
+    }
+
+    // ========================================================================
+    // Metrics Export
+    // ========================================================================
+
+    /// Send metrics via OTLP/gRPC
+    pub async fn export_metrics(&self, request: ExportMetricsServiceRequest) -> Result<()> {
+        let channel = Channel::from_shared(self.grpc_url.clone())
+            .context("Invalid gRPC URL")?
+            .connect()
+            .await
+            .context("Failed to connect to gRPC server")?;
+
+        let api_key_token = self
+            .api_key
+            .as_ref()
+            .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
+
+        let mut client = MetricsServiceClient::with_interceptor(
+            channel,
+            move |mut req: tonic::Request<()>| {
+                if let Some(token) = &api_key_token {
+                    req.metadata_mut().insert("authorization", token.clone());
+                }
+                Ok(req)
+            },
+        );
+
+        client
+            .export(request)
+            .await
+            .context("Failed to export metrics")?;
+
+        Ok(())
+    }
+
+    /// Build a gauge metric request
+    pub fn build_gauge_metric(
+        &self,
+        service_name: &str,
+        metric_name: &str,
+        value: f64,
+    ) -> ExportMetricsServiceRequest {
+        self.build_number_metric_request(service_name, metric_name, value, false)
+    }
+
+    /// Build a counter (cumulative sum) metric request
+    pub fn build_counter_metric(
+        &self,
+        service_name: &str,
+        metric_name: &str,
+        value: f64,
+    ) -> ExportMetricsServiceRequest {
+        self.build_number_metric_request(service_name, metric_name, value, true)
+    }
+
+    fn build_number_metric_request(
+        &self,
+        service_name: &str,
+        metric_name: &str,
+        value: f64,
+        is_counter: bool,
+    ) -> ExportMetricsServiceRequest {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let resource = Resource {
+            attributes: vec![KeyValue {
+                key: "service.name".to_string(),
+                value: Some(AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            service_name.to_string(),
+                        ),
+                    ),
+                }),
+            }],
+            dropped_attributes_count: 0,
+        };
+
+        let data_point = NumberDataPoint {
+            attributes: vec![],
+            start_time_unix_nano: now - 60_000_000_000,
+            time_unix_nano: now,
+            value: Some(number_data_point::Value::AsDouble(value)),
+            exemplars: vec![],
+            flags: 0,
+        };
+
+        let data = if is_counter {
+            Data::Sum(Sum {
+                data_points: vec![data_point],
+                aggregation_temporality: 2, // CUMULATIVE
+                is_monotonic: true,
+            })
+        } else {
+            Data::Gauge(Gauge {
+                data_points: vec![data_point],
+            })
+        };
+
+        let metric = Metric {
+            name: metric_name.to_string(),
+            description: String::new(),
+            unit: String::new(),
+            data: Some(data),
+        };
+
+        let scope_metrics = ScopeMetrics {
+            scope: Some(InstrumentationScope {
+                name: "test-instrumentation".to_string(),
+                version: "1.0.0".to_string(),
+                attributes: vec![],
+                dropped_attributes_count: 0,
+            }),
+            metrics: vec![metric],
+            schema_url: String::new(),
+        };
+
+        let resource_metrics = ResourceMetrics {
+            resource: Some(resource),
+            scope_metrics: vec![scope_metrics],
+            schema_url: String::new(),
+        };
+
+        ExportMetricsServiceRequest {
+            resource_metrics: vec![resource_metrics],
+        }
+    }
+
+    // ========================================================================
+    // Logs Export
+    // ========================================================================
+
+    /// Send logs via OTLP/gRPC
+    pub async fn export_logs(&self, request: ExportLogsServiceRequest) -> Result<()> {
+        let channel = Channel::from_shared(self.grpc_url.clone())
+            .context("Invalid gRPC URL")?
+            .connect()
+            .await
+            .context("Failed to connect to gRPC server")?;
+
+        let api_key_token = self
+            .api_key
+            .as_ref()
+            .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
+
+        let mut client =
+            LogsServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+                if let Some(token) = &api_key_token {
+                    req.metadata_mut().insert("authorization", token.clone());
+                }
+                Ok(req)
+            });
+
+        client
+            .export(request)
+            .await
+            .context("Failed to export logs")?;
+
+        Ok(())
+    }
+
+    /// Build a simple log export request
+    pub fn build_log_request(
+        &self,
+        service_name: &str,
+        severity_number: i32,
+        message: &str,
+    ) -> ExportLogsServiceRequest {
+        self.build_log_request_with_attrs(service_name, severity_number, message, &[], &[], &[])
+    }
+
+    /// Build a log export request with trace context and attributes
+    pub fn build_log_request_with_attrs(
+        &self,
+        service_name: &str,
+        severity_number: i32,
+        message: &str,
+        trace_id: &[u8],
+        span_id: &[u8],
+        attributes: &[(&str, &str)],
+    ) -> ExportLogsServiceRequest {
+        use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyVal;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let severity_text = match severity_number {
+            1..=4 => "TRACE",
+            5..=8 => "DEBUG",
+            9..=12 => "INFO",
+            13..=16 => "WARN",
+            17..=20 => "ERROR",
+            21..=24 => "FATAL",
+            _ => "INFO",
+        };
+
+        let log_attrs: Vec<KeyValue> = attributes
+            .iter()
+            .map(|(k, v)| KeyValue {
+                key: k.to_string(),
+                value: Some(AnyValue {
+                    value: Some(AnyVal::StringValue(v.to_string())),
+                }),
+            })
+            .collect();
+
+        let log_record = OtlpLogRecord {
+            time_unix_nano: now,
+            observed_time_unix_nano: now,
+            severity_number,
+            severity_text: severity_text.to_string(),
+            body: Some(AnyValue {
+                value: Some(AnyVal::StringValue(message.to_string())),
+            }),
+            attributes: log_attrs,
+            dropped_attributes_count: 0,
+            flags: 0,
+            trace_id: trace_id.to_vec(),
+            span_id: span_id.to_vec(),
+        };
+
+        let resource = Resource {
+            attributes: vec![KeyValue {
+                key: "service.name".to_string(),
+                value: Some(AnyValue {
+                    value: Some(AnyVal::StringValue(service_name.to_string())),
+                }),
+            }],
+            dropped_attributes_count: 0,
+        };
+
+        let scope_logs = ScopeLogs {
+            scope: Some(InstrumentationScope {
+                name: "test-instrumentation".to_string(),
+                version: "1.0.0".to_string(),
+                attributes: vec![],
+                dropped_attributes_count: 0,
+            }),
+            log_records: vec![log_record],
+            schema_url: String::new(),
+        };
+
+        let resource_logs = ResourceLogs {
+            resource: Some(resource),
+            scope_logs: vec![scope_logs],
+            schema_url: String::new(),
+        };
+
+        ExportLogsServiceRequest {
+            resource_logs: vec![resource_logs],
         }
     }
 

@@ -5,17 +5,15 @@
 //! This crate provides:
 //! - OTLP Trace Service (gRPC)
 //! - OTLP Metrics Service (gRPC)
-//! - Converter from OTLP protobuf to internal models
-//!
-//! ## Contract
-//!
-//! Uses `opentelemetry-proto` crate as the ONLY source of truth for OTLP types.
-//! This ensures compatibility with all OpenTelemetry clients.
+//! - OTLP Logs Service (gRPC)
+//! - Converters from OTLP protobuf to internal models
 
 mod auth;
 mod converter;
 mod direct_handler;
+mod logs_converter;
 mod logs_service;
+mod metrics_converter;
 mod metrics_service;
 mod span_handler;
 mod span_type_mapper;
@@ -23,8 +21,13 @@ mod trace_service;
 
 pub use auth::{ApiKeyAuth, DbApiKeyAuth};
 pub use converter::OtlpConverter;
-pub use direct_handler::DirectSpanHandler;
-pub use logs_service::{OtlpLogsService, ScoreHandler};
+pub use direct_handler::{
+    DirectLogHandler, DirectLogsHandler, DirectMetricsHandler, DirectSpanHandler, NullLogHandler,
+    NullScoreHandler,
+};
+pub use logs_converter::OtlpLogsConverter;
+pub use logs_service::{LogHandler, OtlpLogsService, ScoreHandler};
+pub use metrics_converter::OtlpMetricsConverter;
 pub use metrics_service::{MetricHandler, OtlpMetricsService};
 pub use span_handler::JobQueueSpanHandler;
 pub use span_type_mapper::SpanTypeMapper;

@@ -30,13 +30,13 @@ pub use plugin::PostgresPlugin;
 
 // Re-export individual repositories for direct use
 pub use repositories::{
-    PostgresApiKeyRepository, PostgresAuditLogger, PostgresJobQueue,
+    PostgresApiKeyRepository, PostgresAuditLogger, PostgresFileListRepository, PostgresJobQueue,
     PostgresOrganizationRepository, PostgresProjectRepository, PostgresRoleRepository,
     PostgresScoreRepository, PostgresTelemetryRepository, PostgresUserRepository,
 };
 
-// Register this plugin with the registry (for dynamic loading)
-// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
+// /// Register this plugin with the registry (for dynamic loading)
+// /// Note: Disabled to avoid symbol conflicts when statically linking multiple plugins
 // #[unsafe(no_mangle)]
 // pub extern "C" fn register_plugin(registry: &PluginRegistry) -> bool {
 //     let plugin = Arc::new(PostgresPlugin::new());

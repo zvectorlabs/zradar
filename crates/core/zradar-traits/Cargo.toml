@@ -4,9 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 
 [features]
-default = []
+default = ["sqlx"]
 # Enable utoipa derives for OpenAPI documentation
 utoipa = ["dep:utoipa"]
+# Enable sqlx derives (FromRow) — sqlx is always a dep so this is always active by default
+sqlx = []
 
 [dependencies]
 async-trait = { workspace = true }

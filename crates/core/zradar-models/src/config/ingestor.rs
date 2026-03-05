@@ -29,6 +29,13 @@ pub struct StorageConfig {
 
     #[serde(default)]
     pub s3: Option<S3StorageConfig>,
+
+    /// Root directory for Parquet files written by the direct-write path.
+    ///
+    /// Files are written under `{parquet_data_dir}/files/{tenant}/...`
+    /// Default: `"./data/parquet-files"`
+    #[serde(default = "default_parquet_data_dir")]
+    pub parquet_data_dir: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,4 +77,7 @@ fn default_redis_url() -> String {
 }
 fn default_num_workers() -> usize {
     8
+}
+fn default_parquet_data_dir() -> String {
+    "./data/parquet-files".to_string()
 }

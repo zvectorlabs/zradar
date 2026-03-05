@@ -9,6 +9,7 @@ use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 // OTLP
+use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsServiceServer;
 use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
 use tonic::codec::CompressionEncoding;
@@ -53,12 +54,15 @@ use zradar_migrations::MigrationRegistry;
 mod health;
 
 use api_optel::{
-    ApiKeyAuth as GrpcApiKeyAuth, DirectSpanHandler, JobQueueSpanHandler, OtlpMetricsService,
-    OtlpTraceService,
+    ApiKeyAuth as GrpcApiKeyAuth, DirectLogHandler, DirectSpanHandler, JobQueueSpanHandler,
+    NullLogHandler, NullScoreHandler, OtlpLogsService, OtlpMetricsService, OtlpTraceService,
 };
 use zradar_models::Config;
+use zradar_parquet::{
+    ParquetFileReader, ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter,
+};
 use zradar_plugin_local::LocalBlockStorage;
-use zradar_plugin_postgres::PostgresJobQueue;
+use zradar_plugin_postgres::{PostgresFileListRepository, PostgresJobQueue};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -139,9 +143,7 @@ async fn main() -> Result<()> {
 
     // Register PostgreSQL migration provider
     let postgres_provider = PostgresMigrationProvider::new(pg_pool_arc.clone());
-    migration_registry
-        .register_plugin(Box::new(postgres_provider))
-        .await;
+    migration_registry.register_plugin(Arc::new(postgres_provider));
 
     // Run migrations if enabled (or on first run)
     let auto_migrate = config
@@ -273,12 +275,36 @@ async fn main() -> Result<()> {
         audit: audit_logger.clone(),
     });
 
-    // Telemetry query service (using Postgres)
-    let telemetry_repo = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(
-        pg_client.clone(),
+    // ---------------------------------------------------------------------------
+    // Parquet storage layer (shared by write and read paths)
+    // ---------------------------------------------------------------------------
+
+    let parquet_data_dir = std::path::PathBuf::from(
+        config
+            .ingestor
+            .as_ref()
+            .map(|i| i.storage.parquet_data_dir.clone())
+            .unwrap_or_else(|| "./data/parquet-files".to_string()),
+    );
+
+    let file_list_repo = Arc::new(PostgresFileListRepository::new(pg_client.clone()))
+        as Arc<dyn zradar_traits::FileListRepository>;
+
+    let parquet_file_writer = Arc::new(ParquetFileWriter::new(
+        parquet_data_dir.clone(),
+        file_list_repo.clone(),
     ));
+
+    let parquet_file_reader = Arc::new(ParquetFileReader::new(
+        parquet_data_dir.clone(),
+        file_list_repo.clone(),
+    ));
+
+    // Telemetry query service — reads from Parquet (Phase 02)
+    let parquet_telemetry_reader =
+        Arc::new(ParquetTelemetryReader::new(parquet_file_reader.clone()));
     let query_service = Arc::new(QueryService::new(
-        telemetry_repo as Arc<dyn zradar_traits::TelemetryReader>,
+        parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
     ));
 
     // Scores service (using Postgres)
@@ -304,13 +330,22 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Ingestor configuration required"))?;
 
     let grpc_api_key_auth = Arc::new(GrpcApiKeyAuth::new(db_api_key_auth.clone()));
+    let otlp_auth = config
+        .auth
+        .otlp_require_api_key
+        .unwrap_or(true)
+        .then(|| grpc_api_key_auth.clone());
+    if otlp_auth.is_none() {
+        info!("⚠️  OTLP gRPC (protobuf) is open: no API key required");
+    }
 
     let otlp_port = config.otlp_port;
     let admin_port = config
         .admin_api
         .as_ref()
         .and_then(|a| a.admin_api_port)
-        .unwrap_or(8080);
+        .unwrap_or(config.query_api_port);
+    let admin_port = if admin_port != 0 { admin_port } else { 8080 };
 
     // Check if we should skip job queue and write directly
     if ingestor_config.skip_job {
@@ -319,19 +354,19 @@ async fn main() -> Result<()> {
         info!("   This mode skips job queue for immediate consistency");
         info!("   Recommended only for development/testing or low-volume deployments");
 
-        // Create telemetry writer for direct persistence
-        let telemetry_writer = Arc::new(zradar_plugin_postgres::PostgresTelemetryRepository::new(
-            pg_client.clone(),
-        ));
-        let span_handler = Arc::new(DirectSpanHandler::new(
-            telemetry_writer as Arc<dyn zradar_traits::TelemetryWriter>,
-        ));
+        // Create Parquet telemetry writer for direct persistence
+        let parquet_writer: Arc<dyn zradar_traits::TelemetryWriter> =
+            Arc::new(ParquetTelemetryWriter::new(parquet_file_writer.clone()));
+        let log_handler = Arc::new(DirectLogHandler::new(Arc::clone(&parquet_writer)));
+        let span_handler = Arc::new(DirectSpanHandler::new(parquet_writer));
 
-        let trace_service =
-            OtlpTraceService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
-
-        let metrics_service =
-            OtlpMetricsService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
+        let trace_service = OtlpTraceService::new(span_handler.clone(), otlp_auth.clone());
+        let metrics_service = OtlpMetricsService::new(span_handler.clone(), otlp_auth.clone());
+        let logs_service = OtlpLogsService::new(
+            Arc::new(NullScoreHandler),
+            log_handler,
+            otlp_auth.clone(),
+        );
 
         info!("✅ OTLP services initialized (direct write mode)");
 
@@ -348,6 +383,11 @@ async fn main() -> Result<()> {
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
+                        .accept_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
+                )
+                .add_service(
+                    LogsServiceServer::new(logs_service)
                         .accept_compressed(CompressionEncoding::Gzip)
                         .send_compressed(CompressionEncoding::Gzip),
                 )
@@ -429,11 +469,13 @@ async fn main() -> Result<()> {
 
         let span_handler = Arc::new(JobQueueSpanHandler::new(job_queue.clone()));
 
-        let trace_service =
-            OtlpTraceService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
-
-        let metrics_service =
-            OtlpMetricsService::new(span_handler.clone(), Some(grpc_api_key_auth.clone()));
+        let trace_service = OtlpTraceService::new(span_handler.clone(), otlp_auth.clone());
+        let metrics_service = OtlpMetricsService::new(span_handler.clone(), otlp_auth.clone());
+        let logs_service = OtlpLogsService::new(
+            Arc::new(NullScoreHandler),
+            Arc::new(NullLogHandler),
+            otlp_auth.clone(),
+        );
 
         info!("✅ OTLP services initialized (job queue mode)");
 
@@ -450,6 +492,11 @@ async fn main() -> Result<()> {
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
+                        .accept_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
+                )
+                .add_service(
+                    LogsServiceServer::new(logs_service)
                         .accept_compressed(CompressionEncoding::Gzip)
                         .send_compressed(CompressionEncoding::Gzip),
                 )

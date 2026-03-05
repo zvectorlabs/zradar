@@ -1,6 +1,7 @@
 //! OTLP Metrics Service gRPC implementation
 
 use crate::auth::ApiKeyAuth;
+use crate::metrics_converter::OtlpMetricsConverter;
 use opentelemetry_proto::tonic::collector::metrics::v1::{
     ExportMetricsServiceRequest, ExportMetricsServiceResponse,
     metrics_service_server::MetricsService,
@@ -9,7 +10,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use zradar_models::RequestContext;
 
-/// Callback trait for handling metrics
+/// Callback trait for handling converted metrics.
 #[tonic::async_trait]
 pub trait MetricHandler: Send + Sync + 'static {
     async fn handle_metrics(
@@ -19,10 +20,9 @@ pub trait MetricHandler: Send + Sync + 'static {
     ) -> Result<(), Status>;
 }
 
-/// OTLP Metrics Service implementation
+/// OTLP Metrics Service implementation.
 #[derive(Clone)]
 pub struct OtlpMetricsService<H: MetricHandler> {
-    #[allow(dead_code)]
     handler: Arc<H>,
     auth: Option<Arc<ApiKeyAuth>>,
 }
@@ -47,9 +47,7 @@ impl<H: MetricHandler> MetricsService for OtlpMetricsService<H> {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        // Authenticate
         let context = self.authenticate(&request).await?;
-
         let req = request.into_inner();
 
         tracing::debug!(
@@ -59,16 +57,20 @@ impl<H: MetricHandler> MetricsService for OtlpMetricsService<H> {
             "Received metrics export request"
         );
 
-        // TODO: Implement metrics conversion
-        // For now, just acknowledge receipt
+        let metrics = OtlpMetricsConverter::convert(req, &context);
+        let metric_count = metrics.len();
+
+        if !metrics.is_empty() {
+            self.handler.handle_metrics(metrics, &context).await?;
+        }
 
         tracing::debug!(
             tenant_id = %context.tenant_id,
             project_id = %context.project_id,
-            "Successfully processed metrics (conversion not yet implemented)"
+            metrics = metric_count,
+            "Successfully processed metrics"
         );
 
-        // Return success response
         Ok(Response::new(ExportMetricsServiceResponse {
             partial_success: None,
         }))

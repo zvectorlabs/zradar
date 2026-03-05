@@ -26,6 +26,7 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
         auth_handlers::login,
         auth_handlers::refresh,
         auth_handlers::me,
+
         // Organization endpoints
         org_handlers::create_organization,
         org_handlers::list_organizations,
@@ -35,6 +36,7 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
         org_handlers::add_organization_member,
         org_handlers::list_organization_members,
         org_handlers::remove_organization_member,
+
         // Project endpoints
         proj_handlers::create_project,
         proj_handlers::list_projects,
@@ -44,12 +46,14 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
         proj_handlers::add_project_member,
         proj_handlers::list_project_members,
         proj_handlers::remove_project_member,
+
         // API Key endpoints
         apikey_handlers::create_api_key,
         apikey_handlers::list_api_keys,
         apikey_handlers::get_api_key,
         apikey_handlers::revoke_api_key,
         apikey_handlers::delete_api_key,
+
         // Role endpoints
         role_handlers::create_role,
         role_handlers::list_roles,
@@ -57,13 +61,22 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
         role_handlers::update_custom_role,
         role_handlers::delete_custom_role,
         role_handlers::list_permissions,
+
         // Query endpoints
         query_handlers::query_traces,
         query_handlers::get_trace,
         query_handlers::query_spans,
+        query_handlers::get_span,
         query_handlers::get_analytics,
         query_handlers::get_top_endpoints,
         query_handlers::get_error_breakdown,
+        // Log endpoints
+        query_handlers::query_logs,
+        query_handlers::get_log,
+        // Metric endpoints
+        query_handlers::query_metrics,
+        query_handlers::query_metric_series,
+
         // Scores endpoints
         score_handlers::create_score,
         score_handlers::get_trace_scores,
@@ -112,6 +125,14 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
             crate::telemetry::ErrorBreakdown,
             crate::telemetry::PaginatedResponse<crate::telemetry::TraceSummary>,
             crate::telemetry::PaginatedResponse<crate::telemetry::SpanDetail>,
+            crate::telemetry::LogQueryFilters,
+            crate::telemetry::LogDetail,
+            crate::telemetry::PaginatedResponse<crate::telemetry::LogDetail>,
+            crate::telemetry::MetricQueryFilters,
+            crate::telemetry::MetricSeriesFilters,
+            crate::telemetry::MetricDetail,
+            crate::telemetry::MetricSeriesPoint,
+            crate::telemetry::PaginatedResponse<crate::telemetry::MetricDetail>,
             crate::scores::CreateScoreRequest,
             crate::scores::ScoreResponse,
             crate::scores::ScoreSummaryResponse,
@@ -120,14 +141,16 @@ use crate::users::{AuthService, UserRepository, handlers as auth_handlers};
         )
     ),
     tags(
-        (name = "Auth", description = "Authentication and user management"),
-        (name = "Organizations", description = "Organization management"),
-        (name = "Projects", description = "Project management"),
-        (name = "ApiKeys", description = "API key management"),
-        (name = "Roles", description = "Custom role management"),
-        (name = "Query", description = "Query telemetry data (traces, spans)"),
-        (name = "Analytics", description = "Analytics and aggregations"),
-        (name = "Scores", description = "Evaluation scores management"),
+        (name = "auth", description = "Authentication and user management"),
+        (name = "organizations", description = "Organization management"),
+        (name = "projects", description = "Project management"),
+        (name = "api-keys", description = "API key management"),
+        (name = "roles", description = "Custom role management"),
+        (name = "query", description = "Query telemetry data (traces, spans)"),
+        (name = "analytics", description = "Analytics and aggregations"),
+        (name = "logs", description = "Log records query"),
+        (name = "metrics", description = "Metrics query and time-series"),
+        (name = "scores", description = "Evaluation scores management"),
     ),
     info(
         title = "ZRadar Admin API",

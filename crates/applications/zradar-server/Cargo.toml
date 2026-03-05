@@ -15,6 +15,7 @@ zradar-models = { path = "../../core/zradar-models" }
 zradar-traits = { path = "../../core/zradar-traits" }
 zradar-plugins = { path = "../../core/zradar-plugins" }
 zradar-migrations = { path = "../../core/zradar-migrations" }
+zradar-parquet = { path = "../../core/zradar-parquet" }
 
 # Services
 api-optel = { path = "../../services/api-optel" }

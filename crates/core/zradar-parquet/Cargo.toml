@@ -1,0 +1,28 @@
+[package]
+name = "zradar-parquet"
+version = "0.1.0"
+edition.workspace = true
+description = "Parquet storage layer for zradar — write and query telemetry via Arrow/DataFusion"
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+# Arrow ecosystem
+arrow = { workspace = true }
+parquet = { workspace = true }
+datafusion = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization / Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+# Internal workspace crates
+zradar-models = { workspace = true }
+zradar-traits = { workspace = true }

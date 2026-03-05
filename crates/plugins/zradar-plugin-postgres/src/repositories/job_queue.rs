@@ -234,6 +234,7 @@ impl JobQueue for PostgresJobQueue {
 
 // Internal row types for sqlx
 #[derive(sqlx::FromRow)]
+#[allow(dead_code)]
 struct JobRow {
     id: Uuid,
     _job_type: String,

@@ -6,6 +6,7 @@ members = [
     "crates/core/zradar-traits",
     "crates/core/zradar-migrations",
     "crates/core/zradar-plugins",
+    "crates/core/zradar-parquet",
     
     # Layer 2: Plugins (ALL implementations)
     "crates/plugins/zradar-plugin-postgres",
@@ -86,10 +87,17 @@ sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "chro
 jsonwebtoken = "9.2"
 bcrypt = "0.15"
 
+# Arrow / Parquet / DataFusion
+# DataFusion 44 uses arrow/parquet 53 internally; pin to the same major to avoid duplicate crates.
+arrow = "53"
+parquet = { version = "53", features = ["arrow", "async"] }
+datafusion = { version = "44", features = ["parquet"] }
+
 # Internal workspace crates (Core)
 zradar-models = { path = "crates/core/zradar-models" }
 zradar-traits = { path = "crates/core/zradar-traits" }
 zradar-plugins = { path = "crates/core/zradar-plugins" }
+zradar-parquet = { path = "crates/core/zradar-parquet" }
 
 # Internal workspace crates (Services)
 api = { path = "crates/services/api" }

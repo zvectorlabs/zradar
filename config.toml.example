@@ -53,6 +53,7 @@ jwt_expiry_hours = 24
 [auth]
 enabled = true
 cache_ttl_seconds = 300  # 5 minutes cache for API key lookups
+# otlp_require_api_key = false  # set to false to make OTLP gRPC (protobuf) open (no API key)
 
 # Note: API keys are now managed via PostgreSQL database
 # Use the Admin API to create and manage API keys

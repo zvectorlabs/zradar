@@ -1,5 +1,8 @@
 # zradar Server Configuration (Ingestion Tier - No Workers)
 # This server receives OTLP data and queues jobs for workers
+#
+# To run OTLP on port 8002: set otlp_port = 8002 below, or env OTLP_PORT=8002
+# To run Admin API on 8002: set admin_api_port = 8002 under [admin_api], or env QUERY_API_PORT=8002
 
 otlp_port = 4317
 query_api_port = 8080
@@ -25,6 +28,8 @@ admin_api_port = 8080
 enabled = true
 type = "api-key"
 cache_ttl_seconds = 300
+# Set to false to make OTLP gRPC (protobuf) open (no API key required). Default: true.
+# otlp_require_api_key = false
 
 [ingestor]
 queue_type = "postgres"  # or "hybrid" for Redis

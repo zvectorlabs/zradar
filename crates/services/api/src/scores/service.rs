@@ -108,9 +108,7 @@ impl ScoresService {
         };
 
         // Insert into storage (in test mode, this will automatically sync)
-        self.repository
-            .insert_scores(std::slice::from_ref(&score))
-            .await?;
+        self.repository.insert_scores(std::slice::from_ref(&score)).await?;
 
         // Audit log
         self.audit

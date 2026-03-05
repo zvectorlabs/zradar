@@ -1,6 +1,7 @@
 //! Compression tests
 
-use functional_tests::*;
+#[allow(unused_imports)]
+use crate::*;
 
 #[tokio::test]
 #[ignore]
@@ -111,7 +112,7 @@ async fn test_grpc_gzip_compression() -> Result<()> {
         resource_spans: vec![],
     });
 
-    let api_key_header = MetadataValue::try_from(&*key_value)?;
+    let api_key_header = MetadataValue::try_from(key_value)?;
     request.metadata_mut().insert("x-api-key", api_key_header);
 
     println!("📤 Sending compressed gRPC request...");

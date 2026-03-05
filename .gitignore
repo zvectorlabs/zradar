@@ -31,5 +31,6 @@ data/postgres/*
 !data/postgres/.gitkeep
 data/redis/*
 !data/redis/.gitkeep
+data/parquet-files/*
 
 .env

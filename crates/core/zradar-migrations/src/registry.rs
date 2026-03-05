@@ -3,8 +3,7 @@
 //! Tracks all plugin migrations in a single PostgreSQL table
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tracing::{error, info};
 
 use sqlx::PgPool;
@@ -15,7 +14,7 @@ use super::types::*;
 /// Central migration registry that tracks all plugin migrations in PostgreSQL
 pub struct MigrationRegistry {
     pool: Arc<PgPool>,
-    plugins: Arc<RwLock<HashMap<String, Box<dyn MigrationProvider>>>>,
+    plugins: Arc<RwLock<HashMap<String, Arc<dyn MigrationProvider>>>>,
 }
 
 impl MigrationRegistry {
@@ -23,7 +22,7 @@ impl MigrationRegistry {
     pub async fn new(pool: Arc<PgPool>) -> anyhow::Result<Self> {
         let registry = Self {
             pool,
-            plugins: Arc::new(RwLock::new(HashMap::new())),
+            plugins: Arc::new(RwLock::new(HashMap::<String, Arc<dyn MigrationProvider>>::new())),
         };
 
         // ALWAYS create tracking table first on startup (idempotent)
@@ -97,9 +96,9 @@ impl MigrationRegistry {
     }
 
     /// Register a plugin that provides migrations
-    pub async fn register_plugin(&self, provider: Box<dyn MigrationProvider>) {
+    pub fn register_plugin(&self, provider: Arc<dyn MigrationProvider>) {
         let plugin_name = provider.plugin_name().to_string();
-        let mut plugins = self.plugins.write().await;
+        let mut plugins = self.plugins.write().unwrap();
         plugins.insert(plugin_name.clone(), provider);
         info!(plugin = %plugin_name, "Registered migration provider");
     }
@@ -136,9 +135,6 @@ impl MigrationRegistry {
     pub async fn run_all_migrations(&self, auto_migrate: bool) -> anyhow::Result<MigrationSummary> {
         let is_first_run = self.is_first_run().await;
 
-        // On first run, always migrate regardless of config
-        let _should_migrate = auto_migrate || is_first_run;
-
         if is_first_run {
             info!("🆕 First run detected - will auto-migrate all plugins");
         } else if !auto_migrate {
@@ -146,12 +142,19 @@ impl MigrationRegistry {
             return Ok(MigrationSummary::default());
         }
 
-        let plugins = self.plugins.read().await;
+        // Clone out Arc refs so the lock is not held across await points.
+        let plugin_entries: Vec<(String, Arc<dyn MigrationProvider>)> = {
+            let plugins = self.plugins.read().unwrap();
+            plugins
+                .iter()
+                .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                .collect()
+        };
         let mut summary = MigrationSummary::default();
 
-        info!("🔄 Running migrations for {} plugins", plugins.len());
+        info!("🔄 Running migrations for {} plugins", plugin_entries.len());
 
-        for (name, provider) in plugins.iter() {
+        for (name, provider) in &plugin_entries {
             let start = std::time::Instant::now();
 
             match self.run_plugin_migrations(provider.as_ref()).await {
@@ -336,10 +339,17 @@ impl MigrationRegistry {
 
     /// Get migration status for all plugins
     pub async fn get_status(&self) -> anyhow::Result<HashMap<String, PluginMigrationStatus>> {
-        let plugins = self.plugins.read().await;
+        // Clone out Arc refs so the lock is not held across await points.
+        let plugin_entries: Vec<(String, Arc<dyn MigrationProvider>)> = {
+            let plugins = self.plugins.read().unwrap();
+            plugins
+                .iter()
+                .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                .collect()
+        };
         let mut statuses = HashMap::new();
 
-        for (name, provider) in plugins.iter() {
+        for (name, provider) in &plugin_entries {
             let applied = self.get_applied_migrations(name).await?;
             let all = provider.discover_migrations().await.unwrap_or_default();
             let pending = all.len().saturating_sub(applied.len());

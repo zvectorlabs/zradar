@@ -10,5 +10,7 @@ pub mod test_organizations;
 pub mod test_projects;
 pub mod test_query_api;
 pub mod test_scores;
+pub mod test_logs;
+pub mod test_metrics;
 pub mod test_telemetry_storage;
 pub mod test_tracing;

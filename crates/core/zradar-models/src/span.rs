@@ -236,9 +236,10 @@ mod tests {
 
     #[test]
     fn test_is_generation_like() {
-        let mut span = Span::default();
-
-        span.span_type = "GENERATION".to_string();
+        let mut span = Span {
+            span_type: "GENERATION".to_string(),
+            ..Span::default()
+        };
         assert!(span.is_generation_like());
 
         span.span_type = "TOOL".to_string();

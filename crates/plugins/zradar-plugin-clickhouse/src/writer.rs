@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use zradar_models::{Metric, Span};
+use zradar_models::{LogRecord, Metric, Span};
 use zradar_traits::TelemetryWriter;
 
 use crate::client::ClickHouseClient;
@@ -79,6 +79,10 @@ impl TelemetryWriter for ClickHouseTelemetryWriter {
             self.client.client().query(optimize_query).execute().await?;
         }
 
+        Ok(())
+    }
+
+    async fn insert_logs(&self, _logs: &[LogRecord]) -> anyhow::Result<()> {
         Ok(())
     }
 }

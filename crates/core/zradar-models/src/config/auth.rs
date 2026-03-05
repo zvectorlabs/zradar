@@ -26,6 +26,10 @@ pub struct AuthConfig {
 
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_seconds: Option<u64>,
+
+    /// When false, OTLP gRPC (protobuf) accepts requests without API key. Default: true.
+    #[serde(default = "default_otlp_require_api_key")]
+    pub otlp_require_api_key: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,6 +50,7 @@ impl Default for AuthConfig {
             type_: "api-key".to_string(),
             api_keys: Vec::new(),
             cache_ttl_seconds: Some(300),
+            otlp_require_api_key: Some(true),
         }
     }
 }
@@ -53,6 +58,9 @@ impl Default for AuthConfig {
 // Default functions
 fn default_admin_port() -> Option<u16> {
     Some(8080)
+}
+fn default_otlp_require_api_key() -> Option<bool> {
+    Some(true)
 }
 fn default_jwt_expiry() -> Option<u32> {
     Some(24)

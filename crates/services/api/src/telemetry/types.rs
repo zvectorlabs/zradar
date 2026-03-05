@@ -253,6 +253,83 @@ pub struct ErrorBreakdown {
     pub percentage: f64,
 }
 
+/// Log query filters (API-level)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LogQueryFilters {
+    pub project_id: String,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub severity: Option<String>,
+    pub service_name: Option<String>,
+    pub trace_id: Option<String>,
+    pub search_text: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+/// Metric query filters (API-level)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MetricQueryFilters {
+    pub project_id: String,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub metric_name: Option<String>,
+    pub service_name: Option<String>,
+    pub agent_name: Option<String>,
+    pub limit: Option<i64>,
+}
+
+/// Metric time-series filters (API-level)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MetricSeriesFilters {
+    pub project_id: String,
+    pub metric_name: String,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub interval_seconds: Option<u64>,
+    pub aggregation: Option<String>,
+    pub service_name: Option<String>,
+}
+
+/// Log record detail (API-level response)
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LogDetail {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub severity: String,
+    pub service_name: String,
+    pub message: String,
+    pub trace_id: Option<String>,
+    pub span_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
+    pub user_id: Option<String>,
+    pub attributes: HashMap<String, serde_json::Value>,
+}
+
+/// Metric data point (API-level response)
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetricDetail {
+    pub metric_name: String,
+    pub metric_type: String,
+    pub timestamp: DateTime<Utc>,
+    pub service_name: String,
+    pub value: f64,
+    pub count: i64,
+    pub sum: f64,
+    pub min: f64,
+    pub max: f64,
+    pub labels: HashMap<String, serde_json::Value>,
+}
+
+/// Metric time-series point (API-level response)
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetricSeriesPoint {
+    pub timestamp: DateTime<Utc>,
+    pub value: f64,
+}
+
 // Note: We no longer define a TelemetryReader trait at the API level.
 // The service layer (QueryService) handles conversion between API DTOs and storage calls.
 // Storage implementations use zradar_traits::TelemetryReader.

@@ -47,3 +47,9 @@ mod test_span_types;
 
 #[path = "scenarios/test_analytics.rs"]
 mod test_analytics;
+
+#[path = "scenarios/test_metrics.rs"]
+mod test_metrics;
+
+#[path = "scenarios/test_logs.rs"]
+mod test_logs;

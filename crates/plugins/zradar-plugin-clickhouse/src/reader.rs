@@ -283,12 +283,12 @@ impl AnalyticsReader for ClickHouseTelemetryReader {
     ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
         let sql = format!(
             r#"
-            SELECT 
+            SELECT
                 formatDateTime(toStartOfDay(timestamp), '%Y-%m-%dT%H:%M:%S.000Z') as timestamp,
                 count() as value
             FROM spans
-            WHERE project_id = '{}' 
-              AND timestamp >= toDateTime({}) 
+            WHERE project_id = '{}'
+              AND timestamp >= toDateTime({})
               AND timestamp <= toDateTime({})
               AND parent_span_id = '' -- Only count root spans (traces)
             GROUP BY timestamp
@@ -324,7 +324,7 @@ impl AnalyticsReader for ClickHouseTelemetryReader {
     ) -> anyhow::Result<MetricsSummary> {
         let sql = format!(
             r#"
-            SELECT 
+            SELECT
                 count() as total_traces,
                 countIf(status = 'error') / count() as error_rate,
                 quantile(0.5)(duration_ns) / 1000000 as p50_latency,

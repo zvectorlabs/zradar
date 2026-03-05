@@ -72,6 +72,7 @@ pub enum JobStatus {
 pub enum JobType {
     TraceIngestion,
     MetricIngestion,
+    LogIngestion,
 }
 
 /// Job model

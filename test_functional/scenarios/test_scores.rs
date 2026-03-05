@@ -1,6 +1,7 @@
 //! End-to-end tests for evaluation scores
 
-use functional_tests::*;
+#[allow(unused_imports)]
+use crate::*;
 use serde_json::json;
 /// Test creating a score via REST API
 #[tokio::test]

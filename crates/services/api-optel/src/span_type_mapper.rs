@@ -21,7 +21,8 @@ impl SpanTypeMapper {
     /// 6. Tool detection
     /// 7. Agent detection
     /// 8. Zero duration = EVENT
-    ///    Default: SPAN
+    ///
+    /// Default: SPAN
     pub fn detect_type(attributes: &HashMap<String, Value>, duration_ns: i64) -> String {
         // Priority 1: Explicit zradar.span.type
         if let Some(explicit_type) = attributes.get("zradar.span.type")

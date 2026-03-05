@@ -84,6 +84,35 @@ pub async fn get_trace(
     Ok(Json(trace))
 }
 
+/// Get a single span by its ID
+#[utoipa::path(
+    get,
+    path = "/api/v1/spans/{span_id}",
+    params(
+        ("span_id" = String, Path, description = "Span ID"),
+        ("project_id" = Uuid, Query, description = "Project ID"),
+    ),
+    responses(
+        (status = 200, description = "Span retrieved", body = SpanDetail),
+        (status = 404, description = "Span not found"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "query"
+)]
+pub async fn get_span(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Path(span_id): Path<String>,
+    Query(params): Query<ProjectIdParam>,
+) -> Result<Json<SpanDetail>> {
+    let span = service
+        .get_span(user.id, Uuid::nil(), params.project_id, &span_id)
+        .await?;
+    Ok(Json(span))
+}
+
 /// Query spans
 #[utoipa::path(
     get,
@@ -235,4 +264,129 @@ pub async fn get_error_breakdown(
         .get_error_breakdown(user.id, Uuid::nil(), query)
         .await?;
     Ok(Json(results))
+}
+
+/// Query log records
+#[utoipa::path(
+    get,
+    path = "/api/v1/logs",
+    params(
+        ("project_id" = String, Query, description = "Project ID"),
+        ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
+        ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
+        ("severity" = Option<String>, Query, description = "Severity filter (INFO, WARN, ERROR, …)"),
+        ("service_name" = Option<String>, Query, description = "Service name filter"),
+        ("trace_id" = Option<String>, Query, description = "Trace ID filter"),
+        ("search_text" = Option<String>, Query, description = "Full-text search in message"),
+        ("agent_name" = Option<String>, Query, description = "Agent name filter"),
+        ("session_id" = Option<String>, Query, description = "Session ID filter"),
+        ("limit" = Option<i64>, Query, description = "Pagination limit"),
+    ),
+    responses(
+        (status = 200, description = "Logs retrieved", body = PaginatedResponse<LogDetail>),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "logs"
+)]
+pub async fn query_logs(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Query(filters): Query<LogQueryFilters>,
+) -> Result<Json<PaginatedResponse<LogDetail>>> {
+    let logs = service.query_logs(user.id, Uuid::nil(), filters).await?;
+    Ok(Json(logs))
+}
+
+/// Get a single log record by ID
+#[utoipa::path(
+    get,
+    path = "/api/v1/logs/{log_id}",
+    params(
+        ("log_id" = String, Path, description = "Log record ID"),
+        ("project_id" = Uuid, Query, description = "Project ID"),
+    ),
+    responses(
+        (status = 200, description = "Log record retrieved", body = LogDetail),
+        (status = 404, description = "Log not found"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "logs"
+)]
+pub async fn get_log(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Path(log_id): Path<String>,
+    Query(params): Query<ProjectIdParam>,
+) -> Result<Json<LogDetail>> {
+    let log = service
+        .get_log(user.id, Uuid::nil(), params.project_id, &log_id)
+        .await?;
+    Ok(Json(log))
+}
+
+/// Query metrics
+#[utoipa::path(
+    get,
+    path = "/api/v1/metrics",
+    params(
+        ("project_id" = String, Query, description = "Project ID"),
+        ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
+        ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
+        ("metric_name" = Option<String>, Query, description = "Metric name filter"),
+        ("service_name" = Option<String>, Query, description = "Service name filter"),
+        ("agent_name" = Option<String>, Query, description = "Agent name filter"),
+        ("limit" = Option<i64>, Query, description = "Pagination limit"),
+    ),
+    responses(
+        (status = 200, description = "Metrics retrieved", body = PaginatedResponse<MetricDetail>),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "metrics"
+)]
+pub async fn query_metrics(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Query(filters): Query<MetricQueryFilters>,
+) -> Result<Json<PaginatedResponse<MetricDetail>>> {
+    let metrics = service
+        .query_metrics(user.id, Uuid::nil(), filters)
+        .await?;
+    Ok(Json(metrics))
+}
+
+/// Query metric time-series (bucketed aggregates)
+#[utoipa::path(
+    get,
+    path = "/api/v1/metrics/series",
+    params(
+        ("project_id" = String, Query, description = "Project ID"),
+        ("metric_name" = String, Query, description = "Metric name"),
+        ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
+        ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
+        ("interval_seconds" = Option<u64>, Query, description = "Bucket interval in seconds (default: 60)"),
+        ("aggregation" = Option<String>, Query, description = "Aggregation: avg, sum, min, max, count (default: avg)"),
+        ("service_name" = Option<String>, Query, description = "Service name filter"),
+    ),
+    responses(
+        (status = 200, description = "Metric series retrieved", body = Vec<MetricSeriesPoint>),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_token" = [])),
+    tag = "metrics"
+)]
+pub async fn query_metric_series(
+    State(service): State<Arc<QueryService>>,
+    user: AuthenticatedUser,
+    Query(filters): Query<MetricSeriesFilters>,
+) -> Result<Json<Vec<MetricSeriesPoint>>> {
+    let series = service
+        .query_metric_series(user.id, Uuid::nil(), filters)
+        .await?;
+    Ok(Json(series))
 }

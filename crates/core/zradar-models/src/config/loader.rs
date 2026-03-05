@@ -87,6 +87,22 @@ impl Config {
             }
         };
 
+        // Override ports from environment when set (so e.g. OTLP_PORT=8002 works with config file)
+        if let Some(p) = std::env::var("OTLP_PORT")
+            .ok()
+            .and_then(|s| s.parse::<u16>().ok())
+        {
+            config.otlp_port = p;
+        }
+        if let Some(p) = std::env::var("QUERY_API_PORT")
+            .ok()
+            .and_then(|s| s.parse::<u16>().ok())
+        {
+            config.query_api_port = p;
+            if let Some(ref mut admin) = config.admin_api {
+                admin.admin_api_port = Some(p);
+            }
+        }
         // Override migration settings from environment variables
         if let Some(ref mut migrations) = config.migrations {
             if let Ok(val) = std::env::var("AUTO_MIGRATE") {

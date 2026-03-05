@@ -17,6 +17,7 @@ pub fn router(
         .route("/api/v1/traces", get(handlers::query_traces))
         .route("/api/v1/traces/:trace_id", get(handlers::get_trace))
         .route("/api/v1/spans", get(handlers::query_spans))
+        .route("/api/v1/spans/:span_id", get(handlers::get_span))
         .route("/api/v1/analytics", get(handlers::get_analytics))
         .route(
             "/api/v1/analytics/metrics",
@@ -30,6 +31,12 @@ pub fn router(
             "/api/v1/analytics/errors",
             get(handlers::get_error_breakdown),
         )
+        // Logs endpoints
+        .route("/api/v1/logs", get(handlers::query_logs))
+        .route("/api/v1/logs/:log_id", get(handlers::get_log))
+        // Metrics endpoints
+        .route("/api/v1/metrics", get(handlers::query_metrics))
+        .route("/api/v1/metrics/series", get(handlers::query_metric_series))
         .with_state(service)
         .layer(Extension(jwt_auth))
         .layer(Extension(user_storage))

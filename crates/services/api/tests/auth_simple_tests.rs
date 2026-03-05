@@ -5,11 +5,10 @@ use uuid::Uuid;
 
 #[test]
 fn test_jwt_secret_and_expiry() {
-    let jwt_auth = JwtAuth::new("test-secret-key".to_string(), 24);
+    let _jwt_auth = JwtAuth::new("test-secret-key".to_string(), 24);
 
     // Just verify construction works
     // Full integration tests would require User struct creation
-    assert!(true);
 }
 
 #[test]

@@ -5,16 +5,19 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::types::{
-    AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown, PaginatedResponse,
-    SpanDetail, SpanQueryFilters, TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters,
-    TraceSummary,
+    AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown, LogDetail,
+    LogQueryFilters, MetricDetail, MetricQueryFilters, MetricSeriesFilters, MetricSeriesPoint,
+    PaginatedResponse, SpanDetail, SpanQueryFilters, TopEndpoint, TopNQuery, TraceDetail,
+    TraceQueryFilters, TraceSummary,
 };
 use crate::errors::{ControlError, Result};
 
 // Use storage-level traits from zradar-traits
 use zradar_traits::{
-    Pagination, SpanQueryFilters as StorageSpanFilters, TelemetryReader as StorageTelemetryReader,
-    TimeRange, TraceQueryFilters as StorageTraceFilters,
+    LogQueryFilters as StorageLogFilters, MetricQueryFilters as StorageMetricFilters,
+    MetricSeriesFilters as StorageMetricSeriesFilters, Pagination,
+    SpanQueryFilters as StorageSpanFilters, TelemetryReader as StorageTelemetryReader, TimeRange,
+    TraceQueryFilters as StorageTraceFilters,
 };
 
 /// Query service for telemetry operations
@@ -219,6 +222,39 @@ impl QueryService {
         })
     }
 
+    /// Get a single span by its ID.
+    pub async fn get_span(
+        &self,
+        _user_id: Uuid,
+        _org_id: Uuid,
+        project_id: Uuid,
+        span_id: &str,
+    ) -> Result<SpanDetail> {
+        let span = self
+            .storage
+            .get_span(project_id, span_id)
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?
+            .ok_or_else(|| ControlError::NotFound("Span not found".to_string()))?;
+
+        Ok(SpanDetail {
+            trace_id: span.trace_id,
+            span_id: span.span_id,
+            parent_span_id: if span.parent_span_id.is_empty() {
+                None
+            } else {
+                Some(span.parent_span_id)
+            },
+            operation_name: span.span_name,
+            service_name: span.service_name,
+            span_type: span.span_type,
+            start_time: DateTime::from_timestamp_nanos(span.timestamp),
+            duration_ms: span.duration_ns / 1_000_000,
+            status: span.status_code,
+            attributes: serde_json::from_str(&span.attributes).unwrap_or_default(),
+        })
+    }
+
     /// Get analytics (daily trace counts)
     pub async fn get_analytics(
         &self,
@@ -314,5 +350,239 @@ impl QueryService {
     ) -> Result<Vec<ErrorBreakdown>> {
         // TODO: Implement error breakdown
         Ok(vec![])
+    }
+
+    /// Query log records
+    pub async fn query_logs(
+        &self,
+        _user_id: Uuid,
+        _org_id: Uuid,
+        filters: LogQueryFilters,
+    ) -> Result<PaginatedResponse<LogDetail>> {
+        let project_id = Uuid::parse_str(&filters.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+
+        let storage_filters = StorageLogFilters {
+            project_id: Some(project_id),
+            time_range: filters
+                .start_time
+                .zip(filters.end_time)
+                .map(|(start, end)| TimeRange {
+                    start: start.timestamp_nanos_opt().unwrap_or(0),
+                    end: end.timestamp_nanos_opt().unwrap_or(0),
+                }),
+            severity: filters.severity,
+            service_name: filters.service_name,
+            trace_id: filters.trace_id,
+            search_text: filters.search_text,
+            agent_name: filters.agent_name,
+            session_id: filters.session_id,
+            pagination: Pagination {
+                limit: Some(filters.limit.unwrap_or(100) as u32),
+                offset: Some(0),
+            },
+        };
+
+        let result = self
+            .storage
+            .query_logs(storage_filters)
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
+
+        let logs: Vec<LogDetail> = result
+            .items
+            .into_iter()
+            .map(|l| LogDetail {
+                id: l.id,
+                timestamp: DateTime::from_timestamp_nanos(l.timestamp),
+                severity: l.severity,
+                service_name: l.service_name,
+                message: l.message,
+                trace_id: if l.trace_id.is_empty() {
+                    None
+                } else {
+                    Some(l.trace_id)
+                },
+                span_id: if l.span_id.is_empty() {
+                    None
+                } else {
+                    Some(l.span_id)
+                },
+                agent_name: if l.agent_name.is_empty() {
+                    None
+                } else {
+                    Some(l.agent_name)
+                },
+                session_id: if l.session_id.is_empty() {
+                    None
+                } else {
+                    Some(l.session_id)
+                },
+                user_id: if l.user_id.is_empty() {
+                    None
+                } else {
+                    Some(l.user_id)
+                },
+                attributes: serde_json::from_str(&l.attributes).unwrap_or_default(),
+            })
+            .collect();
+
+        Ok(PaginatedResponse {
+            items: logs,
+            total: result.total as i64,
+            page: 0,
+            page_size: result.limit as i64,
+        })
+    }
+
+    /// Get a single log by ID
+    pub async fn get_log(
+        &self,
+        _user_id: Uuid,
+        _org_id: Uuid,
+        project_id: Uuid,
+        log_id: &str,
+    ) -> Result<LogDetail> {
+        let log = self
+            .storage
+            .get_log(project_id, log_id)
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?
+            .ok_or_else(|| ControlError::NotFound("Log not found".to_string()))?;
+
+        Ok(LogDetail {
+            id: log.id,
+            timestamp: DateTime::from_timestamp_nanos(log.timestamp),
+            severity: log.severity,
+            service_name: log.service_name,
+            message: log.message,
+            trace_id: if log.trace_id.is_empty() {
+                None
+            } else {
+                Some(log.trace_id)
+            },
+            span_id: if log.span_id.is_empty() {
+                None
+            } else {
+                Some(log.span_id)
+            },
+            agent_name: if log.agent_name.is_empty() {
+                None
+            } else {
+                Some(log.agent_name)
+            },
+            session_id: if log.session_id.is_empty() {
+                None
+            } else {
+                Some(log.session_id)
+            },
+            user_id: if log.user_id.is_empty() {
+                None
+            } else {
+                Some(log.user_id)
+            },
+            attributes: serde_json::from_str(&log.attributes).unwrap_or_default(),
+        })
+    }
+
+    /// Query metrics
+    pub async fn query_metrics(
+        &self,
+        _user_id: Uuid,
+        _org_id: Uuid,
+        filters: MetricQueryFilters,
+    ) -> Result<PaginatedResponse<MetricDetail>> {
+        let project_id = Uuid::parse_str(&filters.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+
+        let storage_filters = StorageMetricFilters {
+            project_id: Some(project_id),
+            time_range: filters
+                .start_time
+                .zip(filters.end_time)
+                .map(|(start, end)| TimeRange {
+                    start: start.timestamp_nanos_opt().unwrap_or(0),
+                    end: end.timestamp_nanos_opt().unwrap_or(0),
+                }),
+            metric_name: filters.metric_name,
+            service_name: filters.service_name,
+            agent_name: filters.agent_name,
+            pagination: Pagination {
+                limit: Some(filters.limit.unwrap_or(100) as u32),
+                offset: Some(0),
+            },
+        };
+
+        let result = self
+            .storage
+            .query_metrics(storage_filters)
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
+
+        let metrics: Vec<MetricDetail> = result
+            .items
+            .into_iter()
+            .map(|m| MetricDetail {
+                metric_name: m.metric_name,
+                metric_type: m.metric_type,
+                timestamp: DateTime::from_timestamp_nanos(m.timestamp),
+                service_name: m.service_name,
+                value: m.value,
+                count: m.count,
+                sum: m.sum,
+                min: m.min,
+                max: m.max,
+                labels: serde_json::from_str(&m.labels).unwrap_or_default(),
+            })
+            .collect();
+
+        Ok(PaginatedResponse {
+            items: metrics,
+            total: result.total as i64,
+            page: 0,
+            page_size: result.limit as i64,
+        })
+    }
+
+    /// Query metric time-series (bucketed aggregates)
+    pub async fn query_metric_series(
+        &self,
+        _user_id: Uuid,
+        _org_id: Uuid,
+        filters: MetricSeriesFilters,
+    ) -> Result<Vec<MetricSeriesPoint>> {
+        let project_id = Uuid::parse_str(&filters.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+
+        let storage_filters = StorageMetricSeriesFilters {
+            project_id: Some(project_id),
+            metric_name: filters.metric_name,
+            time_range: filters
+                .start_time
+                .zip(filters.end_time)
+                .map(|(start, end)| TimeRange {
+                    start: start.timestamp_nanos_opt().unwrap_or(0),
+                    end: end.timestamp_nanos_opt().unwrap_or(0),
+                }),
+            interval_seconds: filters.interval_seconds.unwrap_or(60),
+            aggregation: filters.aggregation.unwrap_or_else(|| "avg".to_string()),
+            service_name: filters.service_name,
+        };
+
+        let points = self
+            .storage
+            .query_metric_series(storage_filters)
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
+
+        let series: Vec<MetricSeriesPoint> = points
+            .into_iter()
+            .map(|p| MetricSeriesPoint {
+                timestamp: DateTime::from_timestamp_nanos(p.bucket_ts),
+                value: p.value,
+            })
+            .collect();
+
+        Ok(series)
     }
 }

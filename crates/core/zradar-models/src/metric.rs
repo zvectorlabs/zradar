@@ -4,7 +4,7 @@ use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 
 /// Metric represents aggregated time-series data
-#[derive(Debug, Clone, Serialize, Deserialize, Row, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, Row, sqlx::FromRow, Default)]
 pub struct Metric {
     // Identity
     pub metric_name: String,

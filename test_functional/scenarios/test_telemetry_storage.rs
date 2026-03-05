@@ -3,7 +3,8 @@
 //! These tests verify that spans and metrics sent via OTLP are properly
 //! stored in PostgreSQL with all fields intact.
 
-use functional_tests::*;
+#[allow(unused_imports)]
+use crate::*;
 
 /// Test that a span sent via OTLP is stored and can be queried back
 #[tokio::test]
