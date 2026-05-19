@@ -1,12 +1,12 @@
 //! gRPC client for testing OTLP endpoints
 
 use anyhow::{Context, Result};
-use opentelemetry_proto::tonic::collector::logs::v1::logs_service_client::LogsServiceClient;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_client::MetricsServiceClient;
+use opentelemetry_proto::tonic::collector::logs::v1::logs_service_client::LogsServiceClient;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::collector::trace::v1::trace_service_client::TraceServiceClient;
+use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_client::MetricsServiceClient;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::trace_service_client::TraceServiceClient;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord as OtlpLogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
@@ -23,10 +23,21 @@ use tonic::transport::Channel;
 /// Type alias for span definition: (name, span_id, parent_span_id)
 type SpanDef<'a> = (&'a str, &'a [u8; 8], Option<&'a [u8; 8]>);
 
+/// Extended span definition with per-span attributes and status
+pub struct SpanDefExt {
+    pub name: String,
+    pub span_id: [u8; 8],
+    pub parent_span_id: Option<[u8; 8]>,
+    pub attributes: Vec<(String, AnyValue)>,
+    pub status_code: Option<i32>, // 0=UNSET, 1=OK, 2=ERROR
+}
+
 /// gRPC client for OTLP telemetry ingestion
 pub struct OtlpClient {
     grpc_url: String,
     api_key: Option<String>,
+    tenant_id: Option<String>,
+    project_id: Option<String>,
 }
 
 impl OtlpClient {
@@ -35,6 +46,8 @@ impl OtlpClient {
         Self {
             grpc_url,
             api_key: None,
+            tenant_id: None,
+            project_id: None,
         }
     }
 
@@ -47,6 +60,18 @@ impl OtlpClient {
     /// Set API key for authentication (mutable)
     pub fn set_api_key(&mut self, api_key: String) {
         self.api_key = Some(api_key);
+    }
+
+    /// Set tenant ID header override
+    pub fn with_tenant_id(mut self, tenant_id: String) -> Self {
+        self.tenant_id = Some(tenant_id);
+        self
+    }
+
+    /// Set project ID header override
+    pub fn with_project_id(mut self, project_id: String) -> Self {
+        self.project_id = Some(project_id);
+        self
     }
 
     // ========================================================================
@@ -66,11 +91,25 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
+        let tenant_id_val = self
+            .tenant_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
+        let project_id_val = self
+            .project_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
         let mut client =
             TraceServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
+                }
+                if let Some(val) = &tenant_id_val {
+                    req.metadata_mut().insert("x-tenant-id", val.clone());
+                }
+                if let Some(val) = &project_id_val {
+                    req.metadata_mut().insert("x-project-id", val.clone());
                 }
                 Ok(req)
             });
@@ -184,6 +223,74 @@ impl OtlpClient {
         }
     }
 
+    /// Build a test trace with explicit start/end timestamps (nanoseconds since epoch).
+    ///
+    /// Useful for retention tests where you need to inject data with known
+    /// timestamps in the past.
+    pub fn build_test_trace_with_timestamp(
+        &self,
+        service_name: &str,
+        trace_id: &[u8; 16],
+        span_id: &[u8; 8],
+        span_name: &str,
+        start_ns: u64,
+        end_ns: u64,
+    ) -> ExportTraceServiceRequest {
+        let resource = Resource {
+            attributes: vec![KeyValue {
+                key: "service.name".to_string(),
+                value: Some(AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            service_name.to_string(),
+                        ),
+                    ),
+                }),
+            }],
+            dropped_attributes_count: 0,
+        };
+
+        let span = Span {
+            trace_id: trace_id.to_vec(),
+            span_id: span_id.to_vec(),
+            trace_state: String::new(),
+            parent_span_id: vec![],
+            name: span_name.to_string(),
+            kind: 1,
+            start_time_unix_nano: start_ns,
+            end_time_unix_nano: end_ns,
+            attributes: vec![],
+            dropped_attributes_count: 0,
+            events: vec![],
+            dropped_events_count: 0,
+            links: vec![],
+            dropped_links_count: 0,
+            status: Some(Status {
+                message: String::new(),
+                code: 0,
+            }),
+        };
+
+        let scope_spans = ScopeSpans {
+            scope: Some(InstrumentationScope {
+                name: "test-instrumentation".to_string(),
+                version: "1.0.0".to_string(),
+                attributes: vec![],
+                dropped_attributes_count: 0,
+            }),
+            spans: vec![span],
+            schema_url: String::new(),
+        };
+
+        ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(resource),
+                scope_spans: vec![scope_spans],
+                schema_url: String::new(),
+            }],
+        }
+    }
+
     // ========================================================================
     // Metrics Export
     // ========================================================================
@@ -200,16 +307,28 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
+        let tenant_id_val = self
+            .tenant_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
+        let project_id_val = self
+            .project_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
-        let mut client = MetricsServiceClient::with_interceptor(
-            channel,
-            move |mut req: tonic::Request<()>| {
+        let mut client =
+            MetricsServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
                 }
+                if let Some(val) = &tenant_id_val {
+                    req.metadata_mut().insert("x-tenant-id", val.clone());
+                }
+                if let Some(val) = &project_id_val {
+                    req.metadata_mut().insert("x-project-id", val.clone());
+                }
                 Ok(req)
-            },
-        );
+            });
 
         client
             .export(request)
@@ -331,11 +450,25 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
+        let tenant_id_val = self
+            .tenant_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
+        let project_id_val = self
+            .project_id
+            .as_ref()
+            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
         let mut client =
             LogsServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
+                }
+                if let Some(val) = &tenant_id_val {
+                    req.metadata_mut().insert("x-tenant-id", val.clone());
+                }
+                if let Some(val) = &project_id_val {
+                    req.metadata_mut().insert("x-project-id", val.clone());
                 }
                 Ok(req)
             });
@@ -492,6 +625,96 @@ impl OtlpClient {
                     status: Some(Status {
                         message: String::new(),
                         code: 0,
+                    }),
+                }
+            })
+            .collect();
+
+        let scope_spans = ScopeSpans {
+            scope: Some(InstrumentationScope {
+                name: "test-instrumentation".to_string(),
+                version: "1.0.0".to_string(),
+                attributes: vec![],
+                dropped_attributes_count: 0,
+            }),
+            spans: built_spans,
+            schema_url: String::new(),
+        };
+
+        let resource_spans = ResourceSpans {
+            resource: Some(resource),
+            scope_spans: vec![scope_spans],
+            schema_url: String::new(),
+        };
+
+        ExportTraceServiceRequest {
+            resource_spans: vec![resource_spans],
+        }
+    }
+
+    /// Build a multi-span trace with per-span attributes and status codes.
+    ///
+    /// Unlike `build_multi_span_trace`, each span carries its own set of OTLP
+    /// attributes and an optional status code, making it suitable for building
+    /// realistic agent workflow trees (AGENT → TOOL, GENERATION, sub-AGENT, …).
+    pub fn build_multi_span_trace_with_attributes(
+        &self,
+        service_name: &str,
+        trace_id: &[u8; 16],
+        spans: Vec<SpanDefExt>,
+    ) -> ExportTraceServiceRequest {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let resource = Resource {
+            attributes: vec![KeyValue {
+                key: "service.name".to_string(),
+                value: Some(AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            service_name.to_string(),
+                        ),
+                    ),
+                }),
+            }],
+            dropped_attributes_count: 0,
+        };
+
+        let built_spans: Vec<Span> = spans
+            .into_iter()
+            .enumerate()
+            .map(|(i, def)| {
+                let start_offset = (i as u64) * 10_000_000; // 10ms between spans
+
+                let attributes: Vec<KeyValue> = def
+                    .attributes
+                    .into_iter()
+                    .map(|(key, value)| KeyValue {
+                        key,
+                        value: Some(value),
+                    })
+                    .collect();
+
+                Span {
+                    trace_id: trace_id.to_vec(),
+                    span_id: def.span_id.to_vec(),
+                    trace_state: String::new(),
+                    parent_span_id: def.parent_span_id.map(|p| p.to_vec()).unwrap_or_default(),
+                    name: def.name,
+                    kind: 1, // SPAN_KIND_INTERNAL
+                    start_time_unix_nano: now - 2_000_000_000 + start_offset,
+                    end_time_unix_nano: now - 1_000_000_000 + start_offset,
+                    attributes,
+                    dropped_attributes_count: 0,
+                    events: vec![],
+                    dropped_events_count: 0,
+                    links: vec![],
+                    dropped_links_count: 0,
+                    status: Some(Status {
+                        message: String::new(),
+                        code: def.status_code.unwrap_or(0),
                     }),
                 }
             })

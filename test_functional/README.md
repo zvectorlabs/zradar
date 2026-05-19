@@ -30,13 +30,10 @@ make functional_tests
 
 ## 🔌 Port Configuration
 
-All test services use **sequential ports 9011-9016** (no conflicts with dev):
+All test services use **sequential ports 9011, 9015, and 9016**:
 
 ```
 9011 - PostgreSQL
-9012 - ClickHouse HTTP
-9013 - ClickHouse Native
-9014 - Redis
 9015 - Admin API (REST)
 9016 - OTLP gRPC
 ```
@@ -52,6 +49,28 @@ cargo test --test functional_tests test_tracing -- --ignored
 # Single test with output
 cargo test --test functional_tests test_send_single_trace -- --ignored --nocapture
 ```
+
+## 📋 Flow & Troubleshooting
+
+**`make functional_tests` flow:**
+
+1. **Build** — `cargo build --release --bin zradar` + test suite
+2. **Docker** — Start PostgreSQL (docker-compose.test.yml), wait for healthy
+3. **Config** — Backup `config.toml`, use `config.test.toml`
+4. **Server** — Run `./target/release/zradar` in background with `DATABASE_URL`, `ZVRADAR_TEST_MODE=1`
+5. **Wait** — Poll `GET /health` up to 60s
+6. **Admin user** — Insert test user into DB (unless reusing)
+7. **Tests** — Run `cargo test --package zradar-functional-tests --test functional_tests -- --ignored`
+
+**Common failure: "Server didn't start in time"**
+
+The script times out if `/health` never responds. Typical causes:
+
+- **Port mismatch** — Script polls `http://localhost:9015/health`, but server must listen on 9015. Config loader reads `admin_api_port` at root (not under `[admin_api]`). The script sets `QUERY_API_PORT=9015` as a fallback. If server logs show "Admin API listening on ...:8080", the config port was ignored.
+- **Server panic on startup** — Check logs above the timeout message. Example: `Overlapping method route. Handler for GET /health already exists` (duplicate route registration).
+- **Port in use** — Another process on 9015/9016. Run `lsof -i:9015` to check.
+
+**Tip:** Run with `-r` to keep Docker running and iterate: `make functional_tests_fast -r`
 
 ## 🛠️ Test Structure
 
@@ -126,7 +145,6 @@ DATABASE_URL=postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test \
 
 # 3. Start server
 DATABASE_URL=postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test \
-CLICKHOUSE_URL=http://localhost:9012 \
 ADMIN_API_PORT=9015 \
 OTLP_PORT=9016 \
   cargo run --bin zradar-server &

@@ -1,0 +1,52 @@
+ATTACH TABLE _ UUID '1cce17ee-0473-4910-9384-04e1b097909b'
+(
+    `trace_id` String,
+    `span_id` String,
+    `parent_span_id` String,
+    `timestamp` DateTime64(9, 'UTC'),
+    `duration_ns` UInt64,
+    `tenant_id` LowCardinality(String),
+    `project_id` LowCardinality(String),
+    `service_name` LowCardinality(String),
+    `span_name` LowCardinality(String),
+    `span_kind` LowCardinality(String),
+    `status_code` LowCardinality(String),
+    `status_message` String,
+    `invocation_id` String,
+    `session_id` String,
+    `user_id` String,
+    `agent_name` LowCardinality(String),
+    `agent_type` LowCardinality(String),
+    `llm_model` LowCardinality(String),
+    `llm_input` String CODEC(LZ4),
+    `llm_output` String CODEC(LZ4),
+    `prompt_tokens` UInt32,
+    `completion_tokens` UInt32,
+    `total_tokens` UInt32,
+    `prompt_cost_usd` Float64,
+    `completion_cost_usd` Float64,
+    `total_cost_usd` Float64,
+    `tool_name` LowCardinality(String),
+    `tool_call_id` String,
+    `resource_cpu_micros` UInt64,
+    `resource_memory_bytes` UInt64,
+    `resource_memory_peak` UInt64,
+    `prompt_id` String,
+    `prompt_name` LowCardinality(String),
+    `prompt_version` UInt32,
+    `completion_start_time` Nullable(DateTime64(9, 'UTC')),
+    `time_to_first_token_ms` UInt32,
+    `agent_version` LowCardinality(String),
+    `sdk_version` LowCardinality(String),
+    `level` LowCardinality(String),
+    `model_parameters` String CODEC(LZ4),
+    `attributes` String CODEC(LZ4),
+    `created_at` DateTime64(9, 'UTC'),
+    `updated_at` DateTime64(9, 'UTC'),
+    `is_deleted` UInt8 DEFAULT 0
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (tenant_id, project_id, timestamp, trace_id, span_id)
+TTL toDateTime(timestamp) + toIntervalDay(90)
+SETTINGS index_granularity = 8192

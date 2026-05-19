@@ -2,75 +2,27 @@
 
 #[allow(unused_imports)]
 use crate::*;
+use uuid::Uuid;
 
 #[tokio::test]
 #[ignore]
 async fn test_send_single_trace() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup: Create org, project, and API key
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
 
-    // Create OTLP client and send trace
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    otlp_client
+    env.otlp
         .send_test_trace(&service_name, &trace_id, &span_id, "test.operation")
         .await?;
 
     println!("✅ Single trace sent successfully via OTLP");
 
-    // VERIFY: Query back the trace to ensure it was stored
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await; // Wait for async processing
-
+    // Verify storage: poll until the trace appears
     let trace_id_hex = hex::encode(trace_id);
-    let query_url = format!("/api/v1/traces/{}?project_id={}", trace_id_hex, project_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    println!("🔍 Querying trace: {}", query_url);
-    let query_response = client.get(&query_url).await?;
-
-    assert_eq!(
-        query_response.status(),
-        200,
-        "Should be able to query stored trace"
-    );
-
-    let trace_data: serde_json::Value = query_response.json().await?;
-    println!(
-        "📊 Retrieved trace: {}",
-        serde_json::to_string_pretty(&trace_data)?
-    );
-
-    // Verify the trace contains our span
-    assert!(trace_data.get("spans").is_some(), "Trace should have spans");
     let spans = trace_data["spans"]
         .as_array()
         .expect("spans should be an array");
@@ -83,124 +35,89 @@ async fn test_send_single_trace() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_send_multi_span_trace() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    // Create test data
     let trace_id = TestDataGenerator::trace_id();
     let root_span_id = TestDataGenerator::span_id();
     let child_span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
-
-    // Create OTLP client
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let spans = vec![
         ("root.operation", &root_span_id, None),
         ("child.operation", &child_span_id, Some(&root_span_id)),
     ];
 
-    let request = otlp_client.build_multi_span_trace(&service_name, &trace_id, spans);
-    otlp_client.export_traces(request).await?;
+    let request = env
+        .otlp
+        .build_multi_span_trace(&service_name, &trace_id, spans);
+    env.otlp.export_traces(request).await?;
 
     println!("✅ Multi-span trace sent successfully");
+
+    // Verify storage: poll until both spans appear
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+
+    let spans = trace_data["spans"]
+        .as_array()
+        .expect("spans should be an array");
+    assert_eq!(spans.len(), 2, "Should have exactly 2 spans");
+
+    println!("✅ Multi-span trace storage verified");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_send_multiple_traces() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let service_name = TestDataGenerator::service_name();
+    let mut trace_ids = Vec::new();
 
-    // Create OTLP client
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    // Send multiple traces
     for i in 0..5 {
         let trace_id = TestDataGenerator::trace_id();
         let span_id = TestDataGenerator::span_id();
         let span_name = format!("operation.{}", i);
 
-        otlp_client
+        env.otlp
             .send_test_trace(&service_name, &trace_id, &span_id, &span_name)
             .await?;
 
+        trace_ids.push(trace_id);
         println!("  Trace {}/5 sent", i + 1);
     }
 
-    println!("✅ Multiple traces sent successfully");
+    // Verify all 5 traces were stored by polling for each
+    for trace_id in &trace_ids {
+        let trace_id_hex = hex::encode(trace_id);
+        let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+        assert!(
+            trace_data["spans"]
+                .as_array()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false),
+            "Trace {} should have spans",
+            trace_id_hex
+        );
+    }
+
+    println!("✅ All 5 traces stored and verified");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_trace_without_api_key_rejected() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
+    let session = TestSession::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
 
-    // Create OTLP client WITHOUT API key
-    let otlp_client = OtlpClient::new(ctx.config.grpc_url.clone());
+    // OTLP client WITHOUT API key
+    let otlp_client = OtlpClient::new(session.ctx.config.grpc_url.clone());
 
-    // Should fail without API key
     let result = otlp_client
         .send_test_trace(&service_name, &trace_id, &span_id, "test.operation")
         .await;
@@ -214,18 +131,15 @@ async fn test_trace_without_api_key_rejected() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_trace_with_invalid_api_key_rejected() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
+    let session = TestSession::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
 
-    // Create OTLP client with invalid API key
-    let otlp_client = OtlpClient::new(ctx.config.grpc_url.clone())
+    let otlp_client = OtlpClient::new(session.ctx.config.grpc_url.clone())
         .with_api_key("zvr_invalid_key_12345".to_string());
 
-    // Should fail with invalid key
     let result = otlp_client
         .send_test_trace(&service_name, &trace_id, &span_id, "test.operation")
         .await;
@@ -238,200 +152,261 @@ async fn test_trace_with_invalid_api_key_rejected() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_trace_with_revoked_api_key_rejected() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+async fn test_trace_for_blocked_project_rejected() -> Result<()> {
+    let mut env = TestEnv::setup().await?;
+    let blocked_project_id = Uuid::new_v4();
 
-    let fixture = TestFixture::new();
+    env.client.set_project_id(blocked_project_id.to_string());
+    env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
+        .with_api_key(env.api_key.clone())
+        .with_tenant_id(Uuid::nil().to_string())
+        .with_project_id(blocked_project_id.to_string());
 
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
+    let settings_resp = env
+        .client
+        .put(
+            &format!("/api/v1/projects/{}/settings", blocked_project_id),
+            &serde_json::json!({
+                "traces_retention_days": 90,
+                "metrics_retention_days": 30,
+                "logs_retention_days": 30,
+                "max_ingestion_rate": null,
+                "file_push_interval_secs": 300,
+                "blocked": true
+            }),
         )
         .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
+    assert_eq!(settings_resp.status(), 200);
+
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+    let result = env
+        .otlp
+        .send_test_trace(
+            "blocked-project-service",
+            &trace_id,
+            &span_id,
+            "test.operation",
         )
-        .await?;
-    let key_id = parse_uuid_from_json(&api_key, "id")?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    let trace_id1 = TestDataGenerator::trace_id();
-    let span_id1 = TestDataGenerator::span_id();
-    let service_name = TestDataGenerator::service_name();
-
-    // Send a trace (should work)
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    let result1 = otlp_client
-        .send_test_trace(&service_name, &trace_id1, &span_id1, "before.revoke")
-        .await;
-    assert!(result1.is_ok(), "Should work before revocation");
-
-    // Revoke the key
-    client.revoke_api_key(&key_id).await?;
-
-    let trace_id2 = TestDataGenerator::trace_id();
-    let span_id2 = TestDataGenerator::span_id();
-
-    let result2 = otlp_client
-        .send_test_trace(&service_name, &trace_id2, &span_id2, "after.revoke")
         .await;
 
-    assert!(result2.is_err(), "Should reject trace with revoked API key");
+    assert!(result.is_err(), "Should reject trace for blocked project");
 
-    println!("✅ Trace with revoked API key rejected");
+    println!("✅ Trace for blocked project rejected");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
+async fn test_trace_project_ingestion_rate_limited() -> Result<()> {
+    let mut env = TestEnv::setup().await?;
+    let rate_limited_project_id = Uuid::new_v4();
+
+    env.client
+        .set_project_id(rate_limited_project_id.to_string());
+    env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
+        .with_api_key(env.api_key.clone())
+        .with_tenant_id(Uuid::nil().to_string())
+        .with_project_id(rate_limited_project_id.to_string());
+
+    let settings_resp = env
+        .client
+        .put(
+            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &serde_json::json!({
+                "traces_retention_days": 90,
+                "metrics_retention_days": 30,
+                "logs_retention_days": 30,
+                "max_ingestion_rate": 1,
+                "file_push_interval_secs": 300,
+                "blocked": false
+            }),
+        )
+        .await?;
+    assert_eq!(settings_resp.status(), 200);
+
+    let trace_id = TestDataGenerator::trace_id();
+    let root_span_id = TestDataGenerator::span_id();
+    let child_span_id = TestDataGenerator::span_id();
+    let sibling_span_id = TestDataGenerator::span_id();
+    let spans = vec![
+        ("root.operation", &root_span_id, None),
+        ("child.operation", &child_span_id, Some(&root_span_id)),
+        ("sibling.operation", &sibling_span_id, Some(&root_span_id)),
+    ];
+    let request = env
+        .otlp
+        .build_multi_span_trace("rate-limited-service", &trace_id, spans);
+
+    let result = env.otlp.export_traces(request).await;
+
+    assert!(
+        result.is_err(),
+        "Should reject trace request over max_ingestion_rate"
+    );
+
+    println!("✅ Trace over project ingestion rate rejected");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_metrics_project_ingestion_rate_limited() -> Result<()> {
+    let mut env = TestEnv::setup().await?;
+    let rate_limited_project_id = Uuid::new_v4();
+
+    env.client
+        .set_project_id(rate_limited_project_id.to_string());
+    env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
+        .with_api_key(env.api_key.clone())
+        .with_tenant_id(Uuid::nil().to_string())
+        .with_project_id(rate_limited_project_id.to_string());
+
+    let settings_resp = env
+        .client
+        .put(
+            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &serde_json::json!({
+                "traces_retention_days": 90,
+                "metrics_retention_days": 30,
+                "logs_retention_days": 30,
+                "max_ingestion_rate": 0,
+                "file_push_interval_secs": 300,
+                "blocked": false
+            }),
+        )
+        .await?;
+    assert_eq!(settings_resp.status(), 200);
+
+    let request = env
+        .otlp
+        .build_gauge_metric("rate-limited-metrics-service", "test.metric", 42.0);
+    let result = env.otlp.export_metrics(request).await;
+
+    assert!(
+        result.is_err(),
+        "Should reject metrics request over max_ingestion_rate"
+    );
+
+    println!("✅ Metrics over project ingestion rate rejected");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_logs_project_ingestion_rate_limited() -> Result<()> {
+    let mut env = TestEnv::setup().await?;
+    let rate_limited_project_id = Uuid::new_v4();
+
+    env.client
+        .set_project_id(rate_limited_project_id.to_string());
+    env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
+        .with_api_key(env.api_key.clone())
+        .with_tenant_id(Uuid::nil().to_string())
+        .with_project_id(rate_limited_project_id.to_string());
+
+    let settings_resp = env
+        .client
+        .put(
+            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &serde_json::json!({
+                "traces_retention_days": 90,
+                "metrics_retention_days": 30,
+                "logs_retention_days": 30,
+                "max_ingestion_rate": 0,
+                "file_push_interval_secs": 300,
+                "blocked": false
+            }),
+        )
+        .await?;
+    assert_eq!(settings_resp.status(), 200);
+
+    let request = env
+        .otlp
+        .build_log_request("rate-limited-logs-service", 9, "rate limited log");
+    let result = env.otlp.export_logs(request).await;
+
+    assert!(
+        result.is_err(),
+        "Should reject logs request over max_ingestion_rate"
+    );
+
+    println!("✅ Logs over project ingestion rate rejected");
+    Ok(())
+}
+
+// Note: API key revocation is no longer supported — keys are config-based.
+// Revocation requires updating config.toml and restarting the server.
+
+#[tokio::test]
+#[ignore]
 async fn test_trace_with_different_service_names() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    // Send traces from different services
     let services = vec!["frontend", "backend", "database", "cache"];
+    let mut trace_ids = Vec::new();
 
     for service in &services {
         let trace_id = TestDataGenerator::trace_id();
         let span_id = TestDataGenerator::span_id();
 
-        otlp_client
+        env.otlp
             .send_test_trace(service, &trace_id, &span_id, "test.operation")
             .await?;
 
+        trace_ids.push((service, trace_id));
         println!("  Trace from service '{}' sent", service);
     }
 
-    println!("✅ Traces from multiple services accepted");
+    // Verify each service's trace was stored
+    for (service, trace_id) in &trace_ids {
+        let trace_id_hex = hex::encode(trace_id);
+        let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+        let spans = trace_data["spans"].as_array().expect("Should have spans");
+        assert!(!spans.is_empty(), "Trace from {} should be stored", service);
+    }
+
+    println!("✅ Traces from multiple services accepted and verified");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_trace_with_complex_attributes() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    // The test_trace includes HTTP attributes
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
 
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    otlp_client
+    env.otlp
         .send_test_trace(&service_name, &trace_id, &span_id, "GET /api/users")
         .await?;
 
-    println!("✅ Trace with attributes accepted");
+    // Verify the span with its operation name was stored
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    assert!(!spans.is_empty(), "Should have at least 1 span");
+    assert_eq!(
+        spans[0]["operation_name"].as_str().unwrap_or(""),
+        "GET /api/users",
+        "Operation name should be stored correctly"
+    );
+
+    println!("✅ Trace with attributes accepted and verified");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_high_volume_trace_ingestion() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let service_name = TestDataGenerator::service_name();
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-    let count = 50; // Send 50 traces
+    let count = 50;
+    let mut last_trace_id = None;
 
     let start = std::time::Instant::now();
 
@@ -440,10 +415,13 @@ async fn test_high_volume_trace_ingestion() -> Result<()> {
         let span_id = TestDataGenerator::span_id();
         let span_name = format!("operation.{}", i);
 
-        otlp_client
+        env.otlp
             .send_test_trace(&service_name, &trace_id, &span_id, &span_name)
             .await?;
 
+        if i == count - 1 {
+            last_trace_id = Some(trace_id);
+        }
         if (i + 1) % 10 == 0 {
             println!("  Sent {}/{} traces", i + 1, count);
         }
@@ -457,71 +435,78 @@ async fn test_high_volume_trace_ingestion() -> Result<()> {
         count as f64 / elapsed.as_secs_f64()
     );
 
+    // Verify the last trace was stored to confirm all ingestion completed
+    if let Some(trace_id) = last_trace_id {
+        let trace_id_hex = hex::encode(trace_id);
+        let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+        assert!(
+            trace_data["spans"]
+                .as_array()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false),
+            "Last trace should be stored"
+        );
+    }
+
+    println!("✅ High-volume ingestion and storage verified");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_concurrent_trace_ingestion() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?.to_string();
-
-    let grpc_url = ctx.config.grpc_url.clone();
+    let grpc_url = env.grpc_url().to_string();
+    let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
+    let project_id = env.project_id;
 
-    // Send traces concurrently
     let mut handles = vec![];
+    let mut trace_ids = vec![];
 
     for i in 0..10 {
-        let key = key_value.clone();
+        let key = api_key.clone();
         let url = grpc_url.clone();
         let svc = service_name.clone();
+        let pid = project_id;
+        let trace_id = TestDataGenerator::trace_id();
+        trace_ids.push(trace_id);
+        let tid = trace_id;
 
         let handle = tokio::spawn(async move {
-            let otlp_client = OtlpClient::new(url).with_api_key(key);
-            let trace_id = TestDataGenerator::trace_id();
+            let otlp_client = OtlpClient::new(url)
+                .with_api_key(key)
+                .with_project_id(pid.to_string());
             let span_id = TestDataGenerator::span_id();
             let span_name = format!("concurrent.{}", i);
-
             otlp_client
-                .send_test_trace(&svc, &trace_id, &span_id, &span_name)
+                .send_test_trace(&svc, &tid, &span_id, &span_name)
                 .await
         });
 
         handles.push(handle);
     }
 
-    // Wait for all to complete
+    // All sends must succeed
     for (i, handle) in handles.into_iter().enumerate() {
         let result = handle.await.unwrap();
-        assert!(result.is_ok(), "Concurrent trace {} failed", i);
+        assert!(result.is_ok(), "Concurrent trace {} failed to send", i);
     }
 
-    println!("✅ Concurrent trace ingestion successful");
+    println!("✅ All 10 concurrent traces sent");
+
+    // Verify the first trace was stored (confirms ingestion pipeline is working)
+    let first_hex = hex::encode(trace_ids[0]);
+    let trace_data = wait_for_trace_default(&env.client, &first_hex).await?;
+    assert!(
+        trace_data["spans"]
+            .as_array()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "Concurrent traces should be stored"
+    );
+
+    println!("✅ Concurrent trace ingestion and storage verified");
     Ok(())
 }

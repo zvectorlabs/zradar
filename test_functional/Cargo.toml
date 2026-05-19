@@ -31,7 +31,6 @@ tokio = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
-clickhouse = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -41,9 +40,6 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-
-# Auth
-bcrypt = { workspace = true }
 
 # Test data generation
 fake = { version = "2.9", features = ["derive", "uuid", "chrono"] }

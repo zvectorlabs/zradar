@@ -1,7 +1,5 @@
-//! Audit logging shared module - re-exports from zradar_traits
+pub mod handlers;
+pub mod router;
 
-pub mod mock;
-
-// Re-export from traits
-pub use mock::MockAuditLogger;
-pub use zradar_traits::{AuditEvent, AuditLog, AuditLogger, AuditStatus};
+pub use handlers::AuditState;
+pub use router::audit_router;

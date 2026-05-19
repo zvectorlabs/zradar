@@ -83,7 +83,7 @@ impl FileListRepository for PostgresFileListRepository {
               AND ($6::bigint IS NULL OR min_ts       <= $6)
               AND ($7::text   IS NULL OR location     = $7)
               AND ($8::bool   IS NULL OR deleted      = $8)
-            ORDER BY created_at DESC
+            ORDER BY min_ts DESC, created_at DESC
             "#,
         )
         .bind(filter.tenant_id)
@@ -99,6 +99,58 @@ impl FileListRepository for PostgresFileListRepository {
         .context("Failed to query file_list")?;
 
         Ok(entries)
+    }
+
+    async fn query_compactable_groups(
+        &self,
+        cutoff_us: i64,
+    ) -> anyhow::Result<Vec<Vec<FileListEntry>>> {
+        let entries = sqlx::query_as::<_, FileListEntry>(
+            r#"
+            WITH groups AS (
+                SELECT tenant_id, project_id, signal_type, date, count(*) AS cnt
+                FROM file_list
+                WHERE deleted = false
+                  AND location = 'local'
+                  AND created_at < $1
+                GROUP BY tenant_id, project_id, signal_type, date
+                HAVING count(*) >= 2
+            )
+            SELECT
+                f.id, f.tenant_id, f.project_id, f.signal_type, f.stream_name, f.date,
+                f.file_path, f.location, f.min_ts, f.max_ts, f.records,
+                f.original_size, f.compressed_size, f.deleted, f.created_at, f.updated_at
+            FROM file_list f
+            JOIN groups g ON f.tenant_id = g.tenant_id
+                         AND f.project_id = g.project_id
+                         AND f.signal_type = g.signal_type
+                         AND f.date = g.date
+            WHERE f.deleted = false
+              AND f.location = 'local'
+              AND f.created_at < $1
+            ORDER BY f.tenant_id, f.project_id, f.signal_type, f.date, f.min_ts
+            "#,
+        )
+        .bind(cutoff_us)
+        .fetch_all(self.client.pool())
+        .await
+        .context("Failed to query compactable file groups")?;
+
+        let mut groups =
+            std::collections::HashMap::<(Uuid, Uuid, String, String), Vec<FileListEntry>>::new();
+        for entry in entries {
+            groups
+                .entry((
+                    entry.tenant_id,
+                    entry.project_id,
+                    entry.signal_type.clone(),
+                    entry.date.clone(),
+                ))
+                .or_default()
+                .push(entry);
+        }
+
+        Ok(groups.into_values().collect())
     }
 
     async fn update_location(&self, id: i64, location: &str, new_path: &str) -> anyhow::Result<()> {

@@ -51,7 +51,6 @@ The following is the list of supported scopes:
 - `traits`
 - `plugins`
 - `postgres`
-- `clickhouse`
 - `s3`
 - `redis`
 - `local`

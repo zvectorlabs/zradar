@@ -1,5 +1,6 @@
 //! Health check endpoints for zradar server
 
+use api_optel::CircuitBreaker;
 use axum::{
     Router,
     http::StatusCode,
@@ -8,7 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 /// Health check response
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,7 +28,22 @@ pub struct ReadinessResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReadinessChecks {
     pub database: CheckStatus,
-    pub clickhouse: CheckStatus,
+    pub storage: CheckStatus,
+    pub circuit_breaker: CheckStatus,
+    pub queue_depth: CheckStatus,
+    pub retention: CheckStatus,
+    pub ingestion: CheckStatus,
+    pub background_jobs: CheckStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthState {
+    pub pg_pool: Option<Arc<PgPool>>,
+    pub storage_path: PathBuf,
+    pub circuit_breaker: Option<Arc<CircuitBreaker>>,
+    pub retention_initialized: bool,
+    pub ingestion_initialized: bool,
+    pub background_jobs_started: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,22 +69,64 @@ pub async fn liveness() -> impl IntoResponse {
 }
 
 /// Readiness probe - checks dependencies
-pub async fn readiness(pg_pool: Option<Arc<PgPool>>) -> impl IntoResponse {
+pub async fn readiness(state: HealthState) -> impl IntoResponse {
     let mut checks = ReadinessChecks {
         database: CheckStatus::Unhealthy,
-        clickhouse: CheckStatus::Healthy, // TODO: Actually check ClickHouse
+        storage: CheckStatus::Unhealthy,
+        circuit_breaker: CheckStatus::Degraded,
+        queue_depth: CheckStatus::Degraded,
+        retention: CheckStatus::Unhealthy,
+        ingestion: CheckStatus::Unhealthy,
+        background_jobs: CheckStatus::Unhealthy,
     };
 
     // Check PostgreSQL connection
-    if let Some(pool) = pg_pool {
+    if let Some(pool) = state.pg_pool {
         match sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await {
             Ok(_) => checks.database = CheckStatus::Healthy,
             Err(_) => checks.database = CheckStatus::Unhealthy,
         }
     }
 
+    match tokio::fs::metadata(&state.storage_path).await {
+        Ok(metadata) if metadata.is_dir() => checks.storage = CheckStatus::Healthy,
+        _ => checks.storage = CheckStatus::Unhealthy,
+    }
+
+    if let Some(circuit_breaker) = state.circuit_breaker {
+        let current_depth = circuit_breaker.queue_depth();
+        let max_depth = circuit_breaker.max_queue_depth();
+        checks.queue_depth = if current_depth > max_depth {
+            CheckStatus::Degraded
+        } else {
+            CheckStatus::Healthy
+        };
+
+        match circuit_breaker.check().await {
+            Ok(_) => checks.circuit_breaker = CheckStatus::Healthy,
+            Err(_) => checks.circuit_breaker = CheckStatus::Degraded,
+        }
+    }
+
+    if state.retention_initialized {
+        checks.retention = CheckStatus::Healthy;
+    }
+
+    if state.ingestion_initialized {
+        checks.ingestion = CheckStatus::Healthy;
+    }
+
+    if state.background_jobs_started {
+        checks.background_jobs = CheckStatus::Healthy;
+    }
+
     let ready = matches!(checks.database, CheckStatus::Healthy)
-        && matches!(checks.clickhouse, CheckStatus::Healthy);
+        && matches!(checks.storage, CheckStatus::Healthy)
+        && !matches!(checks.circuit_breaker, CheckStatus::Unhealthy)
+        && !matches!(checks.queue_depth, CheckStatus::Unhealthy)
+        && matches!(checks.retention, CheckStatus::Healthy)
+        && matches!(checks.ingestion, CheckStatus::Healthy)
+        && matches!(checks.background_jobs, CheckStatus::Healthy);
 
     let status_code = if ready {
         StatusCode::OK
@@ -80,15 +138,15 @@ pub async fn readiness(pg_pool: Option<Arc<PgPool>>) -> impl IntoResponse {
 }
 
 /// Create health check router
-pub fn create_health_router(pg_pool: Option<Arc<PgPool>>) -> Router {
+pub fn create_health_router(state: HealthState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/health/live", get(liveness))
         .route(
             "/health/ready",
             get({
-                let pool = pg_pool.clone();
-                move || readiness(pool.clone())
+                let state = state.clone();
+                move || readiness(state.clone())
             }),
         )
 }
@@ -111,7 +169,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_readiness_no_pool() {
-        let response = readiness(None).await.into_response();
+        let response = readiness(HealthState {
+            pg_pool: None,
+            storage_path: PathBuf::from("."),
+            circuit_breaker: None,
+            retention_initialized: true,
+            ingestion_initialized: true,
+            background_jobs_started: true,
+        })
+        .await
+        .into_response();
         // Should be unhealthy without database
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }

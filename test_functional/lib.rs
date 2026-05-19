@@ -1,51 +1,50 @@
 //! Functional test library for zradar
 //!
-//! This library provides utilities for black-box API testing of zradar services.
-//! All tests verify behavior through public API endpoints only, without direct
-//! database access.
+//! Provides utilities for black-box API testing through public endpoints only.
 
 pub mod helpers;
 
-// Re-export main helpers for convenience
 pub use helpers::test_helpers::{
     assert_json_eq, assert_json_has_key, assert_not_empty, assert_starts_with, format_span_id,
     format_trace_id, generate_test_id, get_bool_from_json, get_i64_from_json, get_string_from_json,
     parse_uuid_from_json, wait_for_server,
 };
-pub use helpers::{ApiClient, OtlpClient, TestDataGenerator, TestFixture};
+pub use helpers::{ApiClient, OtlpClient, SpanDefExt, TestDataGenerator, TestFixture};
+pub use helpers::{
+    DEFAULT_POLL_INTERVAL, DEFAULT_POLL_TIMEOUT, poll_until, wait_for_items,
+    wait_for_items_default, wait_for_trace, wait_for_trace_default,
+};
+pub use helpers::{TestEnv, TestSession};
 
-// Re-export Result and common types for test scenarios
 pub use anyhow::Result;
 pub use hex;
 pub use serde_json::{Value, json};
 pub use std::time::Duration;
 
-/// Test configuration loaded from environment variables
+/// Test configuration loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct TestConfig {
     pub api_url: String,
     pub grpc_url: String,
-    pub admin_email: String,
-    pub admin_password: String,
+    /// API key configured in the server's `config.toml` `[[api_keys]]` section.
+    pub api_key: String,
 }
 
 impl TestConfig {
-    /// Load test configuration from environment variables with defaults
+    /// Load test configuration from environment variables with defaults.
     pub fn from_env() -> Self {
         Self {
             api_url: std::env::var("TEST_API_URL")
                 .unwrap_or_else(|_| "http://localhost:9015".to_string()),
             grpc_url: std::env::var("TEST_GRPC_URL")
                 .unwrap_or_else(|_| "http://localhost:9016".to_string()),
-            admin_email: std::env::var("TEST_ADMIN_EMAIL")
-                .unwrap_or_else(|_| "admin@example.com".to_string()),
-            admin_password: std::env::var("TEST_ADMIN_PASSWORD")
-                .unwrap_or_else(|_| "changeme123".to_string()),
+            api_key: std::env::var("TEST_API_KEY")
+                .unwrap_or_else(|_| "zk_test_default".to_string()),
         }
     }
 }
 
-/// Test context shared across tests
+/// Test context shared across tests.
 pub struct TestContext {
     pub config: TestConfig,
     pub api_client: ApiClient,
@@ -53,10 +52,11 @@ pub struct TestContext {
 }
 
 impl TestContext {
-    /// Create a new test context
+    /// Create a new test context with the configured API key.
     pub fn new() -> Self {
         let config = TestConfig::from_env();
-        let api_client = ApiClient::new(config.api_url.clone());
+        let mut api_client = ApiClient::new(config.api_url.clone());
+        api_client.set_token(config.api_key.clone());
         let otlp_client = OtlpClient::new(config.grpc_url.clone());
 
         Self {
@@ -66,38 +66,12 @@ impl TestContext {
         }
     }
 
-    /// Login as admin and return authenticated client
-    /// If login fails, attempts to register the admin user first
-    pub async fn login_as_admin(&self) -> Result<ApiClient> {
-        let mut client = ApiClient::new(self.config.api_url.clone());
-
-        // Try to login first
-        match client
-            .login(&self.config.admin_email, &self.config.admin_password)
-            .await
-        {
-            Ok(_) => Ok(client),
-            Err(_) => {
-                // Login failed, try to register the admin user
-                println!("Admin user not found, registering...");
-                let _ = client
-                    .register(
-                        &self.config.admin_email,
-                        &self.config.admin_password,
-                        "Test Admin",
-                    )
-                    .await?;
-
-                // Now try to login again
-                client
-                    .login(&self.config.admin_email, &self.config.admin_password)
-                    .await?;
-                Ok(client)
-            }
-        }
+    /// Return an authenticated client (API key already set in `new()`).
+    pub fn authenticated_client(&self) -> &ApiClient {
+        &self.api_client
     }
 
-    /// Wait for server to be ready
+    /// Wait for server to be ready.
     pub async fn wait_for_ready(&self, timeout_secs: u64) -> Result<()> {
         wait_for_server(&self.config.api_url, timeout_secs).await
     }

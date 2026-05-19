@@ -2,8 +2,8 @@
 # This is optimized for local development with hot reload
 # Usage: make dev  OR  docker-compose up
 #
-# Architecture: PostgreSQL-only (simplified)
-# - All data stored in PostgreSQL (telemetry, scores, control plane)
+# Architecture: PostgreSQL metadata + local Parquet telemetry
+# - Control plane and metadata stored in PostgreSQL
 # - Centralized migration system auto-runs on server startup
 # - Set AUTO_MIGRATE=true to enable automatic migrations
 
@@ -39,23 +39,6 @@ services:
   #     - "6379:6379"
   #   volumes:
   #     - ./data/redis:/data
-  #   networks:
-  #     - zradar
-
-  # ClickHouse - DISABLED (using Postgres for everything)
-  # Uncomment below if you need ClickHouse for high-scale deployments
-  # clickhouse:
-  #   image: clickhouse/clickhouse-server:24.1-alpine
-  #   container_name: zradar-clickhouse
-  #   environment:
-  #     CLICKHOUSE_DB: telemetry
-  #     CLICKHOUSE_USER: zradar
-  #     CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dev_password}
-  #   ports:
-  #     - "8123:8123"  # ClickHouse HTTP
-  #     - "9000:9000"  # ClickHouse Native
-  #   volumes:
-  #     - ./data/clickhouse:/var/lib/clickhouse
   #   networks:
   #     - zradar
 
@@ -107,7 +90,6 @@ services:
       postgres:
         condition: service_healthy
       # redis: disabled - not needed yet
-      # clickhouse: disabled - using Postgres only
     networks:
       - zradar
     command: cargo watch --poll -x 'run --bin zradar'

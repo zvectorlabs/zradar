@@ -1,56 +1,79 @@
-//! OTLP Trace Service gRPC implementation
+//! OTLP Trace Service gRPC implementation.
 
-use crate::auth::ApiKeyAuth;
+use crate::auth::authenticate_grpc;
+use crate::circuit_breaker::CircuitBreaker;
+use crate::converter::OtlpConverter;
+use crate::ingestion_guard::enforce_project_settings;
+use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse, trace_service_server::TraceService,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use zradar_models::RequestContext;
+use zradar_traits::{Authenticator, SettingsRepository, TelemetryWriter};
 
-/// Callback trait for handling raw OTLP trace data
-#[tonic::async_trait]
-pub trait SpanHandler: Send + Sync + 'static {
-    /// Handle raw OTLP trace data
-    ///
-    /// # Arguments
-    /// * `data` - Serialized ExportTraceServiceRequest protobuf
-    /// * `context` - Request context (tenant_id, project_id, etc.)
-    async fn handle_raw_otlp(&self, data: &[u8], context: &RequestContext) -> Result<(), Status>;
-}
-
-/// OTLP Trace Service implementation
+/// OTLP Trace Service — converts OTLP protobuf to spans and writes them.
 #[derive(Clone)]
-pub struct OtlpTraceService<H: SpanHandler> {
-    handler: Arc<H>,
-    auth: Option<Arc<ApiKeyAuth>>,
+pub struct OtlpTraceService {
+    writer: Arc<dyn TelemetryWriter>,
+    auth: Option<Arc<dyn Authenticator>>,
+    settings_repo: Option<Arc<dyn SettingsRepository>>,
+    rate_limiter: Option<Arc<ProjectRateLimiter>>,
+    circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
-impl<H: SpanHandler> OtlpTraceService<H> {
-    pub fn new(handler: Arc<H>, auth: Option<Arc<ApiKeyAuth>>) -> Self {
-        Self { handler, auth }
+impl OtlpTraceService {
+    pub fn new(writer: Arc<dyn TelemetryWriter>, auth: Option<Arc<dyn Authenticator>>) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: None,
+            rate_limiter: None,
+            circuit_breaker: None,
+        }
     }
 
-    async fn authenticate<T>(&self, request: &Request<T>) -> Result<RequestContext, Status> {
-        if let Some(ref auth) = self.auth {
-            auth.validate(request).await
-        } else {
-            // No auth - use default context
-            Ok(RequestContext::default())
+    pub fn with_settings_repository(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        settings_repo: Arc<dyn SettingsRepository>,
+        rate_limiter: Arc<ProjectRateLimiter>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: Some(settings_repo),
+            rate_limiter: Some(rate_limiter),
+            circuit_breaker: Some(circuit_breaker),
         }
     }
 }
 
 #[tonic::async_trait]
-impl<H: SpanHandler> TraceService for OtlpTraceService<H> {
+impl TraceService for OtlpTraceService {
     async fn export(
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
-        // Authenticate
-        let context = self.authenticate(&request).await?;
-
+        let context = authenticate_grpc(&self.auth, &request).await?;
+        if let Some(circuit_breaker) = &self.circuit_breaker {
+            circuit_breaker.check_status().await?;
+        }
         let req = request.into_inner();
+        let span_count = req
+            .resource_spans
+            .iter()
+            .flat_map(|resource_spans| &resource_spans.scope_spans)
+            .map(|scope_spans| scope_spans.spans.len() as u64)
+            .sum();
+        enforce_project_settings(
+            &self.settings_repo,
+            &self.rate_limiter,
+            &context,
+            span_count,
+        )
+        .await?;
 
         tracing::debug!(
             tenant_id = %context.tenant_id,
@@ -59,29 +82,27 @@ impl<H: SpanHandler> TraceService for OtlpTraceService<H> {
             "Received trace export request"
         );
 
-        // Serialize OTLP request to bytes (for storage)
-        use prost::Message;
-        let mut buf = Vec::new();
-        req.encode(&mut buf)
-            .map_err(|e| Status::internal(format!("Failed to serialize OTLP request: {}", e)))?;
+        let mut all_spans = Vec::new();
+        for resource_spans in req.resource_spans {
+            let spans = OtlpConverter::convert_resource_spans(resource_spans, &context)
+                .map_err(|e| Status::internal(format!("Failed to convert spans: {}", e)))?;
+            all_spans.extend(spans);
+        }
 
-        tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
-            size = buf.len(),
-            "Serialized OTLP request"
-        );
+        if !all_spans.is_empty() {
+            self.writer
+                .insert_spans(&all_spans)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to insert spans: {}", e)))?;
 
-        // Pass raw bytes to handler (for job queue)
-        self.handler.handle_raw_otlp(&buf, &context).await?;
+            tracing::info!(
+                tenant_id = %context.tenant_id,
+                project_id = %context.project_id,
+                spans = all_spans.len(),
+                "Persisted spans"
+            );
+        }
 
-        tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
-            "Successfully enqueued trace data"
-        );
-
-        // Return success response
         Ok(Response::new(ExportTraceServiceResponse {
             partial_success: None,
         }))
