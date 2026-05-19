@@ -11,6 +11,7 @@ pub use zradar_traits::TelemetryWriter;
 /// Trace query filters
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TraceQueryFilters {
+    #[serde(default)]
     pub project_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -19,12 +20,17 @@ pub struct TraceQueryFilters {
     pub min_duration_ms: Option<i64>,
     pub max_duration_ms: Option<i64>,
     pub status: Option<String>,
+    pub llm_model: Option<String>,
+    pub llm_provider: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
     pub limit: Option<i64>,
 }
 
 /// Span query filters
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SpanQueryFilters {
+    #[serde(default)]
     pub project_id: String,
     pub trace_id: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
@@ -33,6 +39,9 @@ pub struct SpanQueryFilters {
     pub operation_name: Option<String>,
     pub span_type: Option<String>,
     pub span_types: Option<String>, // comma-separated list
+    pub llm_model: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -75,6 +84,9 @@ mod tests {
             operation_name: None,
             span_type: Some("GENERATION".to_string()),
             span_types: None,
+            llm_model: None,
+            agent_name: None,
+            session_id: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
@@ -92,6 +104,9 @@ mod tests {
             operation_name: None,
             span_type: None,
             span_types: Some("GENERATION,TOOL,AGENT".to_string()),
+            llm_model: None,
+            agent_name: None,
+            session_id: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
@@ -116,6 +131,9 @@ mod tests {
             operation_name: None,
             span_type: Some("INVALID".to_string()),
             span_types: None,
+            llm_model: None,
+            agent_name: None,
+            session_id: None,
             limit: None,
         };
         assert!(params.parse_span_types().is_err());
@@ -132,6 +150,9 @@ mod tests {
             operation_name: None,
             span_type: None,
             span_types: Some(" GENERATION , TOOL ".to_string()),
+            llm_model: None,
+            agent_name: None,
+            session_id: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
@@ -145,17 +166,20 @@ mod tests {
 /// Analytics query
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AnalyticsQuery {
+    #[serde(default)]
     pub project_id: String,
     pub start: Option<DateTime<Utc>>,
     pub end: Option<DateTime<Utc>>,
     pub metric: Option<String>,
-    pub group_by: Option<Vec<String>>,
+    /// Comma-separated list of dimensions to group by, e.g. "agent_name,llm_model"
+    pub group_by: Option<String>,
     pub filters: Option<HashMap<String, String>>,
 }
 
 /// Top N query
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TopNQuery {
+    #[serde(default)]
     pub project_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
@@ -227,6 +251,25 @@ pub struct TopEndpoint {
     pub error_rate: f64,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LlmAnalytics {
+    pub llm_model: String,
+    pub request_count: i64,
+    pub total_tokens: f64,
+    pub total_cost_usd: f64,
+    pub avg_duration_ms: f64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgentAnalytics {
+    pub agent_name: String,
+    pub agent_type: Option<String>,
+    pub span_count: i64,
+    pub error_count: i64,
+    pub total_tokens: f64,
+    pub avg_duration_ms: f64,
+}
+
 /// Paginated response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PaginatedResponse<T> {
@@ -239,6 +282,7 @@ pub struct PaginatedResponse<T> {
 /// Error analytics query
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ErrorAnalyticsQuery {
+    #[serde(default)]
     pub project_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
@@ -256,6 +300,7 @@ pub struct ErrorBreakdown {
 /// Log query filters (API-level)
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct LogQueryFilters {
+    #[serde(default)]
     pub project_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -271,6 +316,7 @@ pub struct LogQueryFilters {
 /// Metric query filters (API-level)
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MetricQueryFilters {
+    #[serde(default)]
     pub project_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -283,6 +329,7 @@ pub struct MetricQueryFilters {
 /// Metric time-series filters (API-level)
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MetricSeriesFilters {
+    #[serde(default)]
     pub project_id: String,
     pub metric_name: String,
     pub start_time: Option<DateTime<Utc>>,

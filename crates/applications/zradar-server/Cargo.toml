@@ -13,8 +13,6 @@ path = "src/main.rs"
 # Core
 zradar-models = { path = "../../core/zradar-models" }
 zradar-traits = { path = "../../core/zradar-traits" }
-zradar-plugins = { path = "../../core/zradar-plugins" }
-zradar-migrations = { path = "../../core/zradar-migrations" }
 zradar-parquet = { path = "../../core/zradar-parquet" }
 
 # Services
@@ -25,12 +23,13 @@ api = { path = "../../services/api" }
 # Note: Multiple plugins cause symbol conflicts with extern "C" functions
 # Only include what's needed for current configuration
 zradar-plugin-postgres = { path = "../../plugins/zradar-plugin-postgres" }
-zradar-plugin-local = { path = "../../plugins/zradar-plugin-local" }
-# zradar-plugin-clickhouse = { path = "../../plugins/zradar-plugin-clickhouse" }  # Disabled - using Postgres only
+zradar-plugin-s3 = { path = "../../plugins/zradar-plugin-s3" }
+zradar-retention = { path = "../../core/zradar-retention" }
 
 # Async traits
 async-trait = { workspace = true }
 uuid = { workspace = true }
+tokio-util = { workspace = true }
 
 # OpenTelemetry Protocol
 opentelemetry-proto = { workspace = true }
@@ -41,7 +40,6 @@ tokio = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
-clickhouse = { workspace = true }
 
 # HTTP/API
 axum = { workspace = true }

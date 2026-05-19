@@ -1,13 +1,12 @@
 //! Span data model for distributed tracing
 
-use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 
 /// Span represents a single unit of work in distributed tracing.
 ///
 /// This includes standard OpenTelemetry fields plus LLM-specific attributes
 /// for tracking costs, tokens, prompts, and model parameters.
-#[derive(Debug, Clone, Serialize, Deserialize, Row, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Span {
     // ============================================================
     // Identity

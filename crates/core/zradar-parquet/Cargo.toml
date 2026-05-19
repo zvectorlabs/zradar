@@ -15,6 +15,7 @@ datafusion = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 async-trait = { workspace = true }
 
 # Serialization / Utilities
@@ -22,6 +23,12 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+
+# Concurrent data structures (M07-04 write buffer, M07-06 memory cache)
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+lru = { workspace = true }
+bytes = { workspace = true }
 
 # Internal workspace crates
 zradar-models = { workspace = true }

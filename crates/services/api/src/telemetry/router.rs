@@ -1,18 +1,12 @@
 //! Telemetry/Query module router
 
-use axum::{Extension, Router, routing::get};
+use axum::{Router, routing::get};
 use std::sync::Arc;
 
 use super::{QueryService, handlers};
-use crate::auth::TokenAuth;
-use crate::users::UserRepository;
 
-/// Create the query/telemetry router with all endpoints
-pub fn router(
-    service: Arc<QueryService>,
-    jwt_auth: Arc<dyn TokenAuth>,
-    user_storage: Arc<dyn UserRepository>,
-) -> Router {
+/// Create the query/telemetry router with all endpoints.
+pub fn router(service: Arc<QueryService>) -> Router {
     Router::new()
         .route("/api/v1/traces", get(handlers::query_traces))
         .route("/api/v1/traces/:trace_id", get(handlers::get_trace))
@@ -31,13 +25,14 @@ pub fn router(
             "/api/v1/analytics/errors",
             get(handlers::get_error_breakdown),
         )
-        // Logs endpoints
+        .route("/api/v1/analytics/llm", get(handlers::get_llm_analytics))
+        .route(
+            "/api/v1/analytics/agents",
+            get(handlers::get_agent_analytics),
+        )
         .route("/api/v1/logs", get(handlers::query_logs))
         .route("/api/v1/logs/:log_id", get(handlers::get_log))
-        // Metrics endpoints
         .route("/api/v1/metrics", get(handlers::query_metrics))
         .route("/api/v1/metrics/series", get(handlers::query_metric_series))
         .with_state(service)
-        .layer(Extension(jwt_auth))
-        .layer(Extension(user_storage))
 }

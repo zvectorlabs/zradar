@@ -6,7 +6,7 @@
 # - All test data in PostgreSQL
 # - Centralized migration system auto-runs on test startup
 # - In-memory volume for fast cleanup
-# - Redis/ClickHouse disabled (add back if needed)
+# - Redis disabled (add back if needed)
 
 services:
   postgres-test:
@@ -37,20 +37,6 @@ services:
   #     - "9014:6379"
   #   tmpfs:
   #     - /data
-  #   networks:
-  #     - zradar-test
-
-  # ClickHouse - DISABLED for testing (using Postgres only)
-  # Uncomment if you need ClickHouse in test environment
-  # clickhouse-test:
-  #   image: clickhouse/clickhouse-server:24.1-alpine
-  #   container_name: zradar-test-clickhouse
-  #   environment:
-  #     CLICKHOUSE_DB: telemetry_test
-  #     CLICKHOUSE_USER: zradar_test
-  #     CLICKHOUSE_PASSWORD: test_pass_123
-  #   ports:
-  #     - "9012:8123"
   #   networks:
   #     - zradar-test
 

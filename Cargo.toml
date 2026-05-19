@@ -1,34 +1,30 @@
 [workspace]
 resolver = "2"
 members = [
-    # Layer 1: Core (traits and models)
+    # Core (traits and models)
     "crates/core/zradar-models",
     "crates/core/zradar-traits",
-    "crates/core/zradar-migrations",
-    "crates/core/zradar-plugins",
     "crates/core/zradar-parquet",
-    
-    # Layer 2: Plugins (ALL implementations)
+    "crates/core/zradar-retention",
+
+    # Storage backends
     "crates/plugins/zradar-plugin-postgres",
-    "crates/plugins/zradar-plugin-clickhouse",
     "crates/plugins/zradar-plugin-s3",
-    "crates/plugins/zradar-plugin-redis",
-    "crates/plugins/zradar-plugin-local",
-    
-    # Layer 3: Services (business logic)
+
+    # Services (business logic)
     "crates/services/api",
     "crates/services/api-optel",
-    
-    # Layer 4: Applications (executables)
+
+    # Applications (executables)
     "crates/applications/zradar-server",
-    "crates/applications/zradar-worker",
-    
+
     # Functional Tests
     "test_functional",
 ]
 
 [workspace.package]
 edition = "2024"
+rustversion = "1.93.0"
 
 # Shared workspace dependencies
 [workspace.dependencies]
@@ -40,10 +36,7 @@ tonic = { version = "0.9", features = ["gzip"] }
 prost = "0.11"
 tokio = { version = "1.35", features = ["full"] }
 tokio-stream = "0.1"
-
-# ClickHouse
-clickhouse = { version = "0.11", features = ["lz4"] }
-clickhouse-derive = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -64,12 +57,8 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 hex = "0.4"
 async-trait = "0.1"
 
-# Redis (for hybrid queue)
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
-
-# AWS SDK (for S3 storage)
-aws-sdk-s3 = "1.9"
-aws-config = "1.0"
+# Object storage (S3-compatible via opendal)
+opendal = { version = "0.49", features = ["services-s3"] }
 
 # Web framework (upgraded to 0.7 for utoipa support)
 axum = "0.7"
@@ -83,35 +72,53 @@ utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 # Database
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "chrono", "migrate"] }
 
-# Authentication
-jsonwebtoken = "9.2"
-bcrypt = "0.15"
-
 # Arrow / Parquet / DataFusion
 # DataFusion 44 uses arrow/parquet 53 internally; pin to the same major to avoid duplicate crates.
 arrow = "53"
 parquet = { version = "53", features = ["arrow", "async"] }
 datafusion = { version = "44", features = ["parquet"] }
 
+# Concurrent data structures
+dashmap = "5"
+parking_lot = "0.12"
+lru = "0.12"
+
+# Byte buffers
+bytes = "1"
+
 # Internal workspace crates (Core)
 zradar-models = { path = "crates/core/zradar-models" }
 zradar-traits = { path = "crates/core/zradar-traits" }
-zradar-plugins = { path = "crates/core/zradar-plugins" }
 zradar-parquet = { path = "crates/core/zradar-parquet" }
+zradar-retention = { path = "crates/core/zradar-retention" }
 
 # Internal workspace crates (Services)
 api = { path = "crates/services/api" }
 api-optel = { path = "crates/services/api-optel" }
 
-# Plugins
+# Storage backends
 zradar-plugin-postgres = { path = "crates/plugins/zradar-plugin-postgres" }
-zradar-plugin-clickhouse = { path = "crates/plugins/zradar-plugin-clickhouse" }
 zradar-plugin-s3 = { path = "crates/plugins/zradar-plugin-s3" }
-zradar-plugin-redis = { path = "crates/plugins/zradar-plugin-redis" }
-zradar-plugin-local = { path = "crates/plugins/zradar-plugin-local" }
+
+# Profile options that do NOT improve linker speed:
+# - opt-level, incremental, debug: affect compile/codegen only
+# - strip: runs after linking; only shrinks binary
+# - lto / codegen-units: more link-time work (LTO runs at link time)
+
+[profile.dev]
+split-debuginfo = "unpacked"
+debug = 1
+opt-level = 0
+incremental = true
+
+[profile.test]
+split-debuginfo = "unpacked"
+debug = 1
+incremental = true
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+lto = false
+codegen-units = 16
+debug = 1
+strip = false

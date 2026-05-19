@@ -1,11 +1,7 @@
-//! HTTP layer - router and utilities
-//!
-//! This module provides HTTP routing infrastructure.
-//! Handlers are now in their respective domain modules.
+//! HTTP layer — router and auth extractor.
 
-pub mod extractors;
+pub mod auth_extractor;
 pub mod router;
 
-// Re-export main types
-pub use extractors::AuthenticatedUser;
-pub use router::{ApiDoc, create_admin_router};
+pub use auth_extractor::AuthContext;
+pub use router::create_admin_router;

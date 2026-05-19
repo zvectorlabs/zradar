@@ -9,28 +9,18 @@ use uuid::Uuid;
 /// Database client for test verification
 pub struct DbClient {
     pub pg_pool: PgPool,
-    pub clickhouse_client: clickhouse::Client,
 }
 
 impl DbClient {
     /// Create a new database client
-    pub async fn new(database_url: &str, clickhouse_url: &str) -> Result<Self> {
+    pub async fn new(database_url: &str) -> Result<Self> {
         let pg_pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(5)
             .connect(database_url)
             .await
             .context("Failed to connect to PostgreSQL")?;
 
-        let clickhouse_client = clickhouse::Client::default()
-            .with_url(clickhouse_url)
-            .with_user("zradar_test")
-            .with_password("test_pass_123")
-            .with_database("telemetry_test");
-
-        Ok(Self {
-            pg_pool,
-            clickhouse_client,
-        })
+        Ok(Self { pg_pool })
     }
 
     // ========================================================================
@@ -190,182 +180,6 @@ impl DbClient {
     }
 
     // ========================================================================
-    // PostgreSQL - Ingestion Jobs
-    // ========================================================================
-
-    /// Count ingestion jobs
-    pub async fn count_ingestion_jobs(&self) -> Result<i64> {
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM ingestion_jobs")
-            .fetch_one(&self.pg_pool)
-            .await?;
-        Ok(row.0)
-    }
-
-    /// Count ingestion jobs by status
-    pub async fn count_jobs_by_status(&self, status: &str) -> Result<i64> {
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM ingestion_jobs WHERE status = $1")
-            .bind(status)
-            .fetch_one(&self.pg_pool)
-            .await?;
-        Ok(row.0)
-    }
-
-    /// Get recent ingestion jobs
-    pub async fn get_recent_jobs(&self, limit: i64) -> Result<Vec<IngestionJob>> {
-        let jobs = sqlx::query_as::<_, IngestionJob>(
-            "SELECT id, project_id, status, retry_count, created_at, updated_at 
-             FROM ingestion_jobs 
-             ORDER BY created_at DESC 
-             LIMIT $1",
-        )
-        .bind(limit)
-        .fetch_all(&self.pg_pool)
-        .await?;
-
-        Ok(jobs)
-    }
-
-    // ========================================================================
-    // ClickHouse - Traces
-    // ========================================================================
-
-    /// Count traces in ClickHouse
-    pub async fn count_traces(&self) -> Result<u64> {
-        #[derive(clickhouse::Row, Deserialize)]
-        struct Count {
-            count: u64,
-        }
-
-        let result = self
-            .clickhouse_client
-            .query("SELECT COUNT(*) as count FROM traces")
-            .fetch_one::<Count>()
-            .await
-            .context("Failed to count traces")?;
-
-        Ok(result.count)
-    }
-
-    /// Count traces for a project
-    pub async fn count_traces_for_project(&self, project_id: &Uuid) -> Result<u64> {
-        #[derive(clickhouse::Row, Deserialize)]
-        struct Count {
-            count: u64,
-        }
-
-        let result = self
-            .clickhouse_client
-            .query("SELECT COUNT(*) as count FROM traces WHERE project_id = ?")
-            .bind(project_id)
-            .fetch_one::<Count>()
-            .await
-            .context("Failed to count traces for project")?;
-
-        Ok(result.count)
-    }
-
-    /// Get trace by ID
-    pub async fn get_trace_by_id(&self, trace_id: &str) -> Result<Option<TraceRecord>> {
-        let result = self
-            .clickhouse_client
-            .query("SELECT * FROM traces WHERE trace_id = ? LIMIT 1")
-            .bind(trace_id)
-            .fetch_optional::<TraceRecord>()
-            .await
-            .context("Failed to fetch trace")?;
-
-        Ok(result)
-    }
-
-    /// Search traces by service name
-    pub async fn search_traces_by_service(&self, service_name: &str) -> Result<Vec<TraceRecord>> {
-        let results = self
-            .clickhouse_client
-            .query("SELECT * FROM traces WHERE service_name = ? ORDER BY timestamp DESC LIMIT 100")
-            .bind(service_name)
-            .fetch_all::<TraceRecord>()
-            .await
-            .context("Failed to search traces")?;
-
-        Ok(results)
-    }
-
-    // ========================================================================
-    // ClickHouse - Scores (for debugging)
-    // ========================================================================
-
-    /// Count scores in ClickHouse
-    pub async fn count_scores(&self) -> Result<u64> {
-        #[derive(clickhouse::Row, Deserialize)]
-        struct Count {
-            count: u64,
-        }
-
-        let result = self
-            .clickhouse_client
-            .query("SELECT COUNT(*) as count FROM evaluation_scores WHERE is_deleted = 0")
-            .fetch_one::<Count>()
-            .await
-            .context("Failed to count scores")?;
-
-        Ok(result.count)
-    }
-
-    /// Get scores for a trace (raw ClickHouse query for debugging)
-    pub async fn get_scores_for_trace(
-        &self,
-        tenant_id: &str,
-        project_id: &str,
-        trace_id: &str,
-    ) -> Result<Vec<ScoreRecord>> {
-        println!(
-            "🔍 DIRECT CH QUERY: tenant_id={}, project_id={}, trace_id={}",
-            tenant_id, project_id, trace_id
-        );
-
-        let results = self
-            .clickhouse_client
-            .query("SELECT id, tenant_id, project_id, trace_id, name, value FROM evaluation_scores WHERE tenant_id = ? AND project_id = ? AND trace_id = ? AND is_deleted = 0")
-            .bind(tenant_id)
-            .bind(project_id)
-            .bind(trace_id)
-            .fetch_all::<ScoreRecord>()
-            .await
-            .context("Failed to fetch scores")?;
-
-        println!("🔍 DIRECT CH RESULT: found {} scores", results.len());
-        for score in &results {
-            println!(
-                "  - id={}, name={}, tenant_id={}, project_id={}, trace_id={}",
-                score.id, score.name, score.tenant_id, score.project_id, score.trace_id
-            );
-        }
-
-        Ok(results)
-    }
-
-    /// Get all scores (for debugging - shows what's actually in CH)
-    pub async fn get_all_scores(&self, limit: u64) -> Result<Vec<ScoreRecord>> {
-        let results = self
-            .clickhouse_client
-            .query("SELECT id, tenant_id, project_id, trace_id, name, value FROM evaluation_scores WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT ?")
-            .bind(limit)
-            .fetch_all::<ScoreRecord>()
-            .await
-            .context("Failed to fetch all scores")?;
-
-        println!("🔍 ALL SCORES in ClickHouse (limit {}):", limit);
-        for score in &results {
-            println!(
-                "  - id={}, name={}, tenant_id={}, project_id={}, trace_id={}",
-                score.id, score.name, score.tenant_id, score.project_id, score.trace_id
-            );
-        }
-
-        Ok(results)
-    }
-
-    // ========================================================================
     // Cleanup Methods
     // ========================================================================
 
@@ -408,10 +222,6 @@ impl DbClient {
             .await?;
 
         sqlx::query("TRUNCATE TABLE organizations CASCADE")
-            .execute(&self.pg_pool)
-            .await?;
-
-        sqlx::query("TRUNCATE TABLE ingestion_jobs CASCADE")
             .execute(&self.pg_pool)
             .await?;
 
@@ -463,36 +273,4 @@ pub struct ApiKey {
     pub is_revoked: bool,
     pub created_at: DateTime<Utc>,
     pub revoked_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct IngestionJob {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub status: String,
-    pub retry_count: i32,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, clickhouse::Row)]
-pub struct TraceRecord {
-    pub trace_id: String,
-    pub span_id: String,
-    pub parent_span_id: String,
-    pub project_id: String,
-    pub service_name: String,
-    pub span_name: String,
-    pub timestamp: u64,
-    pub duration_ns: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, clickhouse::Row)]
-pub struct ScoreRecord {
-    pub id: String,
-    pub tenant_id: String,
-    pub project_id: String,
-    pub trace_id: String,
-    pub name: String,
-    pub value: f64,
 }
