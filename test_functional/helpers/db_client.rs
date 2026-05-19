@@ -23,6 +23,68 @@ impl DbClient {
         Ok(Self { pg_pool })
     }
 
+    /// Create a database client from the functional test environment.
+    pub async fn from_env() -> Result<Self> {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .or_else(|_| std::env::var("DATABASE_URL"))
+            .unwrap_or_else(|_| {
+                "postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test".to_string()
+            });
+        Self::new(&database_url).await
+    }
+
+    // ========================================================================
+    // PostgreSQL - Parquet Metadata
+    // ========================================================================
+
+    /// List file metadata rows for a project and signal.
+    pub async fn file_list_entries(
+        &self,
+        tenant_id: &Uuid,
+        project_id: &Uuid,
+        signal_type: &str,
+    ) -> Result<Vec<FileListEntry>> {
+        let rows = sqlx::query_as::<_, FileListEntry>(
+            "SELECT id, tenant_id, project_id, signal_type, stream_name, date, file_path,
+                    location, min_ts, max_ts, records, original_size, compressed_size,
+                    deleted, created_at, updated_at
+             FROM file_list
+             WHERE tenant_id = $1 AND project_id = $2 AND signal_type = $3
+             ORDER BY id",
+        )
+        .bind(tenant_id)
+        .bind(project_id)
+        .bind(signal_type)
+        .fetch_all(&self.pg_pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    /// List stream statistics rows for a project and signal.
+    pub async fn stream_stats(
+        &self,
+        tenant_id: &Uuid,
+        project_id: &Uuid,
+        signal_type: &str,
+    ) -> Result<Vec<StreamStatsEntry>> {
+        let rows = sqlx::query_as::<_, StreamStatsEntry>(
+            "SELECT id, tenant_id, project_id, signal_type, stream_name, file_count,
+                    min_ts, max_ts, total_records, total_original_size,
+                    total_compressed_size, updated_at
+             FROM stream_stats
+             WHERE tenant_id = $1 AND project_id = $2 AND signal_type = $3
+             ORDER BY id",
+        )
+        .bind(tenant_id)
+        .bind(project_id)
+        .bind(signal_type)
+        .fetch_all(&self.pg_pool)
+        .await?;
+
+        Ok(rows)
+    }
+
     // ========================================================================
     // PostgreSQL - Users
     // ========================================================================
@@ -273,4 +335,40 @@ pub struct ApiKey {
     pub is_revoked: bool,
     pub created_at: DateTime<Utc>,
     pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct FileListEntry {
+    pub id: i64,
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+    pub signal_type: String,
+    pub stream_name: String,
+    pub date: String,
+    pub file_path: String,
+    pub location: String,
+    pub min_ts: i64,
+    pub max_ts: i64,
+    pub records: i64,
+    pub original_size: i64,
+    pub compressed_size: i64,
+    pub deleted: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct StreamStatsEntry {
+    pub id: i64,
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+    pub signal_type: String,
+    pub stream_name: String,
+    pub file_count: i64,
+    pub min_ts: i64,
+    pub max_ts: i64,
+    pub total_records: i64,
+    pub total_original_size: i64,
+    pub total_compressed_size: i64,
+    pub updated_at: i64,
 }
