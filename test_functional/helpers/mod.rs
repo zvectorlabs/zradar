@@ -7,12 +7,12 @@ pub mod polling;
 pub mod test_env;
 pub mod test_helpers;
 
-// Database client kept for setup/cleanup only (not for test assertions)
 #[allow(dead_code)]
-pub(crate) mod db_client;
+pub mod db_client;
 
 // Re-export commonly used items for black-box testing
 pub use api_client::ApiClient;
+pub use db_client::DbClient;
 pub use fixtures::*;
 pub use grpc_client::{OtlpClient, SpanDefExt};
 pub use polling::{

@@ -25,6 +25,9 @@ mod test_query_api;
 #[path = "scenarios/test_telemetry_storage.rs"]
 mod test_telemetry_storage;
 
+#[path = "scenarios/test_parquet_metadata.rs"]
+mod test_parquet_metadata;
+
 #[path = "scenarios/test_span_types.rs"]
 mod test_span_types;
 

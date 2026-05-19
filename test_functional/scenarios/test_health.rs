@@ -47,7 +47,17 @@ async fn test_health_ready_checks_dependencies() -> Result<()> {
 #[ignore]
 async fn test_health_live_probe() -> Result<()> {
     let session = TestSession::setup().await?;
+<<<<<<< Updated upstream
     session.client.health_live().await?;
+=======
+    let response = session.client.get("/health/live").await?;
+    assert_eq!(response.status(), 200, "live probe should return HTTP 200");
+    let body = response.text().await?;
+    assert!(
+        body.is_empty(),
+        "live probe should not require a response body"
+    );
+>>>>>>> Stashed changes
 
     println!("✅ Health live probe succeeds");
     Ok(())

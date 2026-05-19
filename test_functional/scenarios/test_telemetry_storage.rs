@@ -1,10 +1,27 @@
 //! Telemetry Storage Tests
 //!
 //! These tests verify that spans and metrics sent via OTLP are properly
-//! stored in PostgreSQL with all fields intact.
+//! stored as Parquet data and can be queried back with all fields intact.
 
 #[allow(unused_imports)]
 use crate::*;
+use opentelemetry_proto::tonic::common::v1::AnyValue;
+
+fn string_value(value: &str) -> AnyValue {
+    AnyValue {
+        value: Some(
+            opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                value.to_string(),
+            ),
+        ),
+    }
+}
+
+fn int_value(value: i64) -> AnyValue {
+    AnyValue {
+        value: Some(opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(value)),
+    }
+}
 
 /// Test that a span sent via OTLP is stored and can be queried back
 #[tokio::test]
@@ -62,21 +79,51 @@ async fn test_llm_span_fields_storage() -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
-    env.otlp
-        .send_test_trace(
-            "llm-service",
-            &trace_id,
-            &span_id,
-            "openai.chat.completions",
-        )
-        .await?;
+    let request = env.otlp.build_multi_span_trace_with_attributes(
+        "llm-service",
+        &trace_id,
+        vec![SpanDefExt {
+            name: "openai.chat.completions".to_string(),
+            span_id,
+            parent_span_id: None,
+            attributes: vec![
+                ("gen_ai.request.model".to_string(), string_value("gpt-4")),
+                ("llm.input".to_string(), string_value("What is zradar?")),
+                (
+                    "llm.output".to_string(),
+                    string_value("zradar is an observability platform."),
+                ),
+                ("llm.usage.prompt_tokens".to_string(), int_value(11)),
+                ("llm.usage.completion_tokens".to_string(), int_value(17)),
+                ("llm.usage.total_tokens".to_string(), int_value(28)),
+            ],
+            status_code: Some(1),
+        }],
+    );
+    env.otlp.export_traces(request).await?;
 
     println!("✅ LLM trace sent");
 
     let trace_id_hex = hex::encode(trace_id);
     let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
-    assert!(!spans.is_empty(), "Should have spans");
+    assert_eq!(spans.len(), 1, "Should have exactly one LLM span");
+    let span = &spans[0];
+    assert_eq!(
+        span["operation_name"].as_str().unwrap(),
+        "openai.chat.completions"
+    );
+    assert_eq!(span["span_type"].as_str().unwrap(), "GENERATION");
+
+    let filtered = wait_for_items_default(&env.client, "/api/v1/spans?llm_model=gpt-4").await?;
+    assert!(
+        filtered.iter().any(|item| {
+            item["span_id"].as_str() == Some(hex::encode(span_id).as_str())
+                && item["operation_name"].as_str() == Some("openai.chat.completions")
+                && item["span_type"].as_str() == Some("GENERATION")
+        }),
+        "LLM model should be stored in typed columns and queryable by llm_model"
+    );
 
     println!("✅ LLM span fields verified!");
     Ok(())

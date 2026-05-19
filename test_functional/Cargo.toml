@@ -32,6 +32,10 @@ tokio = { workspace = true }
 # Database
 sqlx = { workspace = true }
 
+# Arrow / Parquet file inspection
+arrow = { workspace = true }
+parquet = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
