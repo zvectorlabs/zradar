@@ -1,0 +1,21 @@
+# Cargo build configuration for faster parallel builds
+# Optimized for 12-core system with multiple concurrent shells
+#
+# Options that do NOT improve linker speed:
+# - jobs, pipelining, rustc-wrapper: affect compilation/caching; link step is single-threaded
+# - -dead_strip: linker does extra work to strip; smaller binary, not faster link
+
+[build]
+# Use all CPU cores for parallel compilation
+jobs = 12
+# Enable pipelining for better parallelism
+pipelining = true
+# Use sccache for shared compilation cache across shells
+# This allows multiple shells to share compiled artifacts
+rustc-wrapper = "sccache"
+
+# Target-specific configuration for macOS ARM64
+[target.aarch64-apple-darwin]
+# Linker speed: no dead_strip (faster link). For even faster linking, install lld and uncomment:
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+# (brew install llvm, then run scripts/ENABLE_LLD.sh)

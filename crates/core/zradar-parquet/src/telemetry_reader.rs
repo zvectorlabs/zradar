@@ -10,12 +10,14 @@ use anyhow::{Context, anyhow};
 use arrow::array::{Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use uuid::Uuid;
 use zradar_models::{FileListFilter, LogRecord, Metric, Span};
+
 use zradar_traits::{
-    AnalyticsReader, LogQueryFilters, MetricPoint, MetricQueryFilters, MetricSeriesFilters,
-    MetricsSummary, PaginatedResponse, Pagination, SpanQueryFilters, TelemetryReader,
-    TimeSeriesPoint, TraceQueryFilters, TraceSummary,
+    AnalyticsDataPoint, AnalyticsQueryFilters, AnalyticsReader, LogQueryFilters, MetricPoint,
+    MetricQueryFilters, MetricSeriesFilters, MetricsSummary, PaginatedResponse, Pagination,
+    SpanQueryFilters, TelemetryReader, TimeSeriesPoint, TraceQueryFilters, TraceSummary,
 };
 
 use crate::reader::ParquetFileReader;
@@ -39,11 +41,13 @@ impl ParquetTelemetryReader {
 impl AnalyticsReader for ParquetTelemetryReader {
     async fn get_daily_trace_counts(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         start: i64,
         end: i64,
     ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
         let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(start / 1_000),
@@ -104,11 +108,13 @@ impl AnalyticsReader for ParquetTelemetryReader {
 
     async fn get_metrics_summary(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         start: i64,
         end: i64,
     ) -> anyhow::Result<MetricsSummary> {
         let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(start / 1_000),
@@ -187,6 +193,179 @@ impl AnalyticsReader for ParquetTelemetryReader {
             p99_latency: p99,
         })
     }
+
+    async fn query_analytics(
+        &self,
+        tenant_id: Uuid,
+        filters: AnalyticsQueryFilters,
+    ) -> anyhow::Result<Vec<AnalyticsDataPoint>> {
+        // Whitelisted metric names and their SQL aggregation expressions.
+        const ALLOWED_METRICS: &[(&str, &str)] = &[
+            ("trace_count", "COUNT(DISTINCT trace_id)"),
+            ("span_count", "COUNT(*)"),
+            ("total_tokens", "CAST(SUM(total_tokens) AS DOUBLE)"),
+            ("prompt_tokens", "CAST(SUM(prompt_tokens) AS DOUBLE)"),
+            (
+                "completion_tokens",
+                "CAST(SUM(completion_tokens) AS DOUBLE)",
+            ),
+            ("total_cost_usd", "SUM(total_cost_usd)"),
+            (
+                "avg_duration_ms",
+                "AVG(CAST(duration_ns AS DOUBLE)) / 1000000.0",
+            ),
+            (
+                "error_count",
+                "CAST(SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) AS DOUBLE)",
+            ),
+        ];
+
+        // Whitelisted column names that can be used in GROUP BY and WHERE filters.
+        const ALLOWED_DIMENSIONS: &[&str] = &[
+            "agent_name",
+            "llm_model",
+            "session_id",
+            "service_name",
+            "span_name",
+            "span_type",
+            "status_code",
+            "agent_type",
+        ];
+
+        // 1. Resolve metric → SQL aggregation expression
+        let agg_expr = ALLOWED_METRICS
+            .iter()
+            .find(|(name, _)| *name == filters.metric.as_str())
+            .map(|(_, expr)| *expr)
+            .ok_or_else(|| anyhow!("unsupported metric: {}", filters.metric))?;
+
+        // 2. Validate group_by dimensions
+        for g in &filters.group_by {
+            if !ALLOWED_DIMENSIONS.contains(&g.as_str()) {
+                return Err(anyhow!("unsupported group_by dimension: {}", g));
+            }
+        }
+
+        // 3. Build file filter
+        let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
+            project_id: Some(filters.project_id),
+            signal_type: Some("traces".to_string()),
+            time_range_start: Some(filters.start / 1_000),
+            time_range_end: Some(filters.end / 1_000),
+            deleted: Some(false),
+            ..Default::default()
+        };
+
+        // 4. Build WHERE conditions
+        let day_ns: i64 = 86_400_000_000_000;
+        let mut conditions = vec![
+            format!("project_id = '{}'", filters.project_id),
+            format!("timestamp >= {}", filters.start),
+            format!("timestamp <= {}", filters.end),
+        ];
+        // Exclude empty strings for group-by columns so we only see real data
+        for g in &filters.group_by {
+            conditions.push(format!("{} != ''", g));
+        }
+        // Apply ad-hoc WHERE filters
+        for (k, v) in &filters.filters {
+            if ALLOWED_DIMENSIONS.contains(&k.as_str()) {
+                conditions.push(format!("{} = '{}'", k, escape_sql_str(v)));
+            }
+        }
+        let where_clause = conditions.join(" AND ");
+
+        // 5. Build SELECT / GROUP BY / ORDER BY
+        let group_cols_csv = filters.group_by.join(", ");
+        let select_groups = if group_cols_csv.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", group_cols_csv)
+        };
+        let group_clause = if group_cols_csv.is_empty() {
+            "bucket".to_string()
+        } else {
+            format!("bucket, {}", group_cols_csv)
+        };
+
+        let sql = format!(
+            r#"SELECT
+                (timestamp / {day_ns}) * {day_ns} AS bucket
+                {select_groups},
+                {agg_expr} AS value
+            FROM spans
+            WHERE {where_clause}
+            GROUP BY {group_clause}
+            ORDER BY bucket"#
+        );
+
+        // 6. Execute
+        let batches = self
+            .reader
+            .query_parquet(file_filter, &sql)
+            .await
+            .context("Failed to execute analytics query")?;
+
+        // 7. Convert RecordBatches → Vec<AnalyticsDataPoint>
+        let mut results = Vec::new();
+        for batch in &batches {
+            let n = batch.num_rows();
+            if n == 0 {
+                continue;
+            }
+
+            let bucket_col = batch
+                .column_by_name("bucket")
+                .ok_or_else(|| anyhow!("missing column: bucket"))?
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(|| anyhow!("bucket is not Int64Array"))?;
+
+            // Handle both Float64 (SUM/AVG) and Int64 (COUNT) result types
+            let value_arr = batch
+                .column_by_name("value")
+                .ok_or_else(|| anyhow!("missing column: value"))?;
+
+            let value_f64 = value_arr.as_any().downcast_ref::<Float64Array>();
+            let value_i64 = value_arr.as_any().downcast_ref::<Int64Array>();
+
+            // Collect group-by StringArray columns
+            let group_arrays: Vec<(&str, &StringArray)> = filters
+                .group_by
+                .iter()
+                .filter_map(|g| {
+                    batch
+                        .column_by_name(g)
+                        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                        .map(|arr| (g.as_str(), arr))
+                })
+                .collect();
+
+            for i in 0..n {
+                let value = if let Some(f64_col) = value_f64 {
+                    f64_col.value(i)
+                } else if let Some(i64_col) = value_i64 {
+                    i64_col.value(i) as f64
+                } else {
+                    0.0
+                };
+
+                let mut groups = HashMap::new();
+                for (name, arr) in &group_arrays {
+                    groups.insert(name.to_string(), arr.value(i).to_string());
+                }
+
+                results.push(AnalyticsDataPoint {
+                    bucket_ts: bucket_col.value(i),
+                    value,
+                    groups,
+                });
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 #[async_trait]
@@ -217,6 +396,22 @@ impl TelemetryReader for ParquetTelemetryReader {
             // timestamp is in nanoseconds; filter on raw ns.
             inner_where.push_str(&format!(" AND timestamp >= {}", tr.start));
             inner_where.push_str(&format!(" AND timestamp <= {}", tr.end));
+        }
+        // Agent attribute filters — applied at span level before aggregation
+        if let Some(ref llm_model) = filters.llm_model {
+            inner_where.push_str(&format!(" AND llm_model = '{}'", escape_sql_str(llm_model)));
+        }
+        if let Some(ref agent_name) = filters.agent_name {
+            inner_where.push_str(&format!(
+                " AND agent_name = '{}'",
+                escape_sql_str(agent_name)
+            ));
+        }
+        if let Some(ref session_id) = filters.session_id {
+            inner_where.push_str(&format!(
+                " AND session_id = '{}'",
+                escape_sql_str(session_id)
+            ));
         }
 
         let inner_sql = format!(
@@ -296,10 +491,12 @@ impl TelemetryReader for ParquetTelemetryReader {
 
     async fn get_trace_detail(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         trace_id: &str,
     ) -> anyhow::Result<Option<Vec<Span>>> {
         let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             signal_type: Some("traces".to_string()),
             deleted: Some(false),
@@ -307,7 +504,8 @@ impl TelemetryReader for ParquetTelemetryReader {
         };
 
         let sql = format!(
-            "SELECT * FROM spans WHERE project_id = '{}' AND trace_id = '{}' ORDER BY timestamp",
+            "SELECT * FROM spans WHERE tenant_id = '{}' AND project_id = '{}' AND trace_id = '{}' ORDER BY timestamp",
+            tenant_id,
             project_id,
             escape_sql_str(trace_id)
         );
@@ -373,6 +571,16 @@ impl TelemetryReader for ParquetTelemetryReader {
             conditions.push(format!("timestamp >= {}", tr.start));
             conditions.push(format!("timestamp <= {}", tr.end));
         }
+        // Agent attribute filters
+        if let Some(ref llm_model) = filters.llm_model {
+            conditions.push(format!("llm_model = '{}'", escape_sql_str(llm_model)));
+        }
+        if let Some(ref agent_name) = filters.agent_name {
+            conditions.push(format!("agent_name = '{}'", escape_sql_str(agent_name)));
+        }
+        if let Some(ref session_id) = filters.session_id {
+            conditions.push(format!("session_id = '{}'", escape_sql_str(session_id)));
+        }
 
         let where_clause = conditions.join(" AND ");
 
@@ -410,8 +618,14 @@ impl TelemetryReader for ParquetTelemetryReader {
     // get_span
     // -------------------------------------------------------------------------
 
-    async fn get_span(&self, project_id: Uuid, span_id: &str) -> anyhow::Result<Option<Span>> {
+    async fn get_span(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        span_id: &str,
+    ) -> anyhow::Result<Option<Span>> {
         let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             signal_type: Some("traces".to_string()),
             deleted: Some(false),
@@ -419,7 +633,8 @@ impl TelemetryReader for ParquetTelemetryReader {
         };
 
         let sql = format!(
-            "SELECT * FROM spans WHERE project_id = '{}' AND span_id = '{}' LIMIT 1",
+            "SELECT * FROM spans WHERE tenant_id = '{}' AND project_id = '{}' AND span_id = '{}' LIMIT 1",
+            tenant_id,
             project_id,
             escape_sql_str(span_id)
         );
@@ -525,10 +740,12 @@ impl TelemetryReader for ParquetTelemetryReader {
 
     async fn get_log(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         log_id: &str,
     ) -> anyhow::Result<Option<LogRecord>> {
         let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             signal_type: Some("logs".to_string()),
             deleted: Some(false),
@@ -536,7 +753,8 @@ impl TelemetryReader for ParquetTelemetryReader {
         };
 
         let sql = format!(
-            "SELECT * FROM logs WHERE project_id = '{}' AND id = '{}' LIMIT 1",
+            "SELECT * FROM logs WHERE tenant_id = '{}' AND project_id = '{}' AND id = '{}' LIMIT 1",
+            tenant_id,
             project_id,
             escape_sql_str(log_id)
         );

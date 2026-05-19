@@ -1,176 +1,163 @@
 # zradar
 
-Agent Tracing & LLM Observability Platform with high-performance OpenTelemetry ingestion and ClickHouse backend.
+**OpenTelemetry-native observability for AI agents, LLM apps, and multi-step workflows.**
 
-## Overview
+zradar helps developers understand what their agents are doing, why they fail, how much they cost, and where latency appears. It ingests standard OTLP telemetry and stores high-volume traces, metrics, and logs in a Parquet-first architecture built for fast analytical queries.
 
-zradar is an **agent observability platform** designed for tracing AI agents, LLM workflows, and agent-based applications. Built on OpenTelemetry Protocol (OTLP), it provides comprehensive observability for agent sessions, LLM calls, tool executions, and complex multi-step workflows. It features a scalable architecture with asynchronous processing, multi-tenancy, and comprehensive RBAC.
-
-## Features
-
-### Agent Observability
-- **Agent Tracing** - Track agent sessions, workflows, and execution paths
-- **LLM Observability** - Monitor model calls, token usage, costs, and performance
-- **Tool Execution Tracking** - Instrument and analyze tool/function calls
-- **Workflow Visualization** - Tree, timeline, and graph views of agent execution
-- **Quality Scoring** - Custom evaluations and quality metrics for agents and LLM calls
-- **Cost Analysis** - Track LLM costs, token usage, and budget per agent/project
-
-### Platform Features
-- **Standard OTLP Protocol** - Works with any OpenTelemetry client
-- **Asynchronous Processing** - Job queue with separate worker processes
-- **Dual Database Architecture** - PostgreSQL (control) + ClickHouse (data)
-- **Multi-tenancy** - Organization + Project hierarchy
-- **Scalable** - PostgreSQL queue (up to 50 workers) or Hybrid queue (1000+ workers)
-- **Block Storage** - Local filesystem or S3 for raw telemetry data
-
-## Quick Start
-
-### Prerequisites
-
-- Rust 1.90+
-- PostgreSQL 17+ (Main DB)
-- ClickHouse 23.0+ (Optional)
-- Redis (Optional)
-- S3 or S3 compatible Block Storage (Optional)
-
-### Docker Compose (Recommended)
-
-```bash
-# Start all services
-docker-compose up -d
-
-# Scale workers
-docker-compose up -d --scale zradar-worker=4
+```mermaid
+flowchart LR
+    app["AI app or agent framework"] --> otel["OpenTelemetry<br/>spans · metrics · logs"]
+    otel --> zradar["zradar"]
+    zradar --> traces["Agent traces<br/>workflow timelines"]
+    zradar --> llm["LLM tokens<br/>cost · latency"]
+    zradar --> tools["Tool calls<br/>retrieval visibility"]
+    zradar --> errors["Error and performance<br/>breakdowns"]
+    zradar --> parquet["Parquet-backed<br/>telemetry storage"]
 ```
 
+## Why developers try zradar
 
-## Configuration
+- **Use standards you already know:** send OpenTelemetry data instead of adopting a proprietary SDK.
+- **See full agent execution paths:** connect agent spans, LLM calls, tools, retrievers, chains, and evaluations in one trace model.
+- **Debug faster:** inspect latency, errors, status codes, and span metadata across traces, logs, and metrics.
+- **Control LLM cost:** track token usage and estimated cost by model, agent, service, and project.
+- **Keep telemetry affordable:** store high-volume data in Parquet while PostgreSQL handles metadata and control-plane state.
+- **Run locally first:** develop against local PostgreSQL and local Parquet files, then add S3-compatible storage when needed.
 
-See `config.toml.example` for full configuration options. Key settings:
+## What you can observe
 
-```toml
-[ingestor]
-queue_type = "postgres"  # or "hybrid" for high-scale
-storage_type = "local"   # or "s3" for production
+### Agent workflows
 
-[workers]
-num_workers = 8
+```mermaid
+flowchart TD
+    user["User request"] --> session["Agent session"]
+    session --> plan["Planning step"]
+    session --> rag["Retrieval / RAG"]
+    session --> tool["Tool execution"]
+    session --> llm["LLM generation"]
+    session --> eval["Evaluation / guardrail"]
+    plan --> timeline["Unified trace timeline"]
+    rag --> timeline
+    tool --> timeline
+    llm --> timeline
+    eval --> timeline
 ```
+
+zradar is designed for the shape of AI applications, not just traditional request/response services.
+
+### LLM usage and cost
+
+Track model calls, prompt tokens, completion tokens, total tokens, latency, status, and cost signals so you can answer questions like:
+
+- Which agents are most expensive?
+- Which models are slowest?
+- Where are token spikes coming from?
+- Which tools or chains fail most often?
+
+### Logs, metrics, and traces together
+
+zradar supports all three telemetry signals through OTLP ingestion and query APIs, making it easier to correlate behavior across your agent stack.
 
 ## Architecture
 
-zradar uses a **plugin-based architecture** that separates core abstractions from implementations, enabling backend swapping without code changes.
+zradar uses PostgreSQL for metadata and control-plane state, and Parquet for telemetry data.
 
-### Plugin System
-
-- **Core Traits** (`zradar-traits`) - Define interfaces for storage, queues, telemetry, and repositories
-- **Plugin System** (`zradar-plugins`) - Runtime plugin registry and loader with configuration-driven initialization
-- **Plugin Implementations** - Available plugins:
-  - **postgres** (built-in) - Control plane, job queue, and basic storage
-  - **clickhouse** - High-performance telemetry storage and analytics
-  - **s3** - Block storage for trace batches
-  - **redis** - Distributed cache and hybrid queue
-  - **local** - Local filesystem storage
-
-Plugins are configured in `config/plugins.toml` and loaded dynamically at runtime.
-
-### Data Flow
-
-```
-OTLP Clients → Server → Job Queue → Workers → Plugins → Backends
+```mermaid
+flowchart TD
+    otlp["OTLP applications<br/>traces · metrics · logs"] --> server["zradar server<br/>auth · rate limits · circuit breakers"]
+    server --> writer["Parquet writer<br/>buffer · bloom filters · atomic writes"]
+    writer --> parquet["Parquet storage<br/>local disk or S3"]
+    writer --> pg["PostgreSQL metadata<br/>file_list · stream_stats · settings"]
+    parquet --> cache["DiskCache / MemoryCache"]
+    pg --> reader["Query service"]
+    cache --> reader
+    reader --> df["DataFusion ListingTable"]
+    df --> api["Analytics and query APIs"]
+    parquet --> jobs["Retention · FileMover · compaction"]
+    jobs --> pg
 ```
 
-The server handles ingestion and enqueues jobs. Workers process jobs asynchronously and route to configured plugins (ClickHouse, S3, etc.).
+The Parquet path includes batching, atomic writes, bloom filters, DataFusion `ListingTable` queries, memory/disk caching, retention, and compaction for small-file control.
 
-## Agent Observability
+## Core capabilities
 
-zradar is purpose-built for observing AI agents and LLM applications. It supports:
+- **OTLP ingestion:** traces, metrics, and logs.
+- **Agent-aware span model:** agent, generation, tool, chain, retriever, evaluator, embedding, and guardrail spans.
+- **Analytics APIs:** service analytics, top endpoints, error breakdowns, LLM analytics, and agent analytics.
+- **Project settings:** per-project ingestion and storage controls.
+- **Retention controls:** organization defaults with project overrides.
+- **Resilience:** per-project rate limiting, backpressure, health readiness, and circuit breakers.
+- **Storage lifecycle:** local Parquet, optional S3 movement, cache layers, and compaction.
 
-### Agent Span Types
-- **AGENT** - Agent execution spans (conversational agents, task agents, etc.)
-- **GENERATION** - LLM generation calls (chat completions, text generation)
-- **TOOL** - Tool/function calls executed by agents
-- **CHAIN** - Chain of operations (LangChain, LlamaIndex chains)
-- **RETRIEVER** - RAG retrieval operations
-- **EVALUATOR** - Evaluation operations
-- **EMBEDDING** - Embedding generation
-- **GUARDRAIL** - Guardrail/safety checks
+## Quick start
 
-### Key Metrics Tracked
-- **Agent Performance**: Session count, success rate, average latency per agent
-- **LLM Usage**: Model calls, token usage (prompt/completion/total), costs per model
-- **Tool Usage**: Tool call frequency, success rate, execution time
-- **Quality Scores**: Accuracy, relevance, latency, custom evaluations
-- **Cost Analysis**: LLM costs, trends, budget tracking, cost per agent
-- **Error Analysis**: LLM errors, tool errors, agent errors (by type)
-
-### LLM-Specific Attributes
-zradar tracks rich LLM metadata including:
-- Model information (vendor, model name, temperature, max_tokens)
-- Token usage (prompt, completion, total)
-- Cost tracking (input, output, total costs)
-- Response metadata (request/response IDs, finish reasons)
-- Embedding dimensions and usage
-
-See [examples/README.md](examples/README.md) for code examples showing agent and LLM instrumentation.
-
-## Deployment
-
-### Queue Types
-
-- **PostgreSQL Queue** (default): Simple deployment, up to 50 workers, ~10K jobs/sec
-- **Hybrid Queue** (Redis+PG): High-scale, 1000+ workers, ~500K jobs/sec
-
-### Scaling
-
-- **Small**: 1 server, 1-3 workers, PostgreSQL queue
-- **Medium**: 2-3 servers, 10-50 workers, PostgreSQL queue, S3 storage
-- **Large**: 5+ servers, 100-1000 workers, Hybrid queue, S3 storage
-
-## Development
+Use the repository `make` targets for local development.
 
 ```bash
-# Run server
-RUST_LOG=debug cargo run --bin zradar-server
-
-# Run worker
-RUST_LOG=debug cargo run --bin zradar-worker
-
-# Run tests
-cargo test
+make help
+make dev
+make health
 ```
 
-### Development Hooks
-
-To ensure code quality and consistent commit messages, please install the git hooks:
+Run checks:
 
 ```bash
-# Install hooks
-cp scripts/hooks/* .git/hooks/
-chmod +x .git/hooks/*
+make fmt
+make check
+make test
 ```
 
-These hooks will check:
-- Code formatting (`cargo fmt`)
-- Clippy warnings (`cargo clippy`)
-- Compilation (`cargo check`)
-- Commit message format (Conventional Commits)
+Run functional tests:
 
+```bash
+make functional_tests_fast
+```
+
+## Configuration
+
+Start with `config.toml.example` and tune storage settings for your environment.
+
+Common areas to review:
+
+- PostgreSQL connection
+- OTLP ports and API keys
+- local Parquet data directory
+- S3-compatible storage settings
+- retention window
+- write buffering and compaction
+- circuit breaker thresholds
+
+## Project layout
+
+```text
+crates/applications/zradar-server     Server binary
+crates/services/api-optel             OTLP ingestion services
+crates/services/api                   Query and admin APIs
+crates/core/zradar-parquet            Parquet storage and query engine
+crates/core/zradar-models             Shared models and config
+crates/plugins/zradar-plugin-postgres PostgreSQL repositories
+crates/plugins/zradar-plugin-s3       S3 storage plugin
+test_functional                       End-to-end scenarios
+```
+
+## When zradar is a good fit
+
+Try zradar if you are building:
+
+- AI agents with multi-step execution paths
+- LLM applications with token and cost concerns
+- RAG systems where retrieval and generation need correlation
+- tool-using agents where failures happen across many spans
+- observability infrastructure that should stay OpenTelemetry-native
+- telemetry systems where Parquet storage is preferable to keeping everything in an OLTP database
 
 ## Documentation
 
-- [Configuration Example](config.toml.example)
-- [API Documentation](http://localhost:8080/swagger-ui/) (when server running)
-- See `crates/` directory for code documentation
-
-## License
-
-This project uses dual licensing:
-
-- **Apache 2.0**: Main codebase (see [LICENSE](LICENSE))
-- **Enterprise License**: Code in `ee/` directories (see [LICENSE-EE](LICENSE-EE))
+- `config.toml.example` for configuration
+- `examples/README.md` for instrumentation examples
+- `test_functional/README.md` for functional testing
+- `AGENTS.md` and `CODING_GUIDELINES.md` for repository contribution guidance
 
 ## Status
 
-🚧 **Under active development** - Not yet production-ready
+zradar is under active development. The current architecture is Parquet-first for telemetry with PostgreSQL metadata and control-plane state.

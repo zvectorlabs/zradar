@@ -1,72 +1,52 @@
-//! zradar Server - Runs both OTLP gRPC and Admin HTTP API
-//!
-//! Plugin-based architecture for flexible telemetry storage backends.
+//! zradar Server — OTLP gRPC + Admin HTTP API
+
+mod auth;
+mod health;
 
 use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-// OTLP
-use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsServiceServer;
-use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
-use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
-use tonic::codec::CompressionEncoding;
-use tonic::transport::Server;
-
-// Axum
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 
-// Control plane
+use tonic::codec::CompressionEncoding;
+use tonic::transport::Server;
+
 use api::{
-    api_keys::service::ApiKeyService,
-    // Auth
-    auth::{ApiKeyAuth as DbApiKeyAuth, JwtAuth},
-    // HTTP router
+    audit::{AuditState, audit_router},
     http::create_admin_router,
-    organizations::OrganizationService,
-    projects::ProjectService,
-    // RBAC
-    rbac::RbacService,
-    roles::RoleService,
-    scores::ScoresService,
+    retention::{handlers::RetentionState, retention_router},
+    settings::{SettingsState, settings_router},
     telemetry::QueryService,
-    // Services from domain modules
-    users::AuthService,
 };
-
-// Plugins - individual repositories
-use zradar_plugin_postgres::{
-    PostgresApiKeyRepository, PostgresAuditLogger, PostgresClient, PostgresOrganizationRepository,
-    PostgresProjectRepository, PostgresRoleRepository, PostgresUserRepository,
-    migrations::PostgresMigrationProvider,
-};
-// Note: ClickHouse removed - using only Postgres for now
-// TODO: Add plugin-based storage selection via configuration
-use zradar_plugins::{PluginLoader, PluginRegistry};
-
-// Migration system
-use zradar_migrations::MigrationRegistry;
-
-// Local modules
-mod health;
-
 use api_optel::{
-    ApiKeyAuth as GrpcApiKeyAuth, DirectLogHandler, DirectSpanHandler, JobQueueSpanHandler,
-    NullLogHandler, NullScoreHandler, OtlpLogsService, OtlpMetricsService, OtlpTraceService,
+    CircuitBreaker, LogsServiceServer, MetricsServiceServer, OtlpLogsService, OtlpMetricsService,
+    OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
 };
+use tokio_util::sync::CancellationToken;
 use zradar_models::Config;
 use zradar_parquet::{
-    ParquetFileReader, ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter,
+    Compactor, DiskCache, FileMover, FlushWorker, MemoryCache, ParquetFileReader,
+    ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter, RetentionJob, WriteBuffer,
+    WriterConfig, recover_incomplete_writes,
 };
-use zradar_plugin_local::LocalBlockStorage;
-use zradar_plugin_postgres::{PostgresFileListRepository, PostgresJobQueue};
+use zradar_plugin_postgres::{
+    PostgresAuditLogRepository, PostgresClient, PostgresFileListRepository,
+    PostgresRetentionPolicyRepository, PostgresSettingsRepository, migrations::MIGRATIONS,
+};
+use zradar_plugin_s3::S3BlockStorage;
+use zradar_retention::{
+    CleanupJob, EnforcementStrategy, OrgRetentionConfig, QueryEnforcer, RetentionConfigStore,
+};
+use zradar_traits::Authenticator;
+
+use auth::ConfigAuthenticator;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -74,48 +54,27 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    info!("🚀 Starting zradar server...");
+    info!("Starting zradar server...");
 
-    // Load configuration
     let config = Config::load()?;
-    info!("✅ Configuration loaded");
+    info!("Configuration loaded");
 
-    // ========================================================================
-    // Initialize Plugin System
-    // ========================================================================
+    // =========================================================================
+    // Authentication
+    // =========================================================================
 
-    let registry = PluginRegistry::new();
-    let plugin_loader = PluginLoader::default();
-
-    // Load plugin configuration if it exists
-    let plugins_config_path = "config/plugins.toml";
-    if std::path::Path::new(plugins_config_path).exists() {
-        match zradar_plugins::PluginConfig::from_file(plugins_config_path) {
-            Ok(config) => {
-                if let Err(e) = plugin_loader.load_from_config(&config, &registry).await {
-                    info!("⏭️  Plugin loading warning: {}", e);
-                } else {
-                    info!("✅ Loaded {} plugins from config", config.enabled.len());
-                }
-            }
-            Err(e) => info!("⏭️  No plugins loaded: {}", e),
-        }
-    } else {
-        info!("⏭️  No plugins config found, using defaults");
-    }
-
+    let authenticator: Arc<dyn Authenticator> =
+        Arc::new(ConfigAuthenticator::from_config(&config.api_keys));
     info!(
-        "📦 Plugin registry: {} plugins available",
-        registry.list_all_plugins().len()
+        "Config-based authenticator initialized ({} keys)",
+        config.api_keys.len()
     );
 
-    // ========================================================================
-    // Database Connections
-    // ========================================================================
+    // =========================================================================
+    // Database
+    // =========================================================================
 
-    // Connect to PostgreSQL
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-
     let pg_pool = PgPoolOptions::new()
         .max_connections(
             config
@@ -128,431 +87,384 @@ async fn main() -> Result<()> {
         .await
         .expect("Failed to connect to PostgreSQL");
 
-    info!("✅ Connected to PostgreSQL");
+    info!("Connected to PostgreSQL");
 
-    // ========================================================================
-    // Migration System - Centralized Registry
-    // ========================================================================
-
-    info!("🔄 Initializing migration registry...");
-
-    let pg_pool_arc = Arc::new(pg_pool.clone());
-    let migration_registry = MigrationRegistry::new(pg_pool_arc.clone())
-        .await
-        .expect("Failed to initialize migration registry");
-
-    // Register PostgreSQL migration provider
-    let postgres_provider = PostgresMigrationProvider::new(pg_pool_arc.clone());
-    migration_registry.register_plugin(Arc::new(postgres_provider));
-
-    // Run migrations if enabled (or on first run)
-    let auto_migrate = config
-        .migrations
-        .as_ref()
-        .map(|m| m.auto_migrate)
-        .unwrap_or(true);
-
-    info!("🔄 Running migrations (auto_migrate: {})...", auto_migrate);
-
-    match migration_registry.run_all_migrations(auto_migrate).await {
-        Ok(summary) => {
-            info!(
-                "✅ Migration completed: {} successful, {} failed",
-                summary.successful, summary.failed
-            );
-
-            for result in &summary.plugin_results {
-                info!(
-                    "  📦 {}: {} migrations applied in {}ms ({})",
-                    result.plugin_name,
-                    result.migrations_applied,
-                    result.duration_ms,
-                    result.status
-                );
-            }
-
-            if summary.failed > 0 {
-                error!("❌ Some migrations failed");
-                for error in &summary.errors {
-                    error!("  - {}", error);
-                }
-                return Err(anyhow::anyhow!("Migration failed"));
-            }
-        }
-        Err(e) => {
-            error!("❌ Migration system failed: {}", e);
-            return Err(e);
-        }
-    }
-
-    // TODO: Add ClickHouse/other storage via plugin configuration later
-    info!("📊 Using Postgres for all storage (telemetry, scores, etc.)");
-
-    // ========================================================================
-    // Create Repositories (direct, no wrapper)
-    // ========================================================================
+    MIGRATIONS.run(&pg_pool).await?;
+    info!("Migrations applied");
 
     let pg_pool = Arc::new(pg_pool);
     let pg_client = Arc::new(PostgresClient::from_pool(pg_pool.clone()));
-
-    // Individual repositories
-    let user_repo = Arc::new(PostgresUserRepository::new(pg_client.clone()));
-    let org_repo = Arc::new(PostgresOrganizationRepository::new(pg_client.clone()));
-    let project_repo = Arc::new(PostgresProjectRepository::new(pg_client.clone()));
-    let api_key_repo = Arc::new(PostgresApiKeyRepository::new(pg_client.clone()));
-    let role_repo = Arc::new(PostgresRoleRepository::new(pg_client.clone()));
-    let audit_logger = Arc::new(PostgresAuditLogger::new(pg_client.clone()));
-
-    // RBAC service (uses role repo for permission definitions)
-    let rbac_service = Arc::new(RbacService::new(role_repo.clone()));
-    rbac_service.initialize().await?;
-    info!("✅ RBAC service initialized");
-
-    // ========================================================================
-    // Authentication Services
-    // ========================================================================
-
-    let jwt_secret = config
-        .admin_api
-        .as_ref()
-        .and_then(|a| a.jwt_secret.clone())
-        .unwrap_or_else(|| "default-secret-change-me".to_string());
-
-    let jwt_expiry_hours = config
-        .admin_api
-        .as_ref()
-        .and_then(|a| a.jwt_expiry_hours)
-        .unwrap_or(24);
-
-    let jwt_auth = Arc::new(JwtAuth::new(jwt_secret, jwt_expiry_hours));
-
-    let cache_ttl = config.auth.cache_ttl_seconds.unwrap_or(300);
-
-    let db_api_key_auth = Arc::new(DbApiKeyAuth::new(
-        api_key_repo.clone(),
-        audit_logger.clone(),
-        1000,
-        cache_ttl,
-    ));
-
-    info!("✅ Authentication services initialized");
-
-    // ========================================================================
-    // HTTP Handler Services
-    // ========================================================================
-
-    let auth_service = Arc::new(AuthService {
-        user_storage: user_repo.clone(),
-        jwt_auth: jwt_auth.clone(),
-        audit: audit_logger.clone(),
-    });
-
-    let org_service = Arc::new(OrganizationService {
-        org_storage: org_repo.clone(),
-        user_storage: user_repo.clone(),
-        rbac: rbac_service.clone(),
-        audit: audit_logger.clone(),
-    });
-
-    let project_service = Arc::new(ProjectService {
-        project_storage: project_repo.clone(),
-        user_storage: user_repo.clone(),
-        rbac: rbac_service.clone(),
-        audit: audit_logger.clone(),
-    });
-
-    let api_key_service = Arc::new(ApiKeyService::new(
-        api_key_repo.clone(),
-        project_repo.clone(),
-        rbac_service.clone(),
-        audit_logger.clone(),
-        db_api_key_auth.clone(),
-    ));
-
-    let role_service = Arc::new(RoleService {
-        role_storage: role_repo.clone(),
-        rbac: rbac_service.clone(),
-        audit: audit_logger.clone(),
-    });
-
-    // ---------------------------------------------------------------------------
-    // Parquet storage layer (shared by write and read paths)
-    // ---------------------------------------------------------------------------
-
-    let parquet_data_dir = std::path::PathBuf::from(
-        config
-            .ingestor
-            .as_ref()
-            .map(|i| i.storage.parquet_data_dir.clone())
-            .unwrap_or_else(|| "./data/parquet-files".to_string()),
-    );
-
     let file_list_repo = Arc::new(PostgresFileListRepository::new(pg_client.clone()))
         as Arc<dyn zradar_traits::FileListRepository>;
+    let settings_repo = Arc::new(PostgresSettingsRepository::new(pg_client.clone()))
+        as Arc<dyn zradar_traits::SettingsRepository>;
+    let retention_policy_repo = Arc::new(PostgresRetentionPolicyRepository::new(pg_client.clone()))
+        as Arc<dyn zradar_traits::RetentionPolicyRepository>;
+    let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
+        as Arc<dyn zradar_traits::AuditLogRepository>;
 
-    let parquet_file_writer = Arc::new(ParquetFileWriter::new(
-        parquet_data_dir.clone(),
-        file_list_repo.clone(),
-    ));
+    // =========================================================================
+    // Parquet storage layer
+    // =========================================================================
 
-    let parquet_file_reader = Arc::new(ParquetFileReader::new(
-        parquet_data_dir.clone(),
-        file_list_repo.clone(),
-    ));
-
-    // Telemetry query service — reads from Parquet (Phase 02)
-    let parquet_telemetry_reader =
-        Arc::new(ParquetTelemetryReader::new(parquet_file_reader.clone()));
-    let query_service = Arc::new(QueryService::new(
-        parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
-    ));
-
-    // Scores service (using Postgres)
-    let score_repo = Arc::new(zradar_plugin_postgres::PostgresScoreRepository::new(
-        pg_client.clone(),
-    ));
-    let scores_service = Arc::new(ScoresService::new(
-        score_repo as Arc<dyn zradar_traits::ScoreRepository>,
-        project_repo.clone(),
-        rbac_service.clone() as Arc<dyn api::PermissionChecker>,
-        audit_logger.clone() as Arc<dyn api::AuditLogger>,
-    ));
-
-    info!("✅ Control plane services initialized");
-
-    // ========================================================================
-    // OTLP Data Plane (Job Queue or Direct Write)
-    // ========================================================================
-
-    let ingestor_config = config
+    let ingestor_storage_config = config
         .ingestor
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Ingestor configuration required"))?;
+        .map(|i| i.storage.clone())
+        .unwrap_or_default();
 
-    let grpc_api_key_auth = Arc::new(GrpcApiKeyAuth::new(db_api_key_auth.clone()));
-    let otlp_auth = config
-        .auth
-        .otlp_require_api_key
-        .unwrap_or(true)
-        .then(|| grpc_api_key_auth.clone());
-    if otlp_auth.is_none() {
-        info!("⚠️  OTLP gRPC (protobuf) is open: no API key required");
+    let parquet_data_dir = std::path::PathBuf::from(&ingestor_storage_config.parquet_data_dir);
+    let parquet_lifecycle_config = ingestor_storage_config.parquet.clone();
+
+    tokio::fs::create_dir_all(&parquet_data_dir).await?;
+
+    if let Err(e) = recover_incomplete_writes(&parquet_data_dir).await {
+        error!("Crash recovery failed (non-fatal): {}", e);
+    }
+    info!("Crash recovery complete");
+
+    let writer_config = WriterConfig::from_storage_config(
+        parquet_lifecycle_config.bloom_filter_columns.clone(),
+        parquet_lifecycle_config.fsync_before_rename,
+    );
+    let parquet_file_writer = Arc::new(ParquetFileWriter::with_config(
+        parquet_data_dir.clone(),
+        file_list_repo.clone(),
+        writer_config,
+    ));
+
+    let cancel_token = CancellationToken::new();
+
+    // Write buffer
+    let write_buffer: Option<Arc<WriteBuffer>> = if parquet_lifecycle_config.write_buffer_enabled {
+        let buf = Arc::new(WriteBuffer::new(
+            parquet_lifecycle_config.write_buffer_size_bytes,
+        ));
+        let worker = FlushWorker::new(
+            buf.clone(),
+            parquet_file_writer.clone(),
+            parquet_lifecycle_config.write_buffer_flush_interval_secs,
+        );
+        tokio::spawn(worker.run(cancel_token.clone()));
+        info!(
+            max_bytes = parquet_lifecycle_config.write_buffer_size_bytes,
+            flush_interval_secs = parquet_lifecycle_config.write_buffer_flush_interval_secs,
+            "Write buffer + FlushWorker started"
+        );
+        Some(buf)
+    } else {
+        info!("Write buffer disabled — using direct Parquet writes");
+        None
+    };
+
+    // Memory cache
+    let memory_cache: Option<Arc<MemoryCache>> = if parquet_lifecycle_config.memory_cache_enabled {
+        let mc = Arc::new(MemoryCache::new(
+            parquet_lifecycle_config.memory_cache_max_bytes,
+            parquet_lifecycle_config.memory_cache_shards,
+        ));
+        info!(
+            max_bytes = parquet_lifecycle_config.memory_cache_max_bytes,
+            "MemoryCache initialized"
+        );
+        Some(mc)
+    } else {
+        None
+    };
+
+    // Compactor
+    if parquet_lifecycle_config.compaction_enabled {
+        let compactor = Compactor::new(
+            file_list_repo.clone(),
+            parquet_file_writer.clone(),
+            parquet_lifecycle_config.compaction_check_interval_secs,
+            parquet_lifecycle_config.compaction_min_files,
+            parquet_lifecycle_config.compaction_max_file_size_bytes,
+        );
+        tokio::spawn(compactor.run(cancel_token.clone()));
+        info!("Compactor background task started");
     }
 
-    let otlp_port = config.otlp_port;
-    let admin_port = config
-        .admin_api
-        .as_ref()
-        .and_then(|a| a.admin_api_port)
-        .unwrap_or(config.query_api_port);
-    let admin_port = if admin_port != 0 { admin_port } else { 8080 };
+    // S3 block storage + FileMover + RetentionJob
+    let s3_block_storage: Option<Arc<dyn zradar_traits::BlockStorage>> = if let Some(s3_cfg) =
+        &ingestor_storage_config.s3
+    {
+        match S3BlockStorage::new(
+            s3_cfg.bucket.clone(),
+            s3_cfg.region.clone(),
+            s3_cfg.endpoint.clone(),
+        )
+        .await
+        {
+            Ok(s3) => {
+                let s3: Arc<dyn zradar_traits::BlockStorage> = Arc::new(s3);
+                info!(bucket = %s3_cfg.bucket, region = %s3_cfg.region, "S3 block storage initialized");
 
-    // Check if we should skip job queue and write directly
-    if ingestor_config.skip_job {
-        // Direct write mode - bypass job queue entirely
-        info!("⚠️  SKIP_JOB enabled - spans will be written directly to persistence");
-        info!("   This mode skips job queue for immediate consistency");
-        info!("   Recommended only for development/testing or low-volume deployments");
+                let mover = FileMover::new(
+                    file_list_repo.clone(),
+                    s3.clone(),
+                    parquet_lifecycle_config.clone(),
+                );
+                tokio::spawn(mover.run(cancel_token.clone()));
+                info!("FileMover background task started");
 
-        // Create Parquet telemetry writer for direct persistence
-        let parquet_writer: Arc<dyn zradar_traits::TelemetryWriter> =
-            Arc::new(ParquetTelemetryWriter::new(parquet_file_writer.clone()));
-        let log_handler = Arc::new(DirectLogHandler::new(Arc::clone(&parquet_writer)));
-        let span_handler = Arc::new(DirectSpanHandler::new(parquet_writer));
+                let retention = RetentionJob::with_storage(
+                    file_list_repo.clone(),
+                    s3.clone(),
+                    parquet_lifecycle_config.clone(),
+                );
+                tokio::spawn(retention.run(cancel_token.clone()));
+                info!("RetentionJob background task started");
 
-        let trace_service = OtlpTraceService::new(span_handler.clone(), otlp_auth.clone());
-        let metrics_service = OtlpMetricsService::new(span_handler.clone(), otlp_auth.clone());
-        let logs_service = OtlpLogsService::new(
-            Arc::new(NullScoreHandler),
-            log_handler,
-            otlp_auth.clone(),
-        );
-
-        info!("✅ OTLP services initialized (direct write mode)");
-
-        // Start servers
-        let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
-        let otlp_server = async move {
-            info!("🎧 OTLP gRPC server listening on {}", otlp_addr);
-            info!("✅ gRPC compression: gzip enabled (send & accept)");
-            Server::builder()
-                .add_service(
-                    TraceServiceServer::new(trace_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .add_service(
-                    MetricsServiceServer::new(metrics_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .add_service(
-                    LogsServiceServer::new(logs_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .serve(otlp_addr)
-                .await
-                .map_err(|e| {
-                    error!("OTLP server error: {}", e);
-                    anyhow::anyhow!("OTLP server failed: {}", e)
-                })
-        };
-
-        let admin_addr = format!("0.0.0.0:{}", admin_port);
-        let health_router = health::create_health_router(Some(pg_pool.clone()));
-
-        let admin_api = create_admin_router(
-            auth_service,
-            org_service,
-            project_service,
-            api_key_service,
-            role_service,
-            query_service,
-            scores_service,
-            jwt_auth.clone(),
-            user_repo.clone(),
-        );
-
-        let app = Router::new()
-            .merge(health_router)
-            .merge(admin_api)
-            .layer(CompressionLayer::new());
-
-        let admin_server = async move {
-            info!("🎧 Admin API listening on http://{}", admin_addr);
-            info!("✨ Swagger UI: http://localhost:{}/swagger-ui/", admin_port);
-
-            let listener = tokio::net::TcpListener::bind(&admin_addr).await?;
-            axum::serve(listener, app)
-                .await
-                .map_err(|e| anyhow::anyhow!("Admin API server failed: {}", e))
-        };
-
-        info!("✨ zradar is ready!");
-        info!("   OTLP gRPC: localhost:{}", otlp_port);
-        info!("   Admin API: http://localhost:{}", admin_port);
-        info!("   HTTP Compression: gzip enabled");
-
-        tokio::select! {
-            result = otlp_server => {
-                if let Err(e) = result {
-                    error!("OTLP server failed: {}", e);
-                }
+                Some(s3)
             }
-            result = admin_server => {
-                if let Err(e) = result {
-                    error!("Admin API server failed: {}", e);
-                }
+            Err(e) => {
+                error!("Failed to initialize S3 block storage: {}", e);
+                return Err(e);
             }
         }
     } else {
-        // Job queue mode - enqueue for async processing by workers
+        let retention = RetentionJob::new(file_list_repo.clone(), parquet_lifecycle_config.clone());
+        tokio::spawn(retention.run(cancel_token.clone()));
+        info!("RetentionJob (local-only) background task started");
+        None
+    };
 
-        // Initialize block storage (from plugin)
-        let storage_path = ingestor_config
-            .storage
-            .local
-            .as_ref()
-            .map(|l| l.path.as_str())
-            .unwrap_or("./data/trace-batches");
+    // Parquet file reader
+    let parquet_file_reader: Arc<ParquetFileReader> = if let Some(s3_storage) = s3_block_storage {
+        let disk_cache = Arc::new(DiskCache::new(s3_storage, &parquet_lifecycle_config));
+        Arc::new(if let Some(memory_cache) = memory_cache.clone() {
+            ParquetFileReader::with_cache_and_memory_cache(
+                parquet_data_dir.clone(),
+                file_list_repo.clone(),
+                disk_cache,
+                memory_cache,
+            )
+        } else {
+            ParquetFileReader::with_cache(
+                parquet_data_dir.clone(),
+                file_list_repo.clone(),
+                disk_cache,
+            )
+        })
+    } else {
+        Arc::new(if let Some(memory_cache) = memory_cache.clone() {
+            ParquetFileReader::with_memory_cache(
+                parquet_data_dir.clone(),
+                file_list_repo.clone(),
+                memory_cache,
+            )
+        } else {
+            ParquetFileReader::new(parquet_data_dir.clone(), file_list_repo.clone())
+        })
+    };
 
-        let block_storage = Arc::new(LocalBlockStorage::new(storage_path));
-        info!("✅ Block storage initialized: local ({})", storage_path);
+    let parquet_telemetry_reader =
+        Arc::new(ParquetTelemetryReader::new(parquet_file_reader.clone()));
 
-        // Initialize job queue (from plugin)
-        let job_queue = Arc::new(PostgresJobQueue::new(
-            pg_pool.clone(),
-            block_storage.clone(),
-        ));
-        info!("✅ Job queue initialized: postgres (NO workers - use zradar-worker)");
+    // =========================================================================
+    // Retention system
+    // =========================================================================
 
-        let span_handler = Arc::new(JobQueueSpanHandler::new(job_queue.clone()));
+    let global_retention_days = parquet_lifecycle_config.retention_days;
+    let retention_config_store = Arc::new(RetentionConfigStore::new(global_retention_days));
+    for policy in retention_policy_repo.list_policies().await? {
+        retention_config_store.upsert(OrgRetentionConfig {
+            org_id: policy.org_id,
+            default_days: policy.default_days as u32,
+            project_overrides: policy.project_overrides_map()?,
+        });
+    }
+    info!(
+        retention_days = global_retention_days,
+        "RetentionConfigStore initialized"
+    );
 
-        let trace_service = OtlpTraceService::new(span_handler.clone(), otlp_auth.clone());
-        let metrics_service = OtlpMetricsService::new(span_handler.clone(), otlp_auth.clone());
-        let logs_service = OtlpLogsService::new(
-            Arc::new(NullScoreHandler),
-            Arc::new(NullLogHandler),
-            otlp_auth.clone(),
-        );
+    let cleanup_job = Arc::new(CleanupJob::new(
+        file_list_repo.clone(),
+        retention_config_store.clone(),
+        parquet_lifecycle_config.retention_check_interval_secs,
+    ));
+    {
+        let job = cleanup_job.clone();
+        let cancel = cancel_token.clone();
+        tokio::spawn(async move { job.run(cancel).await });
+    }
+    info!("CleanupJob background task started");
 
-        info!("✅ OTLP services initialized (job queue mode)");
+    let retention_state = Arc::new(RetentionState {
+        cleanup_job: cleanup_job.clone(),
+        config_store: retention_config_store.clone(),
+        policy_repo: retention_policy_repo.clone(),
+        audit_log_repo: Some(audit_log_repo.clone()),
+    });
 
-        // Start servers
-        let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
-        let otlp_server = async move {
-            info!("🎧 OTLP gRPC server listening on {}", otlp_addr);
-            info!("✅ gRPC compression: gzip enabled (send & accept)");
-            Server::builder()
-                .add_service(
-                    TraceServiceServer::new(trace_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .add_service(
-                    MetricsServiceServer::new(metrics_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .add_service(
-                    LogsServiceServer::new(logs_service)
-                        .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
-                )
-                .serve(otlp_addr)
-                .await
-                .map_err(|e| {
-                    error!("OTLP server error: {}", e);
-                    anyhow::anyhow!("OTLP server failed: {}", e)
-                })
+    let query_enforcer = Arc::new(QueryEnforcer::new(
+        retention_config_store.clone(),
+        EnforcementStrategy::Clamp,
+    ));
+
+    let query_service = Arc::new(QueryService::with_enforcer(
+        parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
+        query_enforcer,
+    ));
+
+    info!("Storage layer initialized");
+
+    // =========================================================================
+    // OTLP telemetry writer
+    // =========================================================================
+
+    let parquet_writer: Arc<dyn zradar_traits::TelemetryWriter> =
+        if let Some(buf) = write_buffer.clone() {
+            Arc::new(ParquetTelemetryWriter::with_buffer(
+                parquet_file_writer.clone(),
+                buf,
+            ))
+        } else {
+            Arc::new(ParquetTelemetryWriter::new(parquet_file_writer.clone()))
         };
 
-        let admin_addr = format!("0.0.0.0:{}", admin_port);
-        let health_router = health::create_health_router(Some(pg_pool.clone()));
+    let otlp_auth = config
+        .auth
+        .otlp_require_api_key
+        .then(|| authenticator.clone());
+    if otlp_auth.is_none() {
+        info!("OTLP gRPC is open: no API key required");
+    }
 
-        let admin_api = create_admin_router(
-            auth_service,
-            org_service,
-            project_service,
-            api_key_service,
-            role_service,
-            query_service,
-            scores_service,
-            jwt_auth.clone(),
-            user_repo.clone(),
-        );
-
-        let app = Router::new()
-            .merge(health_router)
-            .merge(admin_api)
-            .layer(CompressionLayer::new());
-
-        let admin_server = async move {
-            info!("🎧 Admin API listening on http://{}", admin_addr);
-            info!("✨ Swagger UI: http://localhost:{}/swagger-ui/", admin_port);
-
-            let listener = tokio::net::TcpListener::bind(&admin_addr).await?;
-            axum::serve(listener, app)
-                .await
-                .map_err(|e| anyhow::anyhow!("Admin API server failed: {}", e))
-        };
-
-        info!("✨ zradar is ready!");
-        info!("   OTLP gRPC: localhost:{}", otlp_port);
-        info!("   Admin API: http://localhost:{}", admin_port);
-        info!("   HTTP Compression: gzip enabled");
-
-        tokio::select! {
-            result = otlp_server => {
-                if let Err(e) = result {
-                    error!("OTLP server failed: {}", e);
+    let rate_limiter = Arc::new(ProjectRateLimiter::new());
+    let circuit_breaker = Arc::new(CircuitBreaker::new(
+        parquet_data_dir.clone(),
+        parquet_lifecycle_config.circuit_breaker_max_disk_usage_percent,
+        parquet_lifecycle_config.circuit_breaker_max_memory_usage_percent,
+        parquet_lifecycle_config.circuit_breaker_max_queue_depth,
+    ));
+    if let Some(buffer) = write_buffer.clone() {
+        let breaker = circuit_breaker.clone();
+        let cancel = cancel_token.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        breaker.set_queue_depth(0);
+                        return;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                        breaker.set_queue_depth(buffer.record_count() as u64);
+                    }
                 }
             }
-            result = admin_server => {
-                if let Err(e) = result {
-                    error!("Admin API server failed: {}", e);
-                }
+        });
+    }
+    let trace_service = OtlpTraceService::with_settings_repository(
+        parquet_writer.clone(),
+        otlp_auth.clone(),
+        settings_repo.clone(),
+        rate_limiter.clone(),
+        circuit_breaker.clone(),
+    );
+    let metrics_service = OtlpMetricsService::with_settings_repository(
+        parquet_writer.clone(),
+        otlp_auth.clone(),
+        settings_repo.clone(),
+        rate_limiter.clone(),
+        circuit_breaker.clone(),
+    );
+    let logs_service = OtlpLogsService::with_settings_repository(
+        parquet_writer.clone(),
+        otlp_auth.clone(),
+        settings_repo.clone(),
+        rate_limiter,
+        circuit_breaker.clone(),
+    );
+
+    info!("OTLP services initialized");
+
+    // =========================================================================
+    // Start servers
+    // =========================================================================
+
+    let otlp_port = config.otlp_port;
+    let admin_port = config.effective_admin_port();
+
+    let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
+    let otlp_server = async move {
+        info!("OTLP gRPC server listening on {}", otlp_addr);
+        Server::builder()
+            .add_service(
+                TraceServiceServer::new(trace_service)
+                    .accept_compressed(CompressionEncoding::Gzip)
+                    .send_compressed(CompressionEncoding::Gzip),
+            )
+            .add_service(
+                MetricsServiceServer::new(metrics_service)
+                    .accept_compressed(CompressionEncoding::Gzip)
+                    .send_compressed(CompressionEncoding::Gzip),
+            )
+            .add_service(
+                LogsServiceServer::new(logs_service)
+                    .accept_compressed(CompressionEncoding::Gzip)
+                    .send_compressed(CompressionEncoding::Gzip),
+            )
+            .serve(otlp_addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("OTLP server failed: {}", e))
+    };
+
+    let health_router = health::create_health_router(health::HealthState {
+        pg_pool: Some(pg_pool.clone()),
+        storage_path: parquet_data_dir.clone(),
+        circuit_breaker: Some(circuit_breaker),
+        retention_initialized: true,
+        ingestion_initialized: true,
+        background_jobs_started: true,
+    });
+    let admin_api = create_admin_router(query_service, authenticator.clone());
+    let retention_api = retention_router(retention_state, authenticator.clone());
+    let settings_api = settings_router(
+        Arc::new(SettingsState {
+            repository: settings_repo,
+            audit_log_repo: Some(audit_log_repo.clone()),
+        }),
+        authenticator.clone(),
+    );
+    let audit_api = audit_router(
+        Arc::new(AuditState {
+            repository: audit_log_repo,
+        }),
+        authenticator,
+    );
+    let app = Router::new()
+        .merge(health_router)
+        .merge(admin_api)
+        .merge(retention_api)
+        .merge(settings_api)
+        .merge(audit_api)
+        .layer(CompressionLayer::new());
+
+    let admin_addr = format!("0.0.0.0:{}", admin_port);
+    let admin_server = async move {
+        info!("Admin API listening on http://{}", admin_addr);
+        let listener = tokio::net::TcpListener::bind(&admin_addr).await?;
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| anyhow::anyhow!("Admin API server failed: {}", e))
+    };
+
+    info!("zradar is ready!");
+    info!("  OTLP gRPC: localhost:{}", otlp_port);
+    info!("  Admin API: http://localhost:{}", admin_port);
+
+    tokio::select! {
+        result = otlp_server => {
+            if let Err(e) = result {
+                error!("OTLP server failed: {}", e);
+            }
+        }
+        result = admin_server => {
+            if let Err(e) = result {
+                error!("Admin API server failed: {}", e);
             }
         }
     }

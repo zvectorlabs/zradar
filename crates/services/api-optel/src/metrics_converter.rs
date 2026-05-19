@@ -1,10 +1,12 @@
 //! OTLP metrics protobuf to internal model converter
 
-use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
-use opentelemetry_proto::tonic::common::v1::KeyValue;
-use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::{HistogramDataPoint, NumberDataPoint, SummaryDataPoint};
+use opentelemetry_proto::tonic::common::v1::KeyValue;
+use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
+use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+use opentelemetry_proto::tonic::metrics::v1::{
+    HistogramDataPoint, NumberDataPoint, SummaryDataPoint,
+};
 use zradar_models::{Metric, RequestContext};
 
 /// Converts an `ExportMetricsServiceRequest` into a flat `Vec<Metric>`.
@@ -27,9 +29,8 @@ impl OtlpMetricsConverter {
                 "agent.name",
             )
             .unwrap_or_default();
-            let resource_json = attrs_to_json(
-                resource.map(|r| r.attributes.as_slice()).unwrap_or(&[]),
-            );
+            let resource_json =
+                attrs_to_json(resource.map(|r| r.attributes.as_slice()).unwrap_or(&[]));
 
             for scope_metrics in resource_metrics.scope_metrics {
                 for metric in scope_metrics.metrics {
@@ -170,7 +171,11 @@ fn histogram_dp_to_metric(
         timestamp: dp.time_unix_nano as i64,
         tenant_id: context.tenant_id.clone(),
         project_id: context.project_id.clone(),
-        value: if dp.count > 0 { sum / dp.count as f64 } else { 0.0 },
+        value: if dp.count > 0 {
+            sum / dp.count as f64
+        } else {
+            0.0
+        },
         count: dp.count as i64,
         sum,
         min: dp.min.unwrap_or(0.0),
@@ -196,7 +201,11 @@ fn summary_dp_to_metric(
         timestamp: dp.time_unix_nano as i64,
         tenant_id: context.tenant_id.clone(),
         project_id: context.project_id.clone(),
-        value: if dp.count > 0 { dp.sum / dp.count as f64 } else { 0.0 },
+        value: if dp.count > 0 {
+            dp.sum / dp.count as f64
+        } else {
+            0.0
+        },
         count: dp.count as i64,
         sum: dp.sum,
         min: 0.0,
@@ -231,11 +240,9 @@ fn attrs_to_json(attrs: &[KeyValue]) -> String {
                 .map(|v| match v {
                     AnyValue::StringValue(s) => serde_json::Value::String(s.clone()),
                     AnyValue::IntValue(i) => serde_json::Value::Number((*i).into()),
-                    AnyValue::DoubleValue(d) => {
-                        serde_json::Number::from_f64(*d)
-                            .map(serde_json::Value::Number)
-                            .unwrap_or(serde_json::Value::Null)
-                    }
+                    AnyValue::DoubleValue(d) => serde_json::Number::from_f64(*d)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null),
                     AnyValue::BoolValue(b) => serde_json::Value::Bool(*b),
                     _ => serde_json::Value::Null,
                 })

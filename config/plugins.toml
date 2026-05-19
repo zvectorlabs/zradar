@@ -16,7 +16,6 @@ plugin_dir = "./plugins"
 # - "postgres" is built-in (always available)
 # - Other plugins are loaded dynamically
 enabled = [
-    "clickhouse",   # Telemetry storage (high-performance)
     "s3",           # Block storage (production)
     "redis",        # Cache (fast lookups)
 ]
@@ -39,15 +38,13 @@ storage = "s3"
 # - "redis" = Redis-backed queue (high throughput)
 queue = "postgres"
 
-# Telemetry writer (spans, metrics)
-# - "postgres" = Store in PostgreSQL (small deployments)
-# - "clickhouse" = Store in ClickHouse (production, analytics)
-telemetry_writer = "clickhouse"
+# Telemetry writer (spans, metrics, logs)
+# - "parquet" = Store telemetry in local/S3 Parquet files
+telemetry_writer = "parquet"
 
 # Telemetry reader (queries, analytics)
-# - "postgres" = Query from PostgreSQL
-# - "clickhouse" = Query from ClickHouse (optimized)
-telemetry_reader = "clickhouse"
+# - "parquet" = Query telemetry from local/S3 Parquet files
+telemetry_reader = "parquet"
 
 # Cache provider
 # - "memory" = In-memory cache (single instance)
@@ -70,25 +67,12 @@ auto_migrate = true
 # Fail startup if migration checksums don't match
 strict_checksums = true
 
-# Per-plugin migration directories
-[plugins.migrations.plugin_migrations.clickhouse]
-migrations_dir = "./migrations_clickhouse"
-# Override auto_migrate for this plugin (optional)
-# auto_migrate = false
-
 [plugins.migrations.plugin_migrations.postgres]
 migrations_dir = "./migrations"
 
 # =============================================================================
 # PLUGIN-SPECIFIC CONFIGURATION
 # =============================================================================
-
-[plugins.clickhouse]
-url = "http://localhost:8123"
-user = "default"
-password = ""
-database = "zradar"
-test_mode = false
 
 [plugins.s3]
 bucket = "zradar-traces"
@@ -103,7 +87,7 @@ url = "redis://localhost:6379"
 # =============================================================================
 # EXAMPLE: MINIMAL CONFIGURATION (PostgreSQL only)
 # =============================================================================
-# For small deployments, use PostgreSQL for everything:
+# For small deployments, use local-only storage:
 #
 # [plugins]
 # enabled = []
@@ -111,8 +95,8 @@ url = "redis://localhost:6379"
 # [plugins.backends]
 # storage = "postgres"
 # queue = "postgres"
-# telemetry_writer = "postgres"
-# telemetry_reader = "postgres"
+# telemetry_writer = "parquet"
+# telemetry_reader = "parquet"
 # cache = "memory"
 # auth = "postgres"
 #

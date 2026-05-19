@@ -19,7 +19,7 @@
 |-------|-----------|---------|----------------------|
 | **Applications** | `crates/applications` | Entry points (Server, Worker). Wires plugins to core. | All layers |
 | **Services** | `crates/services` | Business logic (e.g., `api_keys`, `projects`). | `core` |
-| **Plugins** | `crates/plugins` | Concrete implementations (e.g., `postgres`, `clickhouse`). | `core` |
+| **Plugins** | `crates/plugins` | Concrete implementations (e.g., `postgres`, `s3`). | `core` |
 | **Core** | `crates/core` | Shared traits, models, and errors. | None (Leaf nodes) |
 
 ### Key Core Crates

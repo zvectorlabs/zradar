@@ -33,13 +33,11 @@ if [ "$MODE" = "prod" ]; then
     API_PORT="9006"
     OTLP_PORT="9005"
     POSTGRES_PORT="9001"
-    CLICKHOUSE_PORT="9002"
 else
     COMPOSE_FILE="docker-compose.yml"
     API_PORT="8080"
     OTLP_PORT="4317"
     POSTGRES_PORT="5432"
-    CLICKHOUSE_PORT="8123"
 fi
 
 # Check if .env exists, create if not
@@ -49,7 +47,6 @@ if [ ! -f .env ]; then
         cat > .env << EOF
 # zradar Production Environment Variables
 POSTGRES_PASSWORD=prod_password_$(openssl rand -hex 8)
-CLICKHOUSE_PASSWORD=prod_password_$(openssl rand -hex 8)
 RUST_LOG=info,zradar=info
 QUEUE_TYPE=postgres
 STORAGE_TYPE=local
@@ -58,7 +55,6 @@ EOF
         cat > .env << EOF
 # zradar Development Environment Variables
 POSTGRES_PASSWORD=dev_password
-CLICKHOUSE_PASSWORD=dev_password
 RUST_LOG=debug,zradar=trace
 QUEUE_TYPE=postgres
 STORAGE_TYPE=local
@@ -142,7 +138,6 @@ echo "  🔹 OTLP gRPC:     localhost:${OTLP_PORT}"
 echo "  🔹 Health Check:  http://localhost:${API_PORT}/health"
 echo "  🔹 Admin API:     http://localhost:${API_PORT}"
 echo "  🔹 PostgreSQL:    localhost:${POSTGRES_PORT}"
-echo "  🔹 ClickHouse:    localhost:${CLICKHOUSE_PORT}"
 
 if [ "$MODE" = "dev" ]; then
     echo "  🔹 Adminer UI:    http://localhost:8081"

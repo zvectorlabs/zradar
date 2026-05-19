@@ -66,12 +66,12 @@ zradar
 │   └── Permissions                  // RBAC
 ├── zvradar-otlp                     // OTLP ingest (tonic gRPC)
 ├── zvradar-ingestor                 // Batch processing
-├── zvradar-storage                  // PostgreSQL + ClickHouse
+├── zvradar-storage                  // PostgreSQL metadata + Parquet telemetry
 ├── zvradar-auth                     // Authentication/authorization
 └── zvradar-models                   // Shared data models
 ```
 
-**Principle:** Service-oriented architecture with clear boundaries. PostgreSQL for control plane, ClickHouse for telemetry data.
+**Principle:** Service-oriented architecture with clear boundaries. PostgreSQL for control plane and metadata, Parquet for telemetry data.
 
 ---
 
@@ -185,14 +185,14 @@ FOR each_request:
 
 ### 7.2 Batch Processing
 
-- Collect traces in batches before ClickHouse insert
+- Collect traces in batches before telemetry persistence
 - Use PostgreSQL transactions for control plane mutations
 - Implement graceful degradation for storage failures
 
 ### 7.3 Storage Patterns
 
 - PostgreSQL: Control plane (organizations, projects, API keys, audit logs)
-- ClickHouse: Telemetry data (traces, spans, metrics, logs)
+- Parquet: Telemetry data (traces, spans, metrics, logs)
 - Redis: Rate limiting, caching, session management
 - Atomic operations: Use database transactions, avoid multi-step mutations
 

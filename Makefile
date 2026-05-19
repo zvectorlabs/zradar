@@ -34,7 +34,6 @@ help:
 	@echo "  make health         - Check service health"
 	@echo "  make shell          - Open shell in zradar container"
 	@echo "  make db-shell       - Open PostgreSQL shell"
-	@echo "  make ch-shell       - Open ClickHouse shell"
 	@echo "  make db-gui         - Open database GUI (Adminer)"
 	@echo "  make migrate        - Run database migrations"
 	@echo "  make sqlx-prepare   - Generate SQLx offline query cache"
@@ -100,6 +99,7 @@ clean:
 	@docker-compose -f docker-compose.prod.yml down -v
 	@docker-compose -f docker-compose.deploy.yml down
 	@docker system prune -f
+	@rm -rf ./data-test
 	@echo "✅ Containers removed. Database data preserved in ./data/"
 
 # Clean everything including data directory (WARNING: deletes all data!)
@@ -146,7 +146,7 @@ deploy:
 	@echo "🚀 Deploying to production..."
 	@if [ ! -f .env.prod ]; then \
 		echo "❌ Error: .env.prod not found"; \
-		echo "Create .env.prod with DATABASE_URL, CLICKHOUSE_URL, REDIS_URL, etc."; \
+		echo "Create .env.prod with DATABASE_URL, etc."; \
 		exit 1; \
 	fi
 	@docker-compose -f docker-compose.deploy.yml --env-file .env.prod up -d
@@ -194,10 +194,6 @@ shell:
 # Open PostgreSQL shell
 db-shell:
 	@docker-compose exec postgres psql -U zradar -d zradar
-
-# Open ClickHouse shell
-ch-shell:
-	@docker-compose exec clickhouse clickhouse-client
 
 # Open database GUI (Adminer)
 db-gui:

@@ -1,18 +1,17 @@
 //! Evaluation score data model
 
-use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Evaluation score for traces/spans
-#[derive(Debug, Clone, Serialize, Deserialize, Row, sqlx::FromRow, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
 pub struct EvaluationScore {
     // Identity
     pub id: String,
     pub tenant_id: String,
     pub project_id: String,
 
-    // Timing (nanoseconds for Rust, converted to DateTime64(3) for ClickHouse)
+    // Timing in nanoseconds
     pub timestamp: i64,
     pub created_at: i64,
     pub updated_at: i64,

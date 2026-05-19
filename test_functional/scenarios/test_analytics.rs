@@ -20,39 +20,13 @@ struct MetricsSummary {
 #[tokio::test]
 #[ignore]
 async fn test_analytics_endpoints() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-
-    // Login as admin
-    let api_client = ctx.login_as_admin().await?;
-
-    // 1. Create organization and project (unique names via TestFixture)
-    let fixture = TestFixture::new();
-    let org = api_client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = crate::helpers::test_helpers::parse_uuid_from_json(&org, "id")?;
-
-    let project = api_client
-        .create_project(&org_id, &fixture.project_name, &fixture.project_display_name)
-        .await?;
-    let project_id = crate::helpers::test_helpers::parse_uuid_from_json(&project, "id")?;
-
-    // 2. Create API Key for ingestion
-    let api_key_json = api_client
-        .create_api_key(&project_id, "ingest-key", "Key for ingestion")
-        .await?;
-    let api_key = crate::helpers::test_helpers::get_string_from_json(&api_key_json, "key")?;
-
-    // 3. Ingest traces
-    let mut otlp_client = ctx.otlp_client;
-    otlp_client.set_api_key(api_key.to_string());
+    let env = TestEnv::setup().await?;
 
     // Send 3 success traces
     for i in 0..3 {
-        let trace_id = crate::helpers::grpc_client::random_trace_id();
-        let span_id = crate::helpers::grpc_client::random_span_id();
-        otlp_client
+        let trace_id = TestDataGenerator::trace_id();
+        let span_id = TestDataGenerator::span_id();
+        env.otlp
             .send_test_trace(
                 "test-service",
                 &trace_id,
@@ -62,14 +36,12 @@ async fn test_analytics_endpoints() -> Result<()> {
             .await?;
     }
 
-    // Send 1 error trace
-    // We need to manually build this one to set the error status
-    let trace_id = crate::helpers::grpc_client::random_trace_id();
-    let span_id = crate::helpers::grpc_client::random_span_id();
-    let mut request =
-        otlp_client.build_test_trace("test-service", &trace_id, &span_id, "error-span");
-
-    // Modify status to Error (code 2)
+    // Send 1 error trace with error status
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+    let mut request = env
+        .otlp
+        .build_test_trace("test-service", &trace_id, &span_id, "error-span");
     if let Some(res_span) = request.resource_spans.get_mut(0)
         && let Some(scope_span) = res_span.scope_spans.get_mut(0)
         && let Some(span) = scope_span.spans.get_mut(0)
@@ -78,7 +50,6 @@ async fn test_analytics_endpoints() -> Result<()> {
             message: "Something went wrong".to_string(),
             code: 2, // STATUS_CODE_ERROR
         });
-        // Also update http.status_code attribute if present
         if let Some(attr) = span
             .attributes
             .iter_mut()
@@ -91,37 +62,41 @@ async fn test_analytics_endpoints() -> Result<()> {
             });
         }
     }
-    otlp_client.export_traces(request).await?;
+    env.otlp.export_traces(request).await?;
 
-    // Wait for ingestion (async processing)
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    // Poll until the analytics endpoint returns data for all 4 traces
+    let analytics_url = "/api/v1/analytics".to_string();
+    poll_until(
+        || async {
+            let resp = env.client.get(&analytics_url).await?;
+            if resp.status() != 200 {
+                return Ok(None);
+            }
+            let series: Vec<AnalyticsResult> = resp.json().await?;
+            let total: f64 = series.iter().map(|p| p.value).sum();
+            if total >= 4.0 { Ok(Some(())) } else { Ok(None) }
+        },
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_millis(200),
+    )
+    .await?;
 
-    // 4. Get daily trace counts (series)
-    let series_response = api_client
-        .get(&format!("/api/v1/analytics?project_id={}", project_id))
-        .await?;
-
+    // Now fetch and verify final analytics state
+    let series_response = env.client.get(&analytics_url).await?;
     assert_eq!(series_response.status(), 200);
     let series: Vec<AnalyticsResult> = series_response.json().await?;
-
-    // We expect at least one data point for today
     assert!(!series.is_empty(), "Should have analytics data");
     let total_count: f64 = series.iter().map(|p| p.value).sum();
     assert_eq!(total_count, 4.0, "Should have 4 total traces");
 
-    // 5. Get metrics summary
-    let metrics_response = api_client
-        .get(&format!(
-            "/api/v1/analytics/metrics?project_id={}",
-            project_id
-        ))
+    // Get metrics summary
+    let metrics_response = env
+        .client
+        .get(&format!("/api/v1/analytics/metrics?"))
         .await?;
-
     assert_eq!(metrics_response.status(), 200);
     let metrics: MetricsSummary = metrics_response.json().await?;
-
     assert_eq!(metrics.total_traces, 4);
-    // Error rate: 1 error out of 4 traces = 0.25 (25%)
     assert_eq!(metrics.error_rate, 0.25, "Error rate should be 0.25 (25%)");
 
     println!("✅ Analytics endpoints work correctly with data");

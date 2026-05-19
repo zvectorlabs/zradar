@@ -11,9 +11,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 
-# ClickHouse Row derive
-clickhouse = { workspace = true }
-
 # Error handling
 anyhow = { workspace = true }
 

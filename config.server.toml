@@ -9,13 +9,6 @@ query_api_port = 8080
 batch_size = 1000
 batch_timeout_seconds = 10
 
-[clickhouse]
-url = "http://clickhouse:8123"
-user = "zradar"
-password = "clickhouse_password_1764087933"
-database = "telemetry"
-max_connections = 10
-
 [postgres]
 max_connections = 20
 
