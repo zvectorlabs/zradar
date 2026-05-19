@@ -26,17 +26,9 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-# Hashing for API keys
-sha2 = "0.10"
-
-# Compression
-flate2 = "1.0"
-
 # Internal dependencies
 zradar-models = { workspace = true }
 zradar-traits = { workspace = true }
-zradar-plugins = { workspace = true }
-zradar-migrations = { path = "../../core/zradar-migrations" }
 
 [build-dependencies]
 # For embedding migrations

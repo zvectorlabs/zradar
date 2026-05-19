@@ -1,53 +1,66 @@
-//! OTLP Metrics Service gRPC implementation
+//! OTLP Metrics Service gRPC implementation.
 
-use crate::auth::ApiKeyAuth;
+use crate::auth::authenticate_grpc;
+use crate::circuit_breaker::CircuitBreaker;
+use crate::ingestion_guard::enforce_project_settings;
 use crate::metrics_converter::OtlpMetricsConverter;
+use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::metrics::v1::{
     ExportMetricsServiceRequest, ExportMetricsServiceResponse,
     metrics_service_server::MetricsService,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use zradar_models::RequestContext;
+use zradar_traits::{Authenticator, SettingsRepository, TelemetryWriter};
 
-/// Callback trait for handling converted metrics.
-#[tonic::async_trait]
-pub trait MetricHandler: Send + Sync + 'static {
-    async fn handle_metrics(
-        &self,
-        metrics: Vec<zradar_models::Metric>,
-        context: &RequestContext,
-    ) -> Result<(), Status>;
-}
-
-/// OTLP Metrics Service implementation.
+/// OTLP Metrics Service — converts OTLP protobuf to metrics and writes them.
 #[derive(Clone)]
-pub struct OtlpMetricsService<H: MetricHandler> {
-    handler: Arc<H>,
-    auth: Option<Arc<ApiKeyAuth>>,
+pub struct OtlpMetricsService {
+    writer: Arc<dyn TelemetryWriter>,
+    auth: Option<Arc<dyn Authenticator>>,
+    settings_repo: Option<Arc<dyn SettingsRepository>>,
+    rate_limiter: Option<Arc<ProjectRateLimiter>>,
+    circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
-impl<H: MetricHandler> OtlpMetricsService<H> {
-    pub fn new(handler: Arc<H>, auth: Option<Arc<ApiKeyAuth>>) -> Self {
-        Self { handler, auth }
+impl OtlpMetricsService {
+    pub fn new(writer: Arc<dyn TelemetryWriter>, auth: Option<Arc<dyn Authenticator>>) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: None,
+            rate_limiter: None,
+            circuit_breaker: None,
+        }
     }
 
-    async fn authenticate<T>(&self, request: &Request<T>) -> Result<RequestContext, Status> {
-        if let Some(ref auth) = self.auth {
-            auth.validate(request).await
-        } else {
-            Ok(RequestContext::default())
+    pub fn with_settings_repository(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        settings_repo: Arc<dyn SettingsRepository>,
+        rate_limiter: Arc<ProjectRateLimiter>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: Some(settings_repo),
+            rate_limiter: Some(rate_limiter),
+            circuit_breaker: Some(circuit_breaker),
         }
     }
 }
 
 #[tonic::async_trait]
-impl<H: MetricHandler> MetricsService for OtlpMetricsService<H> {
+impl MetricsService for OtlpMetricsService {
     async fn export(
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        let context = self.authenticate(&request).await?;
+        let context = authenticate_grpc(&self.auth, &request).await?;
+        if let Some(circuit_breaker) = &self.circuit_breaker {
+            circuit_breaker.check_status().await?;
+        }
         let req = request.into_inner();
 
         tracing::debug!(
@@ -58,18 +71,27 @@ impl<H: MetricHandler> MetricsService for OtlpMetricsService<H> {
         );
 
         let metrics = OtlpMetricsConverter::convert(req, &context);
-        let metric_count = metrics.len();
+        enforce_project_settings(
+            &self.settings_repo,
+            &self.rate_limiter,
+            &context,
+            metrics.len() as u64,
+        )
+        .await?;
 
         if !metrics.is_empty() {
-            self.handler.handle_metrics(metrics, &context).await?;
-        }
+            self.writer
+                .insert_metrics(&metrics)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to insert metrics: {}", e)))?;
 
-        tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
-            metrics = metric_count,
-            "Successfully processed metrics"
-        );
+            tracing::info!(
+                tenant_id = %context.tenant_id,
+                project_id = %context.project_id,
+                metrics = metrics.len(),
+                "Persisted metrics"
+            );
+        }
 
         Ok(Response::new(ExportMetricsServiceResponse {
             partial_success: None,

@@ -9,12 +9,7 @@ use uuid::Uuid;
 
 use super::{service::QueryService, types::*};
 use crate::errors::Result;
-use crate::http::extractors::AuthenticatedUser;
-
-#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
-pub struct ProjectIdParam {
-    pub project_id: Uuid,
-}
+use crate::http::AuthContext;
 
 /// Query traces
 #[utoipa::path(
@@ -38,20 +33,20 @@ pub struct ProjectIdParam {
     ),
     responses(
         (status = 200, description = "Traces retrieved", body = PaginatedResponse<TraceSummary>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Query"
 )]
 pub async fn query_traces(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(filters): Query<TraceQueryFilters>,
+    AuthContext(ctx): AuthContext,
+    Query(mut filters): Query<TraceQueryFilters>,
 ) -> Result<Json<PaginatedResponse<TraceSummary>>> {
-    // Use Uuid::nil() as org_id since we're checking project permissions
-    let traces = service.query_traces(user.id, Uuid::nil(), filters).await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into filters
+    filters.project_id = ctx.project_id.clone();
+    let traces = service.query_traces(tenant_id, filters).await?;
     Ok(Json(traces))
 }
 
@@ -61,26 +56,23 @@ pub async fn query_traces(
     path = "/api/v1/traces/{trace_id}",
     params(
         ("trace_id" = String, Path, description = "Trace ID"),
-        ("project_id" = Uuid, Query, description = "Project ID"),
     ),
     responses(
         (status = 200, description = "Trace detail retrieved", body = TraceDetail),
         (status = 404, description = "Trace not found"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Query"
 )]
 pub async fn get_trace(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
+    AuthContext(ctx): AuthContext,
     Path(trace_id): Path<String>,
-    Query(params): Query<ProjectIdParam>,
 ) -> Result<Json<TraceDetail>> {
-    let trace = service
-        .get_trace(user.id, Uuid::nil(), params.project_id, &trace_id)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
+    let trace = service.get_trace(tenant_id, project_id, &trace_id).await?;
     Ok(Json(trace))
 }
 
@@ -90,26 +82,23 @@ pub async fn get_trace(
     path = "/api/v1/spans/{span_id}",
     params(
         ("span_id" = String, Path, description = "Span ID"),
-        ("project_id" = Uuid, Query, description = "Project ID"),
     ),
     responses(
         (status = 200, description = "Span retrieved", body = SpanDetail),
         (status = 404, description = "Span not found"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "query"
 )]
 pub async fn get_span(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
+    AuthContext(ctx): AuthContext,
     Path(span_id): Path<String>,
-    Query(params): Query<ProjectIdParam>,
 ) -> Result<Json<SpanDetail>> {
-    let span = service
-        .get_span(user.id, Uuid::nil(), params.project_id, &span_id)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
+    let span = service.get_span(tenant_id, project_id, &span_id).await?;
     Ok(Json(span))
 }
 
@@ -124,7 +113,7 @@ pub async fn get_span(
         ("trace_id" = Option<String>, Query, description = "Filter by trace ID"),
         ("name" = Option<String>, Query, description = "Span name filter"),
         ("service_name" = Option<String>, Query, description = "Service name filter"),
-        ("span_type" = Option<String>, Query, description = "Filter by single span type (SPAN, EVENT, GENERATION, etc.)"),
+        ("span_type" = Option<String>, Query, description = "Filter by single span type"),
         ("span_types" = Option<String>, Query, description = "Filter by multiple span types (comma-separated)"),
         ("min_duration_ms" = Option<i64>, Query, description = "Minimum duration"),
         ("max_duration_ms" = Option<i64>, Query, description = "Maximum duration"),
@@ -133,19 +122,20 @@ pub async fn get_span(
     ),
     responses(
         (status = 200, description = "Spans retrieved", body = PaginatedResponse<SpanDetail>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Query"
 )]
 pub async fn query_spans(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(filters): Query<SpanQueryFilters>,
+    AuthContext(ctx): AuthContext,
+    Query(mut filters): Query<SpanQueryFilters>,
 ) -> Result<Json<PaginatedResponse<SpanDetail>>> {
-    let spans = service.query_spans(user.id, Uuid::nil(), filters).await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into filters
+    filters.project_id = ctx.project_id.clone();
+    let spans = service.query_spans(tenant_id, filters).await?;
     Ok(Json(spans))
 }
 
@@ -162,19 +152,20 @@ pub async fn query_spans(
     ),
     responses(
         (status = 200, description = "Analytics retrieved", body = Vec<AnalyticsResult>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Analytics"
 )]
 pub async fn get_analytics(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(query): Query<AnalyticsQuery>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<AnalyticsResult>>> {
-    let results = service.get_analytics(user.id, Uuid::nil(), query).await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into query
+    query.project_id = ctx.project_id.clone();
+    let results = service.get_analytics(tenant_id, query).await?;
     Ok(Json(results))
 }
 
@@ -189,21 +180,20 @@ pub async fn get_analytics(
     ),
     responses(
         (status = 200, description = "Metrics summary retrieved", body = MetricsSummary),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Analytics"
 )]
 pub async fn get_metrics_summary(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(query): Query<AnalyticsQuery>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<MetricsSummary>> {
-    let summary = service
-        .get_metrics_summary(user.id, Uuid::nil(), query)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into query
+    query.project_id = ctx.project_id.clone();
+    let summary = service.get_metrics_summary(tenant_id, query).await?;
     Ok(Json(summary))
 }
 
@@ -219,21 +209,20 @@ pub async fn get_metrics_summary(
     ),
     responses(
         (status = 200, description = "Top endpoints retrieved", body = Vec<TopEndpoint>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Analytics"
 )]
 pub async fn get_top_endpoints(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(query): Query<TopNQuery>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<TopNQuery>,
 ) -> Result<Json<Vec<TopEndpoint>>> {
-    let results = service
-        .get_top_endpoints(user.id, Uuid::nil(), query)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into query
+    query.project_id = ctx.project_id.clone();
+    let results = service.get_top_endpoints(tenant_id, query).await?;
     Ok(Json(results))
 }
 
@@ -248,21 +237,42 @@ pub async fn get_top_endpoints(
     ),
     responses(
         (status = 200, description = "Error breakdown retrieved", body = Vec<ErrorBreakdown>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
     ),
     security(("bearer_token" = [])),
     tag = "Analytics"
 )]
 pub async fn get_error_breakdown(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(query): Query<ErrorAnalyticsQuery>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<ErrorAnalyticsQuery>,
 ) -> Result<Json<Vec<ErrorBreakdown>>> {
-    let results = service
-        .get_error_breakdown(user.id, Uuid::nil(), query)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into query
+    query.project_id = ctx.project_id.clone();
+    let results = service.get_error_breakdown(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
+pub async fn get_llm_analytics(
+    State(service): State<Arc<QueryService>>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<AnalyticsQuery>,
+) -> Result<Json<Vec<LlmAnalytics>>> {
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    query.project_id = ctx.project_id.clone();
+    let results = service.get_llm_analytics(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
+pub async fn get_agent_analytics(
+    State(service): State<Arc<QueryService>>,
+    AuthContext(ctx): AuthContext,
+    Query(mut query): Query<AnalyticsQuery>,
+) -> Result<Json<Vec<AgentAnalytics>>> {
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    query.project_id = ctx.project_id.clone();
+    let results = service.get_agent_analytics(tenant_id, query).await?;
     Ok(Json(results))
 }
 
@@ -274,7 +284,7 @@ pub async fn get_error_breakdown(
         ("project_id" = String, Query, description = "Project ID"),
         ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
         ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
-        ("severity" = Option<String>, Query, description = "Severity filter (INFO, WARN, ERROR, …)"),
+        ("severity" = Option<String>, Query, description = "Severity filter"),
         ("service_name" = Option<String>, Query, description = "Service name filter"),
         ("trace_id" = Option<String>, Query, description = "Trace ID filter"),
         ("search_text" = Option<String>, Query, description = "Full-text search in message"),
@@ -284,7 +294,6 @@ pub async fn get_error_breakdown(
     ),
     responses(
         (status = 200, description = "Logs retrieved", body = PaginatedResponse<LogDetail>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = [])),
@@ -292,10 +301,13 @@ pub async fn get_error_breakdown(
 )]
 pub async fn query_logs(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(filters): Query<LogQueryFilters>,
+    AuthContext(ctx): AuthContext,
+    Query(mut filters): Query<LogQueryFilters>,
 ) -> Result<Json<PaginatedResponse<LogDetail>>> {
-    let logs = service.query_logs(user.id, Uuid::nil(), filters).await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into filters
+    filters.project_id = ctx.project_id.clone();
+    let logs = service.query_logs(tenant_id, filters).await?;
     Ok(Json(logs))
 }
 
@@ -305,7 +317,6 @@ pub async fn query_logs(
     path = "/api/v1/logs/{log_id}",
     params(
         ("log_id" = String, Path, description = "Log record ID"),
-        ("project_id" = Uuid, Query, description = "Project ID"),
     ),
     responses(
         (status = 200, description = "Log record retrieved", body = LogDetail),
@@ -317,13 +328,12 @@ pub async fn query_logs(
 )]
 pub async fn get_log(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
+    AuthContext(ctx): AuthContext,
     Path(log_id): Path<String>,
-    Query(params): Query<ProjectIdParam>,
 ) -> Result<Json<LogDetail>> {
-    let log = service
-        .get_log(user.id, Uuid::nil(), params.project_id, &log_id)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
+    let log = service.get_log(tenant_id, project_id, &log_id).await?;
     Ok(Json(log))
 }
 
@@ -342,7 +352,6 @@ pub async fn get_log(
     ),
     responses(
         (status = 200, description = "Metrics retrieved", body = PaginatedResponse<MetricDetail>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = [])),
@@ -350,12 +359,13 @@ pub async fn get_log(
 )]
 pub async fn query_metrics(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(filters): Query<MetricQueryFilters>,
+    AuthContext(ctx): AuthContext,
+    Query(mut filters): Query<MetricQueryFilters>,
 ) -> Result<Json<PaginatedResponse<MetricDetail>>> {
-    let metrics = service
-        .query_metrics(user.id, Uuid::nil(), filters)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into filters
+    filters.project_id = ctx.project_id.clone();
+    let metrics = service.query_metrics(tenant_id, filters).await?;
     Ok(Json(metrics))
 }
 
@@ -374,7 +384,6 @@ pub async fn query_metrics(
     ),
     responses(
         (status = 200, description = "Metric series retrieved", body = Vec<MetricSeriesPoint>),
-        (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = [])),
@@ -382,11 +391,17 @@ pub async fn query_metrics(
 )]
 pub async fn query_metric_series(
     State(service): State<Arc<QueryService>>,
-    user: AuthenticatedUser,
-    Query(filters): Query<MetricSeriesFilters>,
+    AuthContext(ctx): AuthContext,
+    Query(mut filters): Query<MetricSeriesFilters>,
 ) -> Result<Json<Vec<MetricSeriesPoint>>> {
-    let series = service
-        .query_metric_series(user.id, Uuid::nil(), filters)
-        .await?;
+    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    // Inject project_id from headers into filters
+    filters.project_id = ctx.project_id.clone();
+    let series = service.query_metric_series(tenant_id, filters).await?;
     Ok(Json(series))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct ProjectIdParam {
+    pub project_id: Uuid,
 }

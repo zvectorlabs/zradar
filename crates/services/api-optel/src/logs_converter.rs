@@ -1,9 +1,9 @@
 //! OTLP logs protobuf to internal model converter
 
-use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
-use opentelemetry_proto::tonic::common::v1::KeyValue;
-use opentelemetry_proto::tonic::logs::v1::LogRecord as OtlpLogRecord;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::common::v1::KeyValue;
+use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
+use opentelemetry_proto::tonic::logs::v1::LogRecord as OtlpLogRecord;
 use uuid::Uuid;
 use zradar_models::{LogRecord, RequestContext};
 
@@ -12,10 +12,7 @@ pub struct OtlpLogsConverter;
 
 impl OtlpLogsConverter {
     /// Convert a full logs export request into internal `LogRecord` records.
-    pub fn convert(
-        request: ExportLogsServiceRequest,
-        context: &RequestContext,
-    ) -> Vec<LogRecord> {
+    pub fn convert(request: ExportLogsServiceRequest, context: &RequestContext) -> Vec<LogRecord> {
         let mut out = Vec::new();
 
         for resource_logs in request.resource_logs {
@@ -24,8 +21,7 @@ impl OtlpLogsConverter {
 
             let service_name = extract_string_attr(resource_attrs, "service.name")
                 .unwrap_or_else(|| "unknown".to_string());
-            let agent_name =
-                extract_string_attr(resource_attrs, "agent.name").unwrap_or_default();
+            let agent_name = extract_string_attr(resource_attrs, "agent.name").unwrap_or_default();
             let resource_json = attrs_to_json(resource_attrs);
 
             for scope_logs in resource_logs.scope_logs {
@@ -96,10 +92,8 @@ fn convert_log_record(
         String::new()
     };
 
-    let user_id =
-        extract_string_attr(&log.attributes, "user.id").unwrap_or_default();
-    let session_id =
-        extract_string_attr(&log.attributes, "session.id").unwrap_or_default();
+    let user_id = extract_string_attr(&log.attributes, "user.id").unwrap_or_default();
+    let session_id = extract_string_attr(&log.attributes, "session.id").unwrap_or_default();
     let attributes_json = attrs_to_json(&log.attributes);
 
     LogRecord {
@@ -158,11 +152,9 @@ fn attrs_to_json(attrs: &[KeyValue]) -> String {
                 .map(|v| match v {
                     AnyValue::StringValue(s) => serde_json::Value::String(s.clone()),
                     AnyValue::IntValue(i) => serde_json::Value::Number((*i).into()),
-                    AnyValue::DoubleValue(d) => {
-                        serde_json::Number::from_f64(*d)
-                            .map(serde_json::Value::Number)
-                            .unwrap_or(serde_json::Value::Null)
-                    }
+                    AnyValue::DoubleValue(d) => serde_json::Number::from_f64(*d)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null),
                     AnyValue::BoolValue(b) => serde_json::Value::Bool(*b),
                     _ => serde_json::Value::Null,
                 })

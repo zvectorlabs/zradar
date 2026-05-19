@@ -22,6 +22,38 @@ pub trait FileListRepository: Send + Sync {
     /// overlaps the filter's `[time_range_start, time_range_end]`.
     async fn query_files(&self, filter: FileListFilter) -> anyhow::Result<Vec<FileListEntry>>;
 
+    async fn query_compactable_groups(
+        &self,
+        cutoff_us: i64,
+    ) -> anyhow::Result<Vec<Vec<FileListEntry>>> {
+        let files = self
+            .query_files(FileListFilter {
+                location: Some("local".to_string()),
+                deleted: Some(false),
+                ..Default::default()
+            })
+            .await?;
+        let mut groups =
+            std::collections::HashMap::<(Uuid, Uuid, String, String), Vec<FileListEntry>>::new();
+        for file in files {
+            if file.created_at < cutoff_us {
+                groups
+                    .entry((
+                        file.tenant_id,
+                        file.project_id,
+                        file.signal_type.clone(),
+                        file.date.clone(),
+                    ))
+                    .or_default()
+                    .push(file);
+            }
+        }
+        Ok(groups
+            .into_values()
+            .filter(|group| group.len() >= 2)
+            .collect())
+    }
+
     /// Move a file to a new storage location (e.g. local → s3) and update its path.
     async fn update_location(&self, id: i64, location: &str, new_path: &str) -> anyhow::Result<()>;
 

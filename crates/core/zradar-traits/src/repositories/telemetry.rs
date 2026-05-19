@@ -1,5 +1,7 @@
 //! Telemetry repository traits
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,6 +34,10 @@ pub struct TraceQueryFilters {
     pub status: Option<String>,
     pub min_duration_ms: Option<u64>,
     pub max_duration_ms: Option<u64>,
+    pub llm_model: Option<String>,
+    pub llm_provider: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
     pub pagination: Pagination,
 }
 
@@ -45,6 +51,9 @@ pub struct SpanQueryFilters {
     pub span_name: Option<String>,
     pub span_types: Option<Vec<String>>, // Filter by span_type(s)
     pub status: Option<String>,
+    pub llm_model: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
     pub pagination: Pagination,
 }
 
@@ -153,6 +162,7 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     /// Get trace detail with all spans
     async fn get_trace_detail(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         trace_id: &str,
     ) -> anyhow::Result<Option<Vec<Span>>>;
@@ -164,7 +174,12 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     ) -> anyhow::Result<PaginatedResponse<Span>>;
 
     /// Get span by ID
-    async fn get_span(&self, project_id: Uuid, span_id: &str) -> anyhow::Result<Option<Span>>;
+    async fn get_span(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        span_id: &str,
+    ) -> anyhow::Result<Option<Span>>;
 
     /// Query log records
     async fn query_logs(
@@ -175,6 +190,7 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     /// Get a single log record by its ID
     async fn get_log(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         log_id: &str,
     ) -> anyhow::Result<Option<LogRecord>>;
@@ -213,12 +229,38 @@ pub struct MetricsSummary {
     pub p99_latency: f64,
 }
 
+/// Generic analytics query filters for the storage layer.
+#[derive(Debug, Clone, Default)]
+pub struct AnalyticsQueryFilters {
+    pub project_id: Uuid,
+    pub start: i64,
+    pub end: i64,
+    /// Metric to compute: "trace_count", "span_count", "total_tokens", etc.
+    pub metric: String,
+    /// Columns to GROUP BY: ["agent_name"], ["llm_model"], ["agent_name", "llm_model"], etc.
+    pub group_by: Vec<String>,
+    /// WHERE filters on allowed columns: {"agent_name": "planner"}
+    pub filters: HashMap<String, String>,
+}
+
+/// A single row from a grouped time-series analytics query.
+#[derive(Debug, Clone)]
+pub struct AnalyticsDataPoint {
+    /// Bucket start time (nanoseconds).
+    pub bucket_ts: i64,
+    /// Aggregated metric value for this bucket + group.
+    pub value: f64,
+    /// Group dimension values, e.g. {"agent_name": "planner"}.
+    pub groups: HashMap<String, String>,
+}
+
 /// Analytics reader trait
 #[async_trait]
 pub trait AnalyticsReader: Send + Sync {
     /// Get daily trace counts
     async fn get_daily_trace_counts(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         start: i64,
         end: i64,
@@ -227,8 +269,19 @@ pub trait AnalyticsReader: Send + Sync {
     /// Get metrics summary
     async fn get_metrics_summary(
         &self,
+        tenant_id: Uuid,
         project_id: Uuid,
         start: i64,
         end: i64,
     ) -> anyhow::Result<MetricsSummary>;
+
+    /// Generic grouped time-series analytics.
+    ///
+    /// Dynamically builds a SQL query based on the requested metric, group-by
+    /// dimensions, and filters. Returns bucketed time-series data.
+    async fn query_analytics(
+        &self,
+        tenant_id: Uuid,
+        filters: AnalyticsQueryFilters,
+    ) -> anyhow::Result<Vec<AnalyticsDataPoint>>;
 }

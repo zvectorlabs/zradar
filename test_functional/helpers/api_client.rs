@@ -3,63 +3,21 @@
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use reqwest::{Client, Response};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
-use uuid::Uuid;
 
-// Request/Response structures
-#[derive(Serialize)]
-struct LoginRequest {
-    email: String,
-    password: String,
-}
-
-#[derive(Deserialize)]
-struct LoginResponse {
-    token: String,
-    #[allow(dead_code)]
-    user: serde_json::Value, // We only care about the token for testing
-}
-
-#[derive(Serialize)]
-struct RegisterRequest {
-    email: String,
-    password: String,
-    full_name: String,
-}
-
-#[derive(Serialize)]
-struct CreateOrgRequest {
-    slug: String,
-    name: String,
-    description: Option<String>,
-}
-
-#[derive(Serialize)]
-struct CreateProjectRequest {
-    slug: String,
-    name: String,
-    description: Option<String>,
-    organization_id: String,
-}
-
-#[derive(Serialize)]
-struct CreateApiKeyRequest {
-    project_id: String,
-    name: String,
-    description: Option<String>,
-}
-
-/// HTTP client for API testing with authentication
+/// HTTP client for API testing with API key authentication.
 pub struct ApiClient {
     client: Client,
     base_url: String,
     token: Option<String>,
+    tenant_id: Option<String>,
+    project_id: Option<String>,
 }
 
 impl ApiClient {
-    /// Create a new API client
+    /// Create a new API client.
     pub fn new(base_url: String) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -70,111 +28,105 @@ impl ApiClient {
             client,
             base_url,
             token: None,
+            tenant_id: None,
+            project_id: None,
         }
     }
 
-    /// Set authentication token
+    /// Set the API key (used as Bearer token).
     pub fn set_token(&mut self, token: String) {
         self.token = Some(token);
     }
 
-    /// Get current token
+    /// Get current token.
     pub fn get_token(&self) -> Option<&str> {
         self.token.as_deref()
     }
 
-    /// Clear authentication token
-    pub fn clear_token(&mut self) {
-        self.token = None;
+    /// Set tenant ID header override.
+    pub fn set_tenant_id(&mut self, tenant_id: String) {
+        self.tenant_id = Some(tenant_id);
+    }
+
+    /// Set project ID header override.
+    pub fn set_project_id(&mut self, project_id: String) {
+        self.project_id = Some(project_id);
+    }
+
+    /// Apply common headers (auth + tenant/project overrides) to a request builder.
+    fn apply_headers(&self, mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(token) = &self.token {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+        if let Some(tid) = &self.tenant_id {
+            req = req.header("x-tenant-id", tid.as_str());
+        }
+        if let Some(pid) = &self.project_id {
+            req = req.header("x-project-id", pid.as_str());
+        }
+        req
     }
 
     fn build_url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 
-    // ========================================================================
+    // =========================================================================
     // Generic HTTP Methods
-    // ========================================================================
+    // =========================================================================
 
-    /// Send GET request
     pub async fn get(&self, path: &str) -> Result<Response> {
-        let mut req = self.client.get(self.build_url(path));
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("GET request failed")
+        let req = self.client.get(self.build_url(path));
+        self.apply_headers(req)
+            .send()
+            .await
+            .context("GET request failed")
     }
 
-    /// Send GET request with custom headers (for compression tests)
     pub async fn get_with_header(
         &self,
         path: &str,
         header_name: &str,
         header_value: &str,
     ) -> Result<Response> {
-        let mut req = self
+        let req = self
             .client
             .get(self.build_url(path))
             .header(header_name, header_value);
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("GET request with header failed")
+        self.apply_headers(req)
+            .send()
+            .await
+            .context("GET request with header failed")
     }
 
-    /// Send POST request with JSON body
     pub async fn post<T: Serialize>(&self, path: &str, body: &T) -> Result<Response> {
-        let mut req = self.client.post(self.build_url(path)).json(body);
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("POST request failed")
+        let req = self.client.post(self.build_url(path)).json(body);
+        self.apply_headers(req)
+            .send()
+            .await
+            .context("POST request failed")
     }
 
-    /// Send PUT request with JSON body
     pub async fn put<T: Serialize>(&self, path: &str, body: &T) -> Result<Response> {
-        let mut req = self.client.put(self.build_url(path)).json(body);
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("PUT request failed")
+        let req = self.client.put(self.build_url(path)).json(body);
+        self.apply_headers(req)
+            .send()
+            .await
+            .context("PUT request failed")
     }
 
-    /// Send PATCH request with JSON body
-    pub async fn patch<T: Serialize>(&self, path: &str, body: &T) -> Result<Response> {
-        let mut req = self.client.patch(self.build_url(path)).json(body);
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("PATCH request failed")
-    }
-
-    /// Send DELETE request
     pub async fn delete(&self, path: &str) -> Result<Response> {
-        let mut req = self.client.delete(self.build_url(path));
-
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
-
-        req.send().await.context("DELETE request failed")
+        let req = self.client.delete(self.build_url(path));
+        self.apply_headers(req)
+            .send()
+            .await
+            .context("DELETE request failed")
     }
 
-    // ========================================================================
-    // Helper Methods for Response Validation
-    // ========================================================================
+    // =========================================================================
+    // Response helpers
+    // =========================================================================
 
-    /// Assert response has expected status code
     pub fn assert_status(response: &Response, expected: StatusCode) -> Result<()> {
         let actual = response.status();
         if actual != expected {
@@ -183,7 +135,6 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Get JSON response or fail with context
     pub async fn get_json(response: Response) -> Result<Value> {
         let status = response.status();
         if !status.is_success() {
@@ -196,330 +147,62 @@ impl ApiClient {
             .context("Failed to parse JSON response")
     }
 
-    // ========================================================================
+    // =========================================================================
     // Health Endpoints
-    // ========================================================================
+    // =========================================================================
 
-    /// Check health endpoint
     pub async fn health(&self) -> Result<Value> {
         let response = self.get("/health").await?;
         Self::get_json(response).await
     }
 
-    /// Check ready endpoint
     pub async fn health_ready(&self) -> Result<Value> {
         let response = self.get("/health/ready").await?;
         Self::get_json(response).await
     }
 
-    /// Check live endpoint
     pub async fn health_live(&self) -> Result<()> {
         let response = self.get("/health/live").await?;
         Self::assert_status(&response, StatusCode::OK)
     }
 
-    // ========================================================================
-    // Authentication Endpoints
-    // ========================================================================
+    // =========================================================================
+    // Telemetry Query Endpoints
+    // =========================================================================
 
-    /// Login and set token
-    pub async fn login(&mut self, email: &str, password: &str) -> Result<String> {
-        let response = self
-            .post(
-                "/api/v1/auth/login",
-                &LoginRequest {
-                    email: email.to_string(),
-                    password: password.to_string(),
-                },
-            )
-            .await?;
-
-        // Check status before parsing
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("Login failed with status {}. Body: {}", status, body);
-        }
-
-        let body: LoginResponse = response.json().await?;
-        self.token = Some(body.token.clone());
-        Ok(body.token)
+    /// Query traces.
+    pub async fn query_traces(&self) -> Result<Value> {
+        let response = self.get("/api/v1/traces").await?;
+        response.json().await.map_err(Into::into)
     }
 
-    /// Register a new user
-    pub async fn register(&self, email: &str, password: &str, full_name: &str) -> Result<Value> {
-        let response = self
-            .post(
-                "/api/v1/auth/register",
-                &RegisterRequest {
-                    email: email.to_string(),
-                    password: password.to_string(),
-                    full_name: full_name.to_string(),
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
+    /// Get a single trace by ID.
+    pub async fn get_trace(&self, trace_id: &str) -> Result<Value> {
+        let response = self.get(&format!("/api/v1/traces/{}", trace_id)).await?;
+        response.json().await.map_err(Into::into)
     }
 
-    /// Get current user info
-    pub async fn auth_me(&self) -> Result<Value> {
-        let response = self.get("/api/v1/auth/me").await?;
-        Self::get_json(response).await
+    /// Query spans.
+    pub async fn query_spans(&self) -> Result<Value> {
+        let response = self.get("/api/v1/spans").await?;
+        response.json().await.map_err(Into::into)
     }
 
-    // ========================================================================
-    // Organization Endpoints
-    // ========================================================================
-
-    /// Create organization
-    /// name = unique slug, display_name = human-readable name
-    pub async fn create_organization(&self, name: &str, display_name: &str) -> Result<Value> {
-        // Use name as slug, display_name as the actual name
-        let slug = name.to_lowercase().replace(" ", "-").replace("_", "-");
-
-        let response = self
-            .post(
-                "/api/v1/organizations",
-                &CreateOrgRequest {
-                    slug,
-                    name: display_name.to_string(),
-                    description: None,
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
+    /// Get analytics.
+    pub async fn get_analytics(&self) -> Result<Value> {
+        let response = self.get("/api/v1/analytics").await?;
+        response.json().await.map_err(Into::into)
     }
 
-    /// Get organization by ID
-    pub async fn get_organization(&self, org_id: &Uuid) -> Result<Value> {
-        let response = self
-            .get(&format!("/api/v1/organizations/{}", org_id))
-            .await?;
-        Self::get_json(response).await
+    /// Query logs.
+    pub async fn query_logs(&self) -> Result<Value> {
+        let response = self.get("/api/v1/logs").await?;
+        response.json().await.map_err(Into::into)
     }
 
-    /// List all organizations
-    pub async fn list_organizations(&self) -> Result<Vec<Value>> {
-        let response = self.get("/api/v1/organizations").await?;
-        response
-            .json()
-            .await
-            .context("Failed to parse organizations list")
-    }
-
-    /// Update organization
-    pub async fn update_organization(&self, org_id: &Uuid, display_name: &str) -> Result<Value> {
-        #[derive(Serialize)]
-        struct UpdateOrgRequest {
-            name: String,
-        }
-
-        let response = self
-            .patch(
-                &format!("/api/v1/organizations/{}", org_id),
-                &UpdateOrgRequest {
-                    name: display_name.to_string(),
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
-    }
-
-    /// Delete organization
-    pub async fn delete_organization(&self, org_id: &Uuid) -> Result<()> {
-        let response = self
-            .delete(&format!("/api/v1/organizations/{}", org_id))
-            .await?;
-        Self::assert_status(&response, StatusCode::NO_CONTENT)
-    }
-
-    /// Add member to organization
-    pub async fn add_organization_member(
-        &self,
-        org_id: &Uuid,
-        email: &str,
-        role: &str,
-    ) -> Result<Value> {
-        #[derive(Serialize)]
-        struct AddMemberReq {
-            user_email: String,
-            role: Option<String>,
-            custom_role_id: Option<String>,
-            permissions: Option<Vec<String>>,
-        }
-
-        let response = self
-            .post(
-                &format!("/api/v1/organizations/{}/members", org_id),
-                &AddMemberReq {
-                    user_email: email.to_string(),
-                    role: Some(role.to_string()),
-                    custom_role_id: None,
-                    permissions: None,
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
-    }
-
-    /// List organization members
-    pub async fn list_organization_members(&self, org_id: &Uuid) -> Result<Vec<Value>> {
-        let response = self
-            .get(&format!("/api/v1/organizations/{}/members", org_id))
-            .await?;
-        response
-            .json()
-            .await
-            .context("Failed to parse organization members list")
-    }
-
-
-    // ========================================================================
-    // Project Endpoints
-    // ========================================================================
-
-    /// Create project
-    /// Slug is auto-generated from name
-    pub async fn create_project(
-        &self,
-        org_id: &Uuid,
-        name: &str,
-        display_name: &str,
-    ) -> Result<Value> {
-        // Auto-generate slug from name: lowercase, replace spaces with hyphens
-        let slug = name.to_lowercase().replace(" ", "-").replace("_", "-");
-
-        let response = self
-            .post(
-                &format!("/api/v1/organizations/{}/projects", org_id),
-                &CreateProjectRequest {
-                    organization_id: org_id.to_string(),
-                    slug,
-                    name: display_name.to_string(),
-                    description: None,
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
-    }
-
-    /// Get project by ID
-    pub async fn get_project(&self, project_id: &Uuid) -> Result<Value> {
-        let response = self
-            .get(&format!("/api/v1/projects/{}", project_id))
-            .await?;
-        Self::get_json(response).await
-    }
-
-    /// List projects (optionally filter by organization)
-    pub async fn list_projects(&self, org_id: Option<&Uuid>) -> Result<Vec<Value>> {
-        let path = if let Some(org_id) = org_id {
-            format!("/api/v1/organizations/{}/projects", org_id)
-        } else {
-            // Without org_id, we can't use the nested endpoint
-            "/api/v1/projects".to_string()
-        };
-
-        let response = self.get(&path).await?;
-        response
-            .json()
-            .await
-            .context("Failed to parse projects list")
-    }
-
-    /// Update project
-    pub async fn update_project(&self, project_id: &Uuid, display_name: &str) -> Result<Value> {
-        #[derive(Serialize)]
-        struct UpdateProjectRequest {
-            name: String,
-        }
-
-        let response = self
-            .patch(
-                &format!("/api/v1/projects/{}", project_id),
-                &UpdateProjectRequest {
-                    name: display_name.to_string(),
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
-    }
-
-    /// Delete project
-    pub async fn delete_project(&self, project_id: &Uuid) -> Result<()> {
-        let response = self
-            .delete(&format!("/api/v1/projects/{}", project_id))
-            .await?;
-        Self::assert_status(&response, StatusCode::NO_CONTENT)
-    }
-
-    // ========================================================================
-    // API Key Endpoints
-    // ========================================================================
-
-    /// Create API key
-    pub async fn create_api_key(
-        &self,
-        project_id: &Uuid,
-        name: &str,
-        description: &str,
-    ) -> Result<Value> {
-        let response = self
-            .post(
-                &format!("/api/v1/projects/{}/api-keys", project_id),
-                &CreateApiKeyRequest {
-                    project_id: project_id.to_string(),
-                    name: name.to_string(),
-                    description: Some(description.to_string()),
-                },
-            )
-            .await?;
-
-        Self::get_json(response).await
-    }
-
-    /// Get API key by ID
-    pub async fn get_api_key(&self, key_id: &Uuid) -> Result<Value> {
-        let response = self.get(&format!("/api/v1/api-keys/{}", key_id)).await?;
-        Self::get_json(response).await
-    }
-
-    /// List API keys (optionally filter by project)
-    pub async fn list_api_keys(&self, project_id: Option<&Uuid>) -> Result<Vec<Value>> {
-        let path = if let Some(project_id) = project_id {
-            format!("/api/v1/projects/{}/api-keys", project_id)
-        } else {
-            "/api/v1/api-keys".to_string()
-        };
-
-        let response = self.get(&path).await?;
-        response
-            .json()
-            .await
-            .context("Failed to parse API keys list")
-    }
-
-    /// Revoke API key
-    pub async fn revoke_api_key(&self, key_id: &Uuid) -> Result<()> {
-        let response = self
-            .post(
-                &format!("/api/v1/api-keys/{}/revoke", key_id),
-                &serde_json::json!({}),
-            )
-            .await?;
-
-        Self::assert_status(&response, StatusCode::OK)
-    }
-
-    /// Delete API key
-    pub async fn delete_api_key(&self, key_id: &Uuid) -> Result<()> {
-        let response = self.delete(&format!("/api/v1/api-keys/{}", key_id)).await?;
-        Self::assert_status(&response, StatusCode::NO_CONTENT)
+    /// Query metrics.
+    pub async fn query_metrics(&self) -> Result<Value> {
+        let response = self.get("/api/v1/metrics").await?;
+        response.json().await.map_err(Into::into)
     }
 }

@@ -21,30 +21,6 @@ pub async fn wait_for_server(url: &str, timeout_secs: u64) -> Result<()> {
     }
 }
 
-/// Wait for a condition to be true with timeout
-pub async fn wait_for_condition<F>(
-    mut condition: F,
-    timeout_secs: u64,
-    check_interval_ms: u64,
-) -> Result<()>
-where
-    F: FnMut() -> bool,
-{
-    let start = std::time::Instant::now();
-
-    loop {
-        if condition() {
-            return Ok(());
-        }
-
-        if start.elapsed().as_secs() > timeout_secs {
-            anyhow::bail!("Condition not met after {} seconds", timeout_secs);
-        }
-
-        tokio::time::sleep(Duration::from_millis(check_interval_ms)).await;
-    }
-}
-
 /// Retry an operation with exponential backoff
 pub async fn retry_with_backoff<F, T, Fut>(
     mut operation: F,

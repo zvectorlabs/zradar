@@ -7,46 +7,16 @@ use anyhow::Result;
 use functional_tests::*;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Test that spans with gen_ai.request.model attribute are detected as GENERATION
 #[tokio::test]
 #[ignore]
 async fn test_generation_span_type_from_model_attribute() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
-
-    // Build trace with model attribute
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let request = build_trace_with_attributes(
         "llm-service",
@@ -65,32 +35,18 @@ async fn test_generation_span_type_from_model_attribute() -> Result<()> {
         )],
         None,
     );
-
-    otlp_client.export_traces(request).await?;
-
+    env.otlp.export_traces(request).await?;
     println!("✅ Trace with model attribute sent");
 
-    // Wait for processing
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    // Query and verify span_type
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    assert_eq!(response.status(), 200, "Should be able to query trace");
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
     assert!(!spans.is_empty(), "Should have at least 1 span");
 
-    let span = &spans[0];
     assert_eq!(
-        span["span_type"].as_str().expect("span_type should exist"),
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
         "GENERATION",
         "Span with model attribute should be GENERATION"
     );
@@ -103,39 +59,10 @@ async fn test_generation_span_type_from_model_attribute() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_tool_span_type_from_tool_attribute() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let request = build_trace_with_attributes(
         "tool-service",
@@ -154,25 +81,16 @@ async fn test_tool_span_type_from_tool_attribute() -> Result<()> {
         )],
         None,
     );
-
-    otlp_client.export_traces(request).await?;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    env.otlp.export_traces(request).await?;
 
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
-    let span = &spans[0];
 
     assert_eq!(
-        span["span_type"].as_str().expect("span_type should exist"),
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
         "TOOL",
         "Span with tool.name should be TOOL"
     );
@@ -185,39 +103,10 @@ async fn test_tool_span_type_from_tool_attribute() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_agent_span_type_from_agent_attribute() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let request = build_trace_with_attributes(
         "agent-service",
@@ -236,25 +125,16 @@ async fn test_agent_span_type_from_agent_attribute() -> Result<()> {
         )],
         None,
     );
-
-    otlp_client.export_traces(request).await?;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    env.otlp.export_traces(request).await?;
 
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
-    let span = &spans[0];
 
     assert_eq!(
-        span["span_type"].as_str().expect("span_type should exist"),
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
         "AGENT",
         "Span with agent.name should be AGENT"
     );
@@ -267,46 +147,16 @@ async fn test_agent_span_type_from_agent_attribute() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_event_span_type_for_zero_duration() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64;
 
-    // Build trace with zero duration (start_time == end_time)
     let request = build_trace_with_attributes(
         "event-service",
         &trace_id,
@@ -315,25 +165,16 @@ async fn test_event_span_type_for_zero_duration() -> Result<()> {
         vec![],
         Some((now, now)), // Zero duration
     );
-
-    otlp_client.export_traces(request).await?;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    env.otlp.export_traces(request).await?;
 
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
-    let span = &spans[0];
 
     assert_eq!(
-        span["span_type"].as_str().expect("span_type should exist"),
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
         "EVENT",
         "Zero-duration span should be EVENT"
     );
@@ -346,39 +187,10 @@ async fn test_event_span_type_for_zero_duration() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_explicit_span_type_from_zradar_attribute() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
 
     let request = build_trace_with_attributes(
         "chain-service",
@@ -410,25 +222,16 @@ async fn test_explicit_span_type_from_zradar_attribute() -> Result<()> {
         ],
         None,
     );
-
-    otlp_client.export_traces(request).await?;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    env.otlp.export_traces(request).await?;
 
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
-    let span = &spans[0];
 
     assert_eq!(
-        span["span_type"].as_str().expect("span_type should exist"),
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
         "CHAIN",
         "Explicit zradar.span.type should override other attributes"
     );
@@ -441,38 +244,8 @@ async fn test_explicit_span_type_from_zradar_attribute() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_rest_api_filter_by_span_type() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    // Create multiple spans with different types
     let trace1 = TestDataGenerator::trace_id();
     let span1 = TestDataGenerator::span_id();
     let request1 = build_trace_with_attributes(
@@ -513,34 +286,18 @@ async fn test_rest_api_filter_by_span_type() -> Result<()> {
         None,
     );
 
-    otlp_client.export_traces(request1).await?;
-    otlp_client.export_traces(request2).await?;
+    env.otlp.export_traces(request1).await?;
+    env.otlp.export_traces(request2).await?;
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Poll until at least one GENERATION span appears
+    let filter_url = format!("/api/v1/spans?span_type=GENERATION");
+    let spans = wait_for_items_default(&env.client, &filter_url).await?;
 
-    // Query with span_type filter
-    let response = client
-        .get(&format!(
-            "/api/v1/spans?project_id={}&span_type=GENERATION",
-            project_id
-        ))
-        .await?;
-
-    assert_eq!(
-        response.status(),
-        200,
-        "Should be able to query with span_type filter"
-    );
-
-    let data: serde_json::Value = response.json().await?;
-    let spans = data["items"].as_array().expect("Should have items array");
-
-    // All returned spans should be GENERATION
     assert!(
         !spans.is_empty(),
         "Should have at least one GENERATION span"
     );
-    for span in spans {
+    for span in &spans {
         assert_eq!(
             span["span_type"].as_str().expect("span_type should exist"),
             "GENERATION",
@@ -556,38 +313,8 @@ async fn test_rest_api_filter_by_span_type() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
+    let env = TestEnv::setup().await?;
 
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
-
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    // Create spans of different types
     let trace1 = TestDataGenerator::trace_id();
     let span1 = TestDataGenerator::span_id();
     let request1 = build_trace_with_attributes(
@@ -648,35 +375,19 @@ async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
         None,
     );
 
-    otlp_client.export_traces(request1).await?;
-    otlp_client.export_traces(request2).await?;
-    otlp_client.export_traces(request3).await?;
+    env.otlp.export_traces(request1).await?;
+    env.otlp.export_traces(request2).await?;
+    env.otlp.export_traces(request3).await?;
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Poll until GENERATION+TOOL spans appear
+    let filter_url = format!("/api/v1/spans?span_types=GENERATION,TOOL");
+    let spans = wait_for_items_default(&env.client, &filter_url).await?;
 
-    // Query with multiple span_types
-    let response = client
-        .get(&format!(
-            "/api/v1/spans?project_id={}&span_types=GENERATION,TOOL",
-            project_id
-        ))
-        .await?;
-
-    assert_eq!(
-        response.status(),
-        200,
-        "Should be able to query with multiple span_types"
-    );
-
-    let data: serde_json::Value = response.json().await?;
-    let spans = data["items"].as_array().expect("Should have items array");
-
-    // All returned spans should be GENERATION or TOOL
     assert!(
         spans.len() >= 2,
         "Should have at least 2 spans (GENERATION and TOOL)"
     );
-    for span in spans {
+    for span in &spans {
         let span_type = span["span_type"].as_str().expect("span_type should exist");
         assert!(
             span_type == "GENERATION" || span_type == "TOOL",
@@ -693,41 +404,11 @@ async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_jsonb_fields_stored_as_json() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-    let client = ctx.login_as_admin().await?;
-
-    let fixture = TestFixture::new();
-
-    // Setup
-    let org = client
-        .create_organization(&fixture.org_name, &fixture.org_display_name)
-        .await?;
-    let org_id = parse_uuid_from_json(&org, "id")?;
-    let project = client
-        .create_project(
-            &org_id,
-            &fixture.project_name,
-            &fixture.project_display_name,
-        )
-        .await?;
-    let project_id = parse_uuid_from_json(&project, "id")?;
-    let api_key = client
-        .create_api_key(
-            &project_id,
-            &fixture.api_key_name,
-            &fixture.api_key_description,
-        )
-        .await?;
-    let key_value = get_string_from_json(&api_key, "key")?;
+    let env = TestEnv::setup().await?;
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
-    let otlp_client =
-        OtlpClient::new(ctx.config.grpc_url.clone()).with_api_key(key_value.to_string());
-
-    // Build trace with LLM input/output in attributes
     let request = build_trace_with_attributes(
         "llm-service",
         &trace_id,
@@ -735,9 +416,7 @@ async fn test_jsonb_fields_stored_as_json() -> Result<()> {
         "openai.chat.completions",
         vec![
             ("gen_ai.request.model", AnyValue {
-                value: Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                    "gpt-4".to_string(),
-                )),
+                value: Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue("gpt-4".to_string())),
             }),
             ("llm.input", AnyValue {
                 value: Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
@@ -752,25 +431,13 @@ async fn test_jsonb_fields_stored_as_json() -> Result<()> {
         ],
         None,
     );
-
-    otlp_client.export_traces(request).await?;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    env.otlp.export_traces(request).await?;
 
     let trace_id_hex = hex::encode(trace_id);
-    let response = client
-        .get(&format!(
-            "/api/v1/traces/{}?project_id={}",
-            trace_id_hex, project_id
-        ))
-        .await?;
-
-    let trace_data: serde_json::Value = response.json().await?;
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
     let spans = trace_data["spans"].as_array().expect("Should have spans");
     let span = &spans[0];
 
-    // Verify llm_input and llm_output are present (as JSONB, they should be queryable)
-    // The exact structure depends on how they're stored, but they should exist
     assert!(
         span.get("llm_input").is_some() || span.get("attributes").is_some(),
         "llm_input should be stored (either directly or in attributes)"

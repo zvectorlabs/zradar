@@ -6,10 +6,8 @@ use crate::*;
 #[tokio::test]
 #[ignore]
 async fn test_health_endpoint_returns_ok() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-
-    let health = ctx.api_client.health().await?;
+    let session = TestSession::setup().await?;
+    let health = session.client.health().await?;
 
     assert_eq!(health["status"], "ok");
     assert!(
@@ -24,17 +22,22 @@ async fn test_health_endpoint_returns_ok() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_health_ready_checks_dependencies() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-
-    let ready = ctx.api_client.health_ready().await?;
+    let session = TestSession::setup().await?;
+    let ready = session.client.health_ready().await?;
 
     assert_eq!(ready["ready"], true);
     assert!(ready.get("checks").is_some());
 
     let checks = &ready["checks"];
     assert_eq!(checks["database"], "healthy");
-    assert_eq!(checks["clickhouse"], "healthy");
+    assert_eq!(checks["storage"], "healthy");
+    assert!(
+        checks["circuit_breaker"] == "healthy" || checks["circuit_breaker"] == "degraded",
+        "Circuit breaker check should report healthy or degraded"
+    );
+    assert_eq!(checks["retention"], "healthy");
+    assert_eq!(checks["ingestion"], "healthy");
+    assert_eq!(checks["background_jobs"], "healthy");
 
     println!("✅ Health ready checks all dependencies");
     Ok(())
@@ -43,10 +46,8 @@ async fn test_health_ready_checks_dependencies() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_health_live_probe() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
-
-    ctx.api_client.health_live().await?;
+    let session = TestSession::setup().await?;
+    session.client.health_live().await?;
 
     println!("✅ Health live probe succeeds");
     Ok(())
@@ -55,13 +56,9 @@ async fn test_health_live_probe() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_health_endpoints_no_auth_required() -> Result<()> {
-    let ctx = TestContext::new();
-    ctx.wait_for_ready(30).await?;
+    let session = TestSession::setup().await?;
+    let unauth_client = session.unauthenticated_client();
 
-    // Create client without authentication
-    let unauth_client = ApiClient::new(ctx.config.api_url.clone());
-
-    // All health endpoints should work without auth
     let health = unauth_client.health().await?;
     assert_eq!(health["status"], "ok");
 

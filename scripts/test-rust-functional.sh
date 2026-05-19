@@ -76,8 +76,6 @@ fi
 
 # Configuration - Test ports: 9011-9016
 TEST_DATABASE_URL="postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test"
-TEST_CLICKHOUSE_URL="http://localhost:9012"
-TEST_REDIS_URL="redis://localhost:9014"
 TEST_API_URL="http://localhost:9015"
 TEST_GRPC_URL="http://localhost:9016"
 
@@ -88,13 +86,6 @@ cleanup() {
     local exit_code=$?
     echo ""
     echo -e "${YELLOW}🧹 Cleaning up...${NC}"
-    
-    # Kill worker process if running
-    if [ ! -z "$WORKER_PID" ]; then
-        kill $WORKER_PID 2>/dev/null || true
-        wait $WORKER_PID 2>/dev/null || true
-        echo -e "${BLUE}   Stopped worker${NC}"
-    fi
     
     # Kill server process if running
     if [ ! -z "$SERVER_PID" ]; then
@@ -107,7 +98,6 @@ cleanup() {
     lsof -ti:9015 2>/dev/null | xargs kill -9 2>/dev/null || true
     lsof -ti:9016 2>/dev/null | xargs kill -9 2>/dev/null || true
     pkill -f "target/release/zradar" 2>/dev/null || true
-    pkill -f "target/release/zradar-worker" 2>/dev/null || true
     
     # Conditionally stop and remove containers based on DOCKER_REUSE flag
     if [ "$DOCKER_REUSE" = true ]; then
@@ -119,8 +109,7 @@ cleanup() {
         docker-compose -f $COMPOSE_FILE down -v --remove-orphans 2>/dev/null || true
         
         # Remove test data
-        rm -rf /tmp/zradar-test-data 2>/dev/null || true
-        rm -rf /tmp/zradar-test-batches 2>/dev/null || true
+        rm -rf ./data-test 2>/dev/null || true
     fi
     
     # Restore original config
@@ -150,14 +139,6 @@ echo -e "${BLUE}   → Building zradar server...${NC}"
 cargo build --release --bin zradar
 if [ ! -f "./target/release/zradar" ]; then
     echo -e "${RED}✗ Server build failed${NC}"
-    exit 1
-fi
-
-# Build worker
-echo -e "${BLUE}   → Building zradar worker...${NC}"
-cargo build --release --bin zradar-worker
-if [ ! -f "./target/release/zradar-worker" ]; then
-    echo -e "${RED}✗ Worker build failed${NC}"
     exit 1
 fi
 
@@ -203,7 +184,7 @@ else
     # Kill any processes still using test ports (in case something leaked)
     echo -e "${BLUE}   → Cleaning up ports...${NC}"
     lsof -ti:9011 2>/dev/null | xargs kill -9 2>/dev/null || true  # PostgreSQL
-    # Note: ClickHouse and Redis ports removed (simplified setup)
+    # Note: Redis ports removed (simplified setup)
     lsof -ti:9015 2>/dev/null | xargs kill -9 2>/dev/null || true  # API
     lsof -ti:9016 2>/dev/null | xargs kill -9 2>/dev/null || true  # gRPC
     
@@ -218,7 +199,7 @@ echo ""
 if [ "$SKIP_DOCKER_SETUP" = true ]; then
     echo -e "${YELLOW}3️⃣  Skipping Docker setup (reusing existing containers)${NC}"
 else
-    echo -e "${YELLOW}3️⃣  Starting fresh test databases (PostgreSQL, ClickHouse, Redis)...${NC}"
+    echo -e "${YELLOW}3️⃣  Starting fresh test databases (PostgreSQL)...${NC}"
     docker-compose -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
 fi
 
@@ -250,6 +231,13 @@ echo ""
 
 # Step 4: Setup test configuration
 echo -e "${YELLOW}4️⃣  Setting up test configuration...${NC}"
+
+# Clean test data directory to ensure test isolation
+if [ -d "./data-test" ]; then
+    echo -e "${BLUE}   Removing old test data for clean run...${NC}"
+    rm -rf ./data-test
+fi
+
 if [ -f "config.toml" ]; then
     mv config.toml config.toml.backup
     echo -e "${BLUE}   Backed up config.toml → config.toml.backup${NC}"
@@ -263,6 +251,7 @@ echo -e "${YELLOW}5️⃣  Starting zradar test server...${NC}"
 echo -e "${BLUE}   → Server will auto-run migrations via MigrationRegistry${NC}"
 echo -e "${BLUE}   → Migrations will create all tables including users${NC}"
 DATABASE_URL=$TEST_DATABASE_URL \
+QUERY_API_PORT=9015 \
 ZVRADAR_TEST_MODE=1 \
 RUST_LOG=info,zradar=debug \
 ./target/release/zradar &
@@ -291,43 +280,9 @@ while [ $elapsed -lt $timeout ]; do
 done
 echo ""
 
-# Step 5.5: Start zradar worker (processes telemetry jobs)
-echo -e "${YELLOW}5.5️⃣  Starting zradar worker...${NC}"
-echo -e "${BLUE}   → Worker processes telemetry jobs from queue → PostgreSQL${NC}"
-DATABASE_URL=$TEST_DATABASE_URL \
-STORAGE_PATH=./data/trace-batches \
-WORKER_COUNT=2 \
-RUST_LOG=info,zradar=debug \
-./target/release/zradar-worker &
-WORKER_PID=$!
-sleep 1  # Give worker a moment to start
-echo -e "${GREEN}✓ Worker started (PID: $WORKER_PID)${NC}"
-echo ""
-
-# Step 6: Create admin user (after migrations have run)
-if [ "$SKIP_DOCKER_SETUP" = true ]; then
-    echo -e "${YELLOW}6️⃣  Skipping admin user creation (reusing existing user)${NC}"
-else
-    echo -e "${YELLOW}6️⃣  Creating test admin user...${NC}"
-    if docker exec zradar-test-postgres psql -U zradar_test -d zradar_test -c "
-INSERT INTO users (id, email, password_hash, full_name, is_active, email_verified, metadata)
-VALUES (
-    gen_random_uuid(),
-    'admin@example.com',
-    '\$2b\$12\$oeeBLCFWxUdHyPstg83KO.nbGCDuciTYdx3YxQU3g2kHTsj89mSVm',
-    'Test Admin',
-    true,
-    true,
-    '{\"is_system_admin\": true}'::jsonb
-) ON CONFLICT (email) DO NOTHING;
-" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Admin user created (email: admin@example.com, password: changeme123)${NC}"
-    else
-        echo -e "${RED}✗ Failed to create admin user${NC}"
-        docker exec zradar-test-postgres psql -U zradar_test -d zradar_test -c "\d users"
-        exit 1
-    fi
-fi
+# Step 6: Admin user creation skipped (using static API key authentication)
+echo -e "${YELLOW}6️⃣  Using static API key authentication (no user creation needed)${NC}"
+echo -e "${GREEN}✓ API key configured: zk_test_default${NC}"
 echo ""
 
 # Step 8: Run functional tests
@@ -339,10 +294,9 @@ echo ""
 if [ "$LIST_TESTS" = true ]; then
     echo -e "${YELLOW}Available tests:${NC}"
     TEST_DATABASE_URL=$TEST_DATABASE_URL \
-    TEST_CLICKHOUSE_URL=$TEST_CLICKHOUSE_URL \
     TEST_API_URL=$TEST_API_URL \
     TEST_GRPC_URL=$TEST_GRPC_URL \
-    cargo test --package zradar-functional-tests --test functional_tests -- --ignored --list
+    cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --list
     TEST_RESULT=$?
 else
     # Build the test command
@@ -350,18 +304,18 @@ else
         echo -e "${YELLOW}Running filtered test: ${TEST_FILTER}${NC}"
         echo ""
         TEST_DATABASE_URL=$TEST_DATABASE_URL \
-        TEST_CLICKHOUSE_URL=$TEST_CLICKHOUSE_URL \
         TEST_API_URL=$TEST_API_URL \
         TEST_GRPC_URL=$TEST_GRPC_URL \
-        cargo test --package zradar-functional-tests --test functional_tests "$TEST_FILTER" -- --ignored --nocapture --test-threads=1
+        TEST_API_KEY=zk_test_default \
+        cargo test --package zradar-functional-tests --test functional_tests "$TEST_FILTER" -- --include-ignored --nocapture --test-threads=1
     else
         echo -e "${YELLOW}Running all tests...${NC}"
         echo ""
         TEST_DATABASE_URL=$TEST_DATABASE_URL \
-        TEST_CLICKHOUSE_URL=$TEST_CLICKHOUSE_URL \
         TEST_API_URL=$TEST_API_URL \
         TEST_GRPC_URL=$TEST_GRPC_URL \
-        cargo test --package zradar-functional-tests --test functional_tests -- --ignored --nocapture --test-threads=8
+        TEST_API_KEY=zk_test_default \
+        cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --nocapture --test-threads=8
     fi
     TEST_RESULT=$?
 fi
@@ -383,8 +337,6 @@ if [ $TEST_RESULT -eq 0 ]; then
         echo ""
         echo -e "${YELLOW}🐳 Docker containers are still running (reuse mode):${NC}"
         echo -e "${BLUE}   - PostgreSQL: localhost:9011${NC}"
-        echo -e "${BLUE}   - ClickHouse: localhost:9012${NC}"
-        echo -e "${BLUE}   - Redis: localhost:9014${NC}"
         echo -e "${BLUE}   To stop: docker-compose -f $COMPOSE_FILE down -v${NC}"
     fi
 else

@@ -40,10 +40,8 @@ pub fn metric_arrow_schema() -> Schema {
 pub fn metrics_to_record_batch(metrics: &[Metric]) -> anyhow::Result<RecordBatch> {
     let schema = Arc::new(metric_arrow_schema());
 
-    let metric_name =
-        StringArray::from_iter_values(metrics.iter().map(|m| m.metric_name.as_str()));
-    let metric_type =
-        StringArray::from_iter_values(metrics.iter().map(|m| m.metric_type.as_str()));
+    let metric_name = StringArray::from_iter_values(metrics.iter().map(|m| m.metric_name.as_str()));
+    let metric_type = StringArray::from_iter_values(metrics.iter().map(|m| m.metric_type.as_str()));
     let timestamp: Int64Array = metrics.iter().map(|m| m.timestamp).collect();
     let tenant_id = StringArray::from_iter_values(metrics.iter().map(|m| m.tenant_id.as_str()));
     let project_id = StringArray::from_iter_values(metrics.iter().map(|m| m.project_id.as_str()));

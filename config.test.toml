@@ -4,6 +4,9 @@
 # OTLP gRPC port for tests
 otlp_port = 9016
 
+# Admin API port (must match TEST_API_URL in test script; loader reads root-level key)
+admin_api_port = 9015
+
 # Batch configuration
 batch_size = 1000
 batch_timeout_seconds = 10
@@ -13,18 +16,8 @@ batch_timeout_seconds = 10
 [postgres]
 max_connections = 20
 
-# ClickHouse configuration (Data Plane) - Test Database
-# Uses port 9012 mapped from docker-compose.test.yml
-[clickhouse]
-url = "http://localhost:9012"
-user = "zradar_test"
-password = "test_pass_123"
-database = "telemetry_test"
-max_connections = 10
-
 # Admin API configuration - Test port 9015
 [admin_api]
-admin_api_port = 9015
 jwt_secret = "test-secret-key-for-functional-tests-only"
 jwt_expiry_hours = 24
 
@@ -33,25 +26,31 @@ jwt_expiry_hours = 24
 enabled = true
 cache_ttl_seconds = 300
 
+# Config-based API key for functional tests (matches TEST_API_KEY default)
+# Tests override tenant_id/project_id via x-tenant-id / x-project-id headers
+[[api_keys]]
+key = "zk_test_default"
+tenant_id = "00000000-0000-0000-0000-000000000000"
+project_id = "00000000-0000-0000-0000-000000000000"
+name = "functional-test-key"
 
-# Ingestor configuration (Redis for job queue)
-# Uses port 9014 mapped from docker-compose.test.yml
+
+# Ingestor configuration
 [ingestor]
-#redis.url = "redis://localhost:9014"
-#redis.max_connections = 10
-#redis.ttl_seconds = 3600
-skip_job = true 
 
-
-# Local storage for test batches
 [ingestor.storage]
-# type = "local"
-# path = "/tmp/zradar-test-batches"
+parquet_data_dir = "./data-test/parquet-files"
 
+# Parquet / lifecycle settings for tests.
+# Write buffer and compactor are disabled so data is written immediately and
+# tests don't have to wait for a 30-second flush interval to expire.
+[ingestor.storage.parquet]
+write_buffer_enabled = false
+compaction_enabled = false
+memory_cache_enabled = false
+fsync_before_rename = false
+cache_dir = "./data-test/parquet-cache"
 
-# Worker configuration
-[workers]
-batch_processor.enabled = false  # Tests run without workers
 
 # Auto-migrations for test environment
 [migrations]

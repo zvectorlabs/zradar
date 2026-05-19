@@ -38,9 +38,9 @@ pub struct LogRecord {
     pub resource: String,
 
     // Agent context (optional)
-    pub agent_name: String,   // empty string if not present
-    pub session_id: String,   // empty string if not present
-    pub user_id: String,      // empty string if not present
+    pub agent_name: String, // empty string if not present
+    pub session_id: String, // empty string if not present
+    pub user_id: String,    // empty string if not present
 
     // Lifecycle
     pub created_at: i64,

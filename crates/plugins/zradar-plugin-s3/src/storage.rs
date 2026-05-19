@@ -1,27 +1,32 @@
-//! S3 block storage implementation
+//! S3 block storage implementation using opendal
 
 use async_trait::async_trait;
-use aws_sdk_s3::Client;
-use aws_sdk_s3::primitives::ByteStream;
+use opendal::Operator;
+use opendal::services::S3;
 use zradar_traits::BlockStorage;
 
-/// S3 block storage
+/// S3 block storage backed by opendal
 pub struct S3BlockStorage {
-    client: Client,
+    operator: Operator,
     bucket: String,
 }
 
 impl S3BlockStorage {
     /// Create new S3 storage
-    pub async fn new(bucket: String, region: String) -> anyhow::Result<Self> {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_sdk_s3::config::Region::new(region))
-            .load()
-            .await;
+    pub async fn new(
+        bucket: String,
+        region: String,
+        endpoint: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let mut builder = S3::default().bucket(&bucket).region(&region);
 
-        let client = Client::new(&config);
+        if let Some(endpoint_url) = endpoint {
+            builder = builder.endpoint(&endpoint_url);
+        }
 
-        Ok(Self { client, bucket })
+        let operator = Operator::new(builder)?.finish();
+
+        Ok(Self { operator, bucket })
     }
 
     /// Create from configuration
@@ -33,66 +38,34 @@ impl S3BlockStorage {
 
         let region = config["region"].as_str().unwrap_or("us-east-1").to_string();
 
-        Self::new(bucket, region).await
+        let endpoint = config["endpoint"].as_str().map(String::from);
+
+        Self::new(bucket, region, endpoint).await
     }
 }
 
 #[async_trait]
 impl BlockStorage for S3BlockStorage {
     async fn upload(&self, key: &str, data: &[u8]) -> anyhow::Result<String> {
-        let body = ByteStream::from(data.to_vec());
-
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .body(body)
-            .send()
-            .await?;
-
+        self.operator.write(key, data.to_vec()).await?;
         Ok(format!("s3://{}/{}", self.bucket, key))
     }
 
     async fn download(&self, key: &str) -> anyhow::Result<Vec<u8>> {
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await?;
-
-        let data = resp.body.collect().await?;
-        Ok(data.into_bytes().to_vec())
+        let data = self.operator.read(key).await?;
+        Ok(data.to_vec())
     }
 
     async fn delete(&self, key: &str) -> anyhow::Result<()> {
-        self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await?;
-
+        self.operator.delete(key).await?;
         Ok(())
     }
 
     async fn exists(&self, key: &str) -> anyhow::Result<bool> {
-        match self
-            .client
-            .head_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        Ok(self.operator.is_exist(key).await?)
     }
 
     async fn cleanup(&self, key: &str) -> anyhow::Result<()> {
-        // S3 uses lifecycle policies - just log
         tracing::debug!(key = %key, "S3 cleanup (relies on lifecycle policy)");
         Ok(())
     }

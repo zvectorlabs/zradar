@@ -258,20 +258,6 @@ const childSpan = tracer.startSpan('child', {}, ctx);
 ### CLI Queries
 
 ```bash
-# Check traces in ClickHouse
-clickhouse-client --query "
-  SELECT 
-    trace_id,
-    span_id,
-    span_name,
-    timestamp,
-    duration_ns / 1000000 as duration_ms
-  FROM telemetry.spans
-  WHERE timestamp > now() - INTERVAL 1 HOUR
-  ORDER BY timestamp DESC
-  LIMIT 10
-"
-
 # Check API keys
 psql zradar -c "
   SELECT 
@@ -304,7 +290,7 @@ psql zradar -c "
 ### "No spans appearing"
 - Check server logs: Look for OTLP ingestion messages
 - Verify batch is flushed: `provider.force_flush()` (Python) or wait for auto-flush
-- Check ClickHouse: `SELECT count() FROM telemetry.spans`
+- Query traces through the Admin API
 
 ### SSL/TLS Errors
 - Examples use `insecure=True` for local development
@@ -318,7 +304,7 @@ psql zradar -c "
    - Deploy to production
 
 2. **Explore the data:**
-   - Query traces in ClickHouse
+   - Query traces through the Admin API
    - Build dashboards
    - Set up alerts
 

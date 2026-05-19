@@ -10,24 +10,15 @@ tokio = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
-clickhouse = { version = "0.11", features = ["lz4"] }
 
 # Web framework & API
 axum = { workspace = true }
-axum-extra = { version = "0.9", features = ["typed-header"] }
 tower = { workspace = true }
 tower-http = { workspace = true }
 
 # Auto-documentation
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
-
-# Authentication
-jsonwebtoken = "9.2"
-bcrypt = "0.15"
-sha2 = "0.10"
-rand = "0.8"
-hex = "0.4"
 
 # Serialization
 serde = { workspace = true }
@@ -43,12 +34,8 @@ async-trait = "0.1"
 # Logging
 tracing = { workspace = true }
 
-# Caching
-lru = "0.12"
-
 # Internal dependencies
 zradar-models = { path = "../../core/zradar-models" }
 zradar-traits = { path = "../../core/zradar-traits", features = ["utoipa"] }
-zradar-plugins = { path = "../../core/zradar-plugins" }
-zradar-plugin-postgres = { path = "../../plugins/zradar-plugin-postgres" }
+zradar-retention = { path = "../../core/zradar-retention" }
 

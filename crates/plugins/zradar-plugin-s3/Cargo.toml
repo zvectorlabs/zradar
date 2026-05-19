@@ -15,12 +15,10 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 
-# AWS SDK
-aws-sdk-s3 = { workspace = true }
-aws-config = { workspace = true }
+# Object storage
+opendal = { workspace = true }
 
 # Internal
 zradar-models = { workspace = true }
 zradar-traits = { workspace = true }
-zradar-plugins = { workspace = true }
 

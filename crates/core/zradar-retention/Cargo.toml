@@ -1,0 +1,25 @@
+[package]
+name = "zradar-retention"
+version = "0.1.0"
+edition.workspace = true
+description = "Retention system for zradar — config, cleanup, and query enforcement"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+
+# Concurrency
+dashmap = "5"
+
+# Serialization / Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+
+# Internal workspace crates
+zradar-models = { workspace = true }
+zradar-traits = { workspace = true }
