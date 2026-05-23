@@ -1,0 +1,16 @@
+[project]
+name = "zradar-python-examples"
+version = "0.0.0"
+description = "OTLP and evaluation score examples for zradar"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opentelemetry-api==1.21.0",
+    "opentelemetry-sdk==1.21.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.21.0",
+    "opentelemetry-instrumentation==0.42b0",
+    "requests>=2.31.0",
+]
+
+[tool.uv]
+package = false

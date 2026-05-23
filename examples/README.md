@@ -58,18 +58,14 @@ Example client applications demonstrating how to send OTLP telemetry to zradar.
 - Complex multi-step workflows
 - Rich LLM-specific attributes
 
-**Setup:**
-```bash
-cd examples/python
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+**Setup:** Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (manages `.venv` automatically).
 
 **Run:**
 ```bash
+cd examples/python
 export ZVRADAR_API_KEY=your-key-here
-python send_trace.py
+uv run send_trace.py
+# uv run send_score.py
 ```
 
 **What it demonstrates:**

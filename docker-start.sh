@@ -162,7 +162,7 @@ if [ "$MODE" = "dev" ]; then
 else
     echo "  1. Create an API key"
     echo "  2. Send test traces:"
-    echo "     cd examples/python && python send_trace.py"
+    echo "     cd examples/python && uv run send_trace.py"
     echo "  3. View logs:"
     echo "     make logs  OR  docker-compose -f $COMPOSE_FILE logs -f"
     echo "  4. Stop services:"
