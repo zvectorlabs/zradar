@@ -6,6 +6,64 @@ use serde::Deserialize;
 pub struct IngestorConfig {
     #[serde(default)]
     pub storage: StorageConfig,
+
+    /// Disk-resident Write-Ahead Log configuration (Phase 08).
+    #[serde(default)]
+    pub wal: WalIngestorConfig,
+}
+
+/// WAL configuration embedded in the ingestor TOML section.
+///
+/// Mirrors `zradar_wal::config::WalConfig` for TOML deserialization.
+/// The server converts this to the WAL crate's native config type.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalIngestorConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "default_wal_dir")]
+    pub wal_dir: String,
+
+    #[serde(default = "default_wal_segment_max_bytes")]
+    pub segment_max_bytes: u64,
+
+    #[serde(default = "default_wal_flush_interval_ms")]
+    pub flush_interval_ms: u64,
+
+    #[serde(default = "default_wal_group_commit_window_ms")]
+    pub group_commit_window_ms: u64,
+
+    #[serde(default = "default_wal_replay_batch_max_bytes")]
+    pub replay_batch_max_bytes: u64,
+}
+
+impl Default for WalIngestorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            wal_dir: default_wal_dir(),
+            segment_max_bytes: default_wal_segment_max_bytes(),
+            flush_interval_ms: default_wal_flush_interval_ms(),
+            group_commit_window_ms: default_wal_group_commit_window_ms(),
+            replay_batch_max_bytes: default_wal_replay_batch_max_bytes(),
+        }
+    }
+}
+
+fn default_wal_dir() -> String {
+    "./data/wal".to_string()
+}
+fn default_wal_segment_max_bytes() -> u64 {
+    256 * 1024 * 1024
+}
+fn default_wal_flush_interval_ms() -> u64 {
+    200
+}
+fn default_wal_group_commit_window_ms() -> u64 {
+    1
+}
+fn default_wal_replay_batch_max_bytes() -> u64 {
+    64 * 1024 * 1024
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

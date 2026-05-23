@@ -312,7 +312,7 @@ async fn main() -> Result<()> {
     info!("Storage layer initialized");
 
     // =========================================================================
-    // OTLP telemetry writer
+    // OTLP telemetry writer (direct Parquet path)
     // =========================================================================
 
     let parquet_writer: Arc<dyn zradar_traits::TelemetryWriter> =
@@ -324,6 +324,264 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(ParquetTelemetryWriter::new(parquet_file_writer.clone()))
         };
+
+    // =========================================================================
+    // WAL (Phase 08) — replay + background tasks + WAL-backed writer
+    // =========================================================================
+
+    let wal_config = config
+        .ingestor
+        .as_ref()
+        .map(|i| i.wal.clone())
+        .unwrap_or_default();
+
+    let otlp_writer: Arc<dyn zradar_traits::TelemetryWriter> = if wal_config.enabled {
+        use zradar_wal::checkpoint::CheckpointStore;
+        use zradar_wal::config::WalConfig;
+        use zradar_wal::flusher::{FlushSink, WalFlusher};
+        use zradar_wal::janitor::WalJanitor;
+        use zradar_wal::record::{SignalType, WalRecord};
+        use zradar_wal::replay::WalReplayer;
+        use zradar_wal::Wal;
+
+        let wal_dir = std::path::PathBuf::from(&wal_config.wal_dir);
+        tokio::fs::create_dir_all(&wal_dir).await?;
+
+        let native_config = WalConfig {
+            enabled: true,
+            wal_dir: wal_config.wal_dir.clone(),
+            segment_max_bytes: wal_config.segment_max_bytes,
+            flush_interval_ms: wal_config.flush_interval_ms,
+            group_commit_window_ms: wal_config.group_commit_window_ms,
+            replay_batch_max_bytes: wal_config.replay_batch_max_bytes,
+            ..WalConfig::default()
+        };
+
+        let checkpoint_store = Arc::new(CheckpointStore::new(&wal_dir));
+
+        // --- FlushSink: deserializes WAL records back into domain objects ---
+        struct TelemetryFlushSink {
+            writer: Arc<dyn zradar_traits::TelemetryWriter>,
+        }
+
+        #[async_trait::async_trait]
+        impl FlushSink for TelemetryFlushSink {
+            async fn flush_records(
+                &self,
+                records: &[zradar_wal::record::WalRecord],
+            ) -> anyhow::Result<()> {
+                use zradar_models::{LogRecord, Metric, Span};
+
+                let mut spans: Vec<Span> = Vec::new();
+                let mut metrics: Vec<Metric> = Vec::new();
+                let mut logs: Vec<LogRecord> = Vec::new();
+
+                for rec in records {
+                    match rec.signal_type {
+                        SignalType::Trace => {
+                            let batch: Vec<Span> =
+                                serde_json::from_slice(&rec.payload).map_err(|e| {
+                                    anyhow::anyhow!(
+                                        "WAL flush: failed to deserialize spans at offset {}: {}",
+                                        rec.assigned_offset,
+                                        e
+                                    )
+                                })?;
+                            spans.extend(batch);
+                        }
+                        SignalType::Metric => {
+                            let batch: Vec<Metric> =
+                                serde_json::from_slice(&rec.payload).map_err(|e| {
+                                    anyhow::anyhow!(
+                                        "WAL flush: failed to deserialize metrics at offset {}: {}",
+                                        rec.assigned_offset,
+                                        e
+                                    )
+                                })?;
+                            metrics.extend(batch);
+                        }
+                        SignalType::Log => {
+                            let batch: Vec<LogRecord> =
+                                serde_json::from_slice(&rec.payload).map_err(|e| {
+                                    anyhow::anyhow!(
+                                        "WAL flush: failed to deserialize logs at offset {}: {}",
+                                        rec.assigned_offset,
+                                        e
+                                    )
+                                })?;
+                            logs.extend(batch);
+                        }
+                    }
+                }
+
+                if !spans.is_empty() {
+                    self.writer.insert_spans(&spans).await?;
+                }
+                if !metrics.is_empty() {
+                    self.writer.insert_metrics(&metrics).await?;
+                }
+                if !logs.is_empty() {
+                    self.writer.insert_logs(&logs).await?;
+                }
+
+                Ok(())
+            }
+        }
+
+        let flush_sink: Arc<dyn FlushSink> = Arc::new(TelemetryFlushSink {
+            writer: parquet_writer.clone(),
+        });
+
+        // Replay unflushed records before accepting traffic
+        let replayer = WalReplayer::new(
+            wal_dir.clone(),
+            flush_sink.clone(),
+            checkpoint_store.clone(),
+            native_config.replay_batch_max_bytes,
+        );
+        let replayed = replayer.replay().await?;
+        if replayed > 0 {
+            info!(records = replayed, "WAL replay completed");
+        }
+
+        // Open WAL for new writes
+        let wal = Arc::new(
+            Wal::open(&wal_dir, native_config.clone(), cancel_token.clone()).await?,
+        );
+
+        // Start flusher
+        let flusher = WalFlusher::new(
+            wal.clone(),
+            flush_sink,
+            checkpoint_store.clone(),
+            native_config.flush_interval_ms,
+        );
+        tokio::spawn(flusher.run(cancel_token.clone()));
+
+        // Start janitor
+        let janitor = WalJanitor::new(
+            wal.clone(),
+            checkpoint_store,
+            native_config.flush_interval_ms,
+        );
+        tokio::spawn(janitor.run(cancel_token.clone()));
+
+        // Start backpressure monitor
+        let bp_monitor = zradar_wal::backpressure::BackpressureMonitor::new(native_config.clone());
+        tokio::spawn(zradar_wal::backpressure::backpressure_monitor_loop(
+            wal.clone(),
+            bp_monitor,
+            cancel_token.clone(),
+        ));
+
+        info!(wal_dir = %wal_config.wal_dir, "WAL flusher + janitor + backpressure started");
+
+        // --- WAL-backed TelemetryWriter for OTLP services ---
+        struct WalTelemetryWriter {
+            wal: Arc<Wal>,
+        }
+
+        #[async_trait::async_trait]
+        impl zradar_traits::TelemetryWriter for WalTelemetryWriter {
+            async fn insert_spans(
+                &self,
+                spans: &[zradar_models::Span],
+            ) -> anyhow::Result<()> {
+                if spans.is_empty() {
+                    return Ok(());
+                }
+                let tenant_id = uuid::Uuid::parse_str(&spans[0].tenant_id)
+                    .unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&spans[0].project_id)
+                    .unwrap_or_default();
+                let payload = serde_json::to_vec(spans)?;
+                let record = WalRecord {
+                    signal_type: SignalType::Trace,
+                    tenant_id,
+                    project_id,
+                    arrival_timestamp_ns: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+                    assigned_offset: 0,
+                    payload: bytes::Bytes::from(payload),
+                };
+                let handle = self.wal.append(record).await.map_err(|e| {
+                    anyhow::anyhow!("WAL append failed: {}", e)
+                })?;
+                handle.durable().await.map_err(|e| {
+                    anyhow::anyhow!("WAL fsync failed: {}", e)
+                })?;
+                Ok(())
+            }
+
+            async fn insert_metrics(
+                &self,
+                metrics: &[zradar_models::Metric],
+            ) -> anyhow::Result<()> {
+                if metrics.is_empty() {
+                    return Ok(());
+                }
+                let tenant_id = uuid::Uuid::parse_str(&metrics[0].tenant_id)
+                    .unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&metrics[0].project_id)
+                    .unwrap_or_default();
+                let payload = serde_json::to_vec(metrics)?;
+                let record = WalRecord {
+                    signal_type: SignalType::Metric,
+                    tenant_id,
+                    project_id,
+                    arrival_timestamp_ns: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+                    assigned_offset: 0,
+                    payload: bytes::Bytes::from(payload),
+                };
+                let handle = self.wal.append(record).await.map_err(|e| {
+                    anyhow::anyhow!("WAL append failed: {}", e)
+                })?;
+                handle.durable().await.map_err(|e| {
+                    anyhow::anyhow!("WAL fsync failed: {}", e)
+                })?;
+                Ok(())
+            }
+
+            async fn insert_logs(
+                &self,
+                logs: &[zradar_models::LogRecord],
+            ) -> anyhow::Result<()> {
+                if logs.is_empty() {
+                    return Ok(());
+                }
+                let tenant_id = uuid::Uuid::parse_str(&logs[0].tenant_id)
+                    .unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&logs[0].project_id)
+                    .unwrap_or_default();
+                let payload = serde_json::to_vec(logs)?;
+                let record = WalRecord {
+                    signal_type: SignalType::Log,
+                    tenant_id,
+                    project_id,
+                    arrival_timestamp_ns: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+                    assigned_offset: 0,
+                    payload: bytes::Bytes::from(payload),
+                };
+                let handle = self.wal.append(record).await.map_err(|e| {
+                    anyhow::anyhow!("WAL append failed: {}", e)
+                })?;
+                handle.durable().await.map_err(|e| {
+                    anyhow::anyhow!("WAL fsync failed: {}", e)
+                })?;
+                Ok(())
+            }
+        }
+
+        Arc::new(WalTelemetryWriter { wal }) as Arc<dyn zradar_traits::TelemetryWriter>
+    } else {
+        parquet_writer.clone()
+    };
+
+    // WAL metrics (available even when WAL is disabled — returns zeros)
+    let wal_metrics = Arc::new(zradar_wal::metrics::WalMetrics::new());
+
+    // =========================================================================
+    // OTLP services
+    // =========================================================================
 
     let otlp_auth = config
         .auth
@@ -358,21 +616,21 @@ async fn main() -> Result<()> {
         });
     }
     let trace_service = OtlpTraceService::with_settings_repository(
-        parquet_writer.clone(),
+        otlp_writer.clone(),
         otlp_auth.clone(),
         settings_repo.clone(),
         rate_limiter.clone(),
         circuit_breaker.clone(),
     );
     let metrics_service = OtlpMetricsService::with_settings_repository(
-        parquet_writer.clone(),
+        otlp_writer.clone(),
         otlp_auth.clone(),
         settings_repo.clone(),
         rate_limiter.clone(),
         circuit_breaker.clone(),
     );
     let logs_service = OtlpLogsService::with_settings_repository(
-        parquet_writer.clone(),
+        otlp_writer.clone(),
         otlp_auth.clone(),
         settings_repo.clone(),
         rate_limiter,
@@ -435,7 +693,14 @@ async fn main() -> Result<()> {
         }),
         authenticator,
     );
+    let metrics_state = wal_metrics.clone();
+    let metrics_route = axum::routing::get(move || {
+        let m = metrics_state.clone();
+        async move { m.render_prometheus() }
+    });
+
     let app = Router::new()
+        .route("/metrics", metrics_route)
         .merge(health_router)
         .merge(admin_api)
         .merge(retention_api)

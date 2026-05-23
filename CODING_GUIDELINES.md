@@ -57,21 +57,18 @@ WRONG:
 
 ```
 zradar
-├── zvradar-server                   // REST API (actix-web)
-├── zvradar-worker                   // Background processing
-├── zvradar-control                  // Control plane logic
-│   ├── Organizations                // Multi-tenant management
-│   ├── Projects                     // Project isolation
-│   ├── API Keys                     // Authentication
-│   └── Permissions                  // RBAC
-├── zvradar-otlp                     // OTLP ingest (tonic gRPC)
-├── zvradar-ingestor                 // Batch processing
-├── zvradar-storage                  // PostgreSQL metadata + Parquet telemetry
-├── zvradar-auth                     // Authentication/authorization
-└── zvradar-models                   // Shared data models
+├── crates/applications/zradar-server   // OTLP gRPC + Admin HTTP API (single binary)
+├── crates/services/api                 // Admin HTTP routes: telemetry queries, analytics, settings
+├── crates/services/api-optel           // OTLP gRPC services + circuit breaker + rate limiter
+├── crates/core/zradar-models           // Shared data structures
+├── crates/core/zradar-traits           // Trait abstractions
+├── crates/core/zradar-parquet          // Parquet writer/reader, write buffer, compactor, file mover
+├── crates/core/zradar-retention        // Retention policies + cleanup job
+├── crates/plugins/zradar-plugin-postgres // Postgres-backed file_list, settings, retention, audit repos
+└── crates/plugins/zradar-plugin-s3     // S3 block storage backend
 ```
 
-**Principle:** Service-oriented architecture with clear boundaries. PostgreSQL for control plane and metadata, Parquet for telemetry data.
+**Principle:** Single-binary OTLP server. PostgreSQL holds only the control plane (file_list, stream_stats, settings, retention, audit). All telemetry lives in Parquet (local disk → S3 via FileMover). Auth is handled at the agnitiv platform gateway; the zradar binary uses static API keys for direct deployments.
 
 ---
 
@@ -193,7 +190,6 @@ FOR each_request:
 
 - PostgreSQL: Control plane (organizations, projects, API keys, audit logs)
 - Parquet: Telemetry data (traces, spans, metrics, logs)
-- Redis: Rate limiting, caching, session management
 - Atomic operations: Use database transactions, avoid multi-step mutations
 
 ---

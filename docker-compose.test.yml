@@ -6,7 +6,6 @@
 # - All test data in PostgreSQL
 # - Centralized migration system auto-runs on test startup
 # - In-memory volume for fast cleanup
-# - Redis disabled (add back if needed)
 
 services:
   postgres-test:
@@ -28,13 +27,6 @@ services:
     networks:
       - zradar-test
 
-  # Redis - DISABLED for testing (not needed yet)
-  # Uncomment if you need Redis in test environment
-  # redis-test:
-  #   image: redis:7-alpine
-  #   container_name: zradar-test-redis
-  #   ports:
-  #     - "9014:6379"
   #   tmpfs:
   #     - /data
   #   networks:

@@ -382,6 +382,7 @@ impl ParquetFileWriter {
                 compressed_size,
                 created_at: now_us,
                 updated_at: now_us,
+                wal_replay_offset: None,
             })
             .await
             .context("Failed to register file in file_list")?;

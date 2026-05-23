@@ -72,4 +72,17 @@ pub trait FileListRepository: Send + Sync {
 
     /// Upsert stream stats for a single stream (insert or accumulate deltas).
     async fn upsert_stream_stats(&self, stats: StreamStatsUpdate) -> anyhow::Result<()>;
+
+    /// Check whether a file produced from a WAL flush at the given offset already
+    /// exists in the file_list. Used by WAL replay to skip duplicate flushes.
+    async fn already_flushed(
+        &self,
+        _tenant_id: Uuid,
+        _project_id: Uuid,
+        _signal_type: &str,
+        _stream_name: &str,
+        _max_wal_offset: i64,
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
 }

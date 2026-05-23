@@ -52,9 +52,9 @@ The following is the list of supported scopes:
 - `plugins`
 - `postgres`
 - `s3`
-- `redis`
 - `local`
 - `deps`
+- `wal`
 - `config`
 - `ci`
 

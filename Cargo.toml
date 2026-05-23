@@ -6,6 +6,7 @@ members = [
     "crates/core/zradar-traits",
     "crates/core/zradar-parquet",
     "crates/core/zradar-retention",
+    "crates/core/zradar-wal",
 
     # Storage backends
     "crates/plugins/zradar-plugin-postgres",
@@ -86,11 +87,18 @@ lru = "0.12"
 # Byte buffers
 bytes = "1"
 
+# Hashing
+crc32fast = "1"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["async_tokio"] }
+
 # Internal workspace crates (Core)
 zradar-models = { path = "crates/core/zradar-models" }
 zradar-traits = { path = "crates/core/zradar-traits" }
 zradar-parquet = { path = "crates/core/zradar-parquet" }
 zradar-retention = { path = "crates/core/zradar-retention" }
+zradar-wal = { path = "crates/core/zradar-wal" }
 
 # Internal workspace crates (Services)
 api = { path = "crates/services/api" }
@@ -104,6 +112,9 @@ zradar-plugin-s3 = { path = "crates/plugins/zradar-plugin-s3" }
 # - opt-level, incremental, debug: affect compile/codegen only
 # - strip: runs after linking; only shrinks binary
 # - lto / codegen-units: more link-time work (LTO runs at link time)
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [profile.dev]
 split-debuginfo = "unpacked"

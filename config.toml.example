@@ -3,14 +3,13 @@
 #
 # DOCKER PORT MAPPINGS (when using docker-compose.yml):
 # - PostgreSQL:  localhost:9001 → postgres:5432
-# - Redis:       localhost:9004 → redis:6379
 # - OTLP gRPC:   localhost:9005 → zradar:4317
 # - Admin API:   localhost:9006 → zradar:8080
 #
 # USAGE SCENARIOS:
-# 1. Inside Docker container: Use service names (postgres, redis)
-# 2. Local app → Docker services: Use localhost with mapped ports (9001-9006)
-# 3. Native development: Use localhost with standard ports (5432, 8123, 6379)
+# 1. Inside Docker container: Use service names (postgres)
+# 2. Local app → Docker services: Use localhost with mapped ports (9001, 9005, 9006)
+# 3. Native development: Use localhost with standard ports (5432)
 
 # OTLP gRPC port (standard OpenTelemetry port)
 otlp_port = 4317
@@ -18,12 +17,8 @@ otlp_port = 4317
 # Admin API HTTP port
 admin_api_port = 8080
 
-# Batch configuration
-batch_size = 1000
-batch_timeout_seconds = 10
-
-# PostgreSQL configuration (Control Plane)
-# Database URL should be set via DATABASE_URL environment variable for sqlx migrations
+# PostgreSQL configuration (control plane: file_list, stream_stats, settings, retention, audit)
+# Connection string is provided via DATABASE_URL environment variable.
 #
 # Docker (inside container): postgresql://zradar:zradar_password@postgres:5432/zradar
 # Local (to Docker):         postgresql://zradar:zradar_password@localhost:9001/zradar
@@ -39,73 +34,54 @@ jwt_expiry_hours = 24
 # Authentication configuration
 [auth]
 enabled = true
-cache_ttl_seconds = 300  # 5 minutes cache for API key lookups
-# otlp_require_api_key = false  # set to false to make OTLP gRPC (protobuf) open (no API key)
+cache_ttl_seconds = 300
 
-# Note: API keys are now managed via PostgreSQL database
-# Use the Admin API to create and manage API keys
-# Legacy config-based API keys are no longer supported
+# Static API keys (development). Production should use a managed identity provider.
+# [[api_keys]]
+# key   = "dev-key"
+# org   = "00000000-0000-0000-0000-000000000000"
+# scope = "ingest,query"
 
-# Ingestor configuration
+# Ingestion / storage configuration
 [ingestor]
-# Job queue implementation: "postgres" (simple) or "hybrid" (Redis+PG, high-scale)
-# queue_type = "postgres"
-
-# Block storage implementation: "local" (dev) or "s3" (production)
+# Block storage for older Parquet files: "local" (dev) or "s3" (production).
 # storage_type = "local"
 
-# skip job and block storage, direct insert into DB
-skip_job = true 
-
-
 [ingestor.storage.local]
-# Local storage path (mounted in Docker: ./data/trace-batches → /app/data/trace-batches)
 path = "./data/trace-batches"
 
 [ingestor.storage.s3]
 bucket = "zradar-traces-prod"
 region = "us-east-1"
 
-# Redis configuration (only needed if queue_type = "hybrid")
-# Docker (inside container): redis://redis:6379
-# Local (to Docker):         redis://localhost:9004
-# Local (native):            redis://localhost:6379
-[ingestor.redis]
-url = "redis://localhost:6379"
+# Parquet ingestion lifecycle (write buffer, compaction, memory cache, fsync).
+# All of these are durability/throughput tuning knobs; the durable-by-default
+# path is direct write (no buffer) with fsync + atomic rename.
+[ingestor.storage.parquet]
+write_buffer_enabled        = false
+write_buffer_size_bytes     = 8388608   # 8 MiB
+write_buffer_flush_interval_secs = 30
+fsync_before_rename         = true
+compaction_enabled          = false
+memory_cache_enabled        = false
 
-# Worker configuration
-[workers]
-num_workers = 8
-
-# Database Migrations
-# Automatic migrations will run on application startup if enabled
+# Database migrations.
+# - On first run (empty database), migrations always run.
+# - On subsequent runs, only if auto_migrate = true.
 [migrations]
-# Enable automatic migrations on startup
-# - On first run (no PostgreSQL setup), migrations always run
-# - On subsequent runs, only runs if this flag is true
-# - Default: true for development convenience
 auto_migrate = true
 
 # ============================================================================
-# ENVIRONMENT VARIABLE OVERRIDES (Docker-friendly)
+# ENVIRONMENT VARIABLE OVERRIDES
 # ============================================================================
-# The following environment variables can override config file settings:
-#
 # DATABASE_URL              - PostgreSQL connection string (overrides [postgres])
-# REDIS_URL                 - Redis connection string (overrides [ingestor.redis].url)
-# QUEUE_TYPE                - "postgres" or "hybrid" (overrides [ingestor].queue_type)
-# STORAGE_TYPE              - "local" or "s3" (overrides [ingestor].storage_type)
-# WORKER_COUNT              - Number of worker threads (overrides [workers].num_workers)
-# RUST_LOG                  - Logging level (e.g., "info,zradar=debug")
-# OTLP_PORT                 - OTLP gRPC port (overrides otlp_port)
-# QUERY_API_PORT            - Admin API port (overrides admin_api_port)
-# AUTO_MIGRATE_POSTGRES     - Enable PostgreSQL auto-migrations (true/false)
+# STORAGE_TYPE              - "local" or "s3"     (overrides [ingestor].storage_type)
+# RUST_LOG                  - Logging level       (e.g., "info,zradar=debug")
+# OTLP_PORT                 - OTLP gRPC port      (overrides otlp_port)
+# QUERY_API_PORT            - Admin API port      (overrides admin_api_port)
+# AUTO_MIGRATE              - Enable PostgreSQL auto-migrations (true/false)
 #
 # Docker Compose example:
 #   DATABASE_URL: postgres://zradar:zradar_password@postgres:5432/zradar
-#   REDIS_URL: redis://redis:6379
-#   QUEUE_TYPE: postgres
 #   STORAGE_TYPE: local
-#   WORKER_COUNT: 8
-#   AUTO_MIGRATE_POSTGRES: true
-
+#   AUTO_MIGRATE: true

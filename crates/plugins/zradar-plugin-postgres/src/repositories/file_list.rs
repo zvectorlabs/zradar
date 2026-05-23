@@ -31,11 +31,13 @@ impl FileListRepository for PostgresFileListRepository {
             INSERT INTO file_list (
                 tenant_id, project_id, signal_type, stream_name, date,
                 file_path, location, min_ts, max_ts, records,
-                original_size, compressed_size, deleted, created_at, updated_at
+                original_size, compressed_size, deleted, created_at, updated_at,
+                wal_replay_offset
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10,
-                $11, $12, false, $13, $14
+                $11, $12, false, $13, $14,
+                $15
             )
             RETURNING id
             "#,
@@ -54,6 +56,7 @@ impl FileListRepository for PostgresFileListRepository {
         .bind(entry.compressed_size)
         .bind(entry.created_at)
         .bind(entry.updated_at)
+        .bind(entry.wal_replay_offset)
         .fetch_one(self.client.pool())
         .await
         .context("Failed to register file in file_list")?;
@@ -234,6 +237,39 @@ impl FileListRepository for PostgresFileListRepository {
         .context("Failed to query stream_stats")?;
 
         Ok(stats)
+    }
+
+    async fn already_flushed(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        signal_type: &str,
+        stream_name: &str,
+        max_wal_offset: i64,
+    ) -> anyhow::Result<bool> {
+        let row = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM file_list
+                WHERE tenant_id = $1
+                  AND project_id = $2
+                  AND signal_type = $3
+                  AND stream_name = $4
+                  AND wal_replay_offset >= $5
+                  AND deleted = false
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(project_id)
+        .bind(signal_type)
+        .bind(stream_name)
+        .bind(max_wal_offset)
+        .fetch_one(self.client.pool())
+        .await
+        .context("Failed to check already_flushed")?;
+
+        Ok(row)
     }
 
     async fn upsert_stream_stats(&self, stats: StreamStatsUpdate) -> anyhow::Result<()> {

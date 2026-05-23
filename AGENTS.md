@@ -111,20 +111,20 @@ make test
 
 `zradar` is a Rust service-oriented telemetry platform. Major responsibilities include:
 
-- `zvradar-server`: REST API using Actix Web.
-- `zvradar-worker`: background processing.
-- `zvradar-control`: organizations, projects, API keys, permissions, and RBAC.
-- `zvradar-otlp`: OTLP ingest using tonic gRPC.
-- `zvradar-ingestor`: batch ingestion.
-- `zvradar-storage`: PostgreSQL metadata and Parquet telemetry storage.
-- `zvradar-auth`: authentication and authorization.
-- `zvradar-models`: shared models.
+- `crates/applications/zradar-server`: single OTLP gRPC + Admin HTTP server binary.
+- `crates/services/api`: Admin HTTP routes (telemetry queries, analytics, settings, retention, audit).
+- `crates/services/api-optel`: OTLP gRPC services, circuit breaker, project rate limiter.
+- `crates/core/zradar-models`: shared data structures (Span, Metric, LogRecord, Config).
+- `crates/core/zradar-traits`: trait abstractions (TelemetryWriter/Reader, FileListRepository, Authenticator).
+- `crates/core/zradar-parquet`: Parquet writer/reader, write buffer, flush worker, compactor, file mover, retention job, recovery.
+- `crates/core/zradar-retention`: retention policies + cleanup job + query enforcer.
+- `crates/plugins/zradar-plugin-postgres`: Postgres-backed file_list, settings, retention, and audit repositories.
+- `crates/plugins/zradar-plugin-s3`: S3 block storage for warm Parquet files.
 
 Storage responsibilities:
 
 - PostgreSQL: control plane data, organizations, projects, API keys, audit logs, and queues by default.
 - Parquet: telemetry data such as traces, spans, metrics, and logs.
-- Redis: rate limiting, caching, sessions, and high-scale queue support where configured.
 
 ## Rust Best Practices
 

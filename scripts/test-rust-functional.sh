@@ -184,7 +184,6 @@ else
     # Kill any processes still using test ports (in case something leaked)
     echo -e "${BLUE}   → Cleaning up ports...${NC}"
     lsof -ti:9011 2>/dev/null | xargs kill -9 2>/dev/null || true  # PostgreSQL
-    # Note: Redis ports removed (simplified setup)
     lsof -ti:9015 2>/dev/null | xargs kill -9 2>/dev/null || true  # API
     lsof -ti:9016 2>/dev/null | xargs kill -9 2>/dev/null || true  # gRPC
     

@@ -63,6 +63,8 @@ pub struct NewFileListEntry {
     pub compressed_size: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    /// WAL offset that was flushed to produce this file (`None` for non-WAL writes).
+    pub wal_replay_offset: Option<i64>,
 }
 
 /// Per-stream aggregated statistics.

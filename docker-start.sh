@@ -141,7 +141,6 @@ echo "  🔹 PostgreSQL:    localhost:${POSTGRES_PORT}"
 
 if [ "$MODE" = "dev" ]; then
     echo "  🔹 Adminer UI:    http://localhost:8081"
-    echo "  🔹 Redis:         localhost:6379"
     echo ""
     echo "🔧 Development Features:"
     echo "  ✅ Hot reload enabled (code changes auto-rebuild)"

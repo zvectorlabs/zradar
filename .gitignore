@@ -27,8 +27,6 @@ data/trace-batches/*
 !data/trace-batches/.gitkeep
 data/postgres/*
 !data/postgres/.gitkeep
-data/redis/*
-!data/redis/.gitkeep
 data/parquet-files/*
 
 data-test/

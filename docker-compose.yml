@@ -30,18 +30,6 @@ services:
     networks:
       - zradar
 
-  # Redis - DISABLED (not needed yet, can be added later for job queues)
-  # Uncomment below if you need Redis for job queue coordination
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: zradar-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - ./data/redis:/data
-  #   networks:
-  #     - zradar
-
   # zradar server with hot reload (Development)
   zradar:
     build:
@@ -49,24 +37,15 @@ services:
       dockerfile: Dockerfile.dev
     container_name: zradar-server
     environment:
-      # Database connections (Postgres-only)
       DATABASE_URL: postgres://zradar:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/zradar
-      # REDIS_URL: redis://redis:6379  # Uncomment if you enable Redis
 
-      # Development config
       RUST_LOG: ${RUST_LOG:-debug,zradar=trace}
       RUST_BACKTRACE: 1
 
-      # Migration config - Centralized system
-      # On first run: Always migrates (auto-detects empty database)
-      # Subsequent runs: Only if AUTO_MIGRATE=true
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
 
-      # Job queue config
-      QUEUE_TYPE: ${QUEUE_TYPE:-postgres}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
 
-      # Server ports
       OTLP_PORT: 4317
       QUERY_API_PORT: 8080
     ports:
@@ -89,7 +68,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # redis: disabled - not needed yet
     networks:
       - zradar
     command: cargo watch --poll -x 'run --bin zradar'
