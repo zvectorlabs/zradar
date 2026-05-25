@@ -17,7 +17,7 @@ use tonic::transport::Server;
 
 use api::{
     audit::{AuditState, audit_router},
-    http::create_admin_router,
+    http::{AuthMode, create_admin_router},
     retention::{handlers::RetentionState, retention_router},
     settings::{SettingsState, settings_router},
     telemetry::QueryService,
@@ -43,7 +43,7 @@ use zradar_retention::{
 };
 use zradar_traits::Authenticator;
 
-use auth::ConfigAuthenticator;
+use auth::{ConfigAuthenticator, PlatformAuthenticator};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -63,12 +63,23 @@ async fn main() -> Result<()> {
     // Authentication
     // =========================================================================
 
-    let authenticator: Arc<dyn Authenticator> =
-        Arc::new(ConfigAuthenticator::from_config(&config.api_keys));
-    info!(
-        "Config-based authenticator initialized ({} keys)",
-        config.api_keys.len()
-    );
+    let authenticator: Arc<dyn Authenticator> = if config.auth.is_platform_mode() {
+        let token = &config.auth.platform.gateway_service_token;
+        if token.is_empty() {
+            anyhow::bail!(
+                "auth.mode is 'platform' but auth.platform.gateway_service_token is empty. \
+                 Set it in config.toml or via the ZRADAR_GATEWAY_SERVICE_TOKEN env var."
+            );
+        }
+        info!("Platform authenticator initialized (Agnitiv gateway service token)");
+        Arc::new(PlatformAuthenticator::new(token.clone()))
+    } else {
+        info!(
+            "Config-based authenticator initialized ({} API keys)",
+            config.api_keys.len()
+        );
+        Arc::new(ConfigAuthenticator::from_config(&config.api_keys))
+    };
 
     // =========================================================================
     // Database
@@ -678,7 +689,12 @@ async fn main() -> Result<()> {
         ingestion_initialized: true,
         background_jobs_started: true,
     });
-    let admin_api = create_admin_router(query_service, authenticator.clone());
+    let auth_mode = if config.auth.is_platform_mode() {
+        AuthMode::Platform
+    } else {
+        AuthMode::Standalone
+    };
+    let admin_api = create_admin_router(query_service, authenticator.clone(), auth_mode);
     let retention_api = retention_router(retention_state, authenticator.clone());
     let settings_api = settings_router(
         Arc::new(SettingsState {
