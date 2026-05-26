@@ -857,6 +857,7 @@ async fn test_load_concurrent_traces() -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
+    let tenant_id = env.tenant_id;
     let project_id = env.project_id;
     let count = 100;
 
@@ -869,6 +870,7 @@ async fn test_load_concurrent_traces() -> Result<()> {
         let key = api_key.clone();
         let url = grpc_url.clone();
         let svc = service_name.clone();
+        let tid_ctx = tenant_id;
         let pid = project_id;
         let trace_id = TestDataGenerator::trace_id();
         trace_ids.push(trace_id);
@@ -877,6 +879,7 @@ async fn test_load_concurrent_traces() -> Result<()> {
         let handle = tokio::spawn(async move {
             let otlp_client = OtlpClient::new(url)
                 .with_api_key(key)
+                .with_tenant_id(tid_ctx.to_string())
                 .with_project_id(pid.to_string());
             let span_id = TestDataGenerator::span_id();
             let span_name = format!("load.concurrent.{}", i);
@@ -926,6 +929,7 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
+    let tenant_id = env.tenant_id;
     let project_id = env.project_id;
     let trace_count = 20;
     let children_per_trace = 10;
@@ -939,6 +943,7 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
         let key = api_key.clone();
         let url = grpc_url.clone();
         let svc = service_name.clone();
+        let tid_ctx = tenant_id;
         let pid = project_id;
         let trace_id = TestDataGenerator::trace_id();
         trace_ids.push(trace_id);
@@ -947,6 +952,7 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
         let handle = tokio::spawn(async move {
             let otlp_client = OtlpClient::new(url)
                 .with_api_key(key)
+                .with_tenant_id(tid_ctx.to_string())
                 .with_project_id(pid.to_string());
 
             let root_span_id = TestDataGenerator::span_id();
@@ -1026,6 +1032,7 @@ async fn test_load_concurrent_agent_trees() -> Result<()> {
 
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
+    let tenant_id = env.tenant_id;
     let project_id = env.project_id;
     let trace_count = 10;
     let tools_per_agent = 50;
@@ -1038,6 +1045,7 @@ async fn test_load_concurrent_agent_trees() -> Result<()> {
     for t in 0..trace_count {
         let key = api_key.clone();
         let url = grpc_url.clone();
+        let tid_ctx = tenant_id;
         let pid = project_id;
         let trace_id = TestDataGenerator::trace_id();
         trace_ids.push(trace_id);
@@ -1046,6 +1054,7 @@ async fn test_load_concurrent_agent_trees() -> Result<()> {
         let handle = tokio::spawn(async move {
             let otlp_client = OtlpClient::new(url)
                 .with_api_key(key)
+                .with_tenant_id(tid_ctx.to_string())
                 .with_project_id(pid.to_string());
 
             let root_span_id = TestDataGenerator::span_id();

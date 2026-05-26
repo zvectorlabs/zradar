@@ -6,7 +6,6 @@
 use crate::helpers::DbClient;
 #[allow(unused_imports)]
 use crate::*;
-use uuid::Uuid;
 
 #[tokio::test]
 #[ignore]
@@ -53,7 +52,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
         let file_entries = poll_until(
             || async {
                 let rows = db
-                    .file_list_entries(&Uuid::nil(), &env.project_id, signal_type)
+                    .file_list_entries(&env.tenant_id, &env.project_id, signal_type)
                     .await?;
                 if rows.is_empty() {
                     Ok(None)
@@ -72,7 +71,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
         );
 
         for entry in file_entries.iter().filter(|entry| !entry.deleted) {
-            assert_eq!(entry.tenant_id, Uuid::nil());
+            assert_eq!(entry.tenant_id, env.tenant_id);
             assert_eq!(entry.project_id, env.project_id);
             assert_eq!(entry.signal_type, signal_type);
             assert_eq!(entry.location, "local");
@@ -91,7 +90,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
         }
 
         let stats_entries = db
-            .stream_stats(&Uuid::nil(), &env.project_id, signal_type)
+            .stream_stats(&env.tenant_id, &env.project_id, signal_type)
             .await?;
         assert!(
             !stats_entries.is_empty(),

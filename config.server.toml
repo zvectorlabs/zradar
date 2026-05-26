@@ -1,41 +1,39 @@
 # zradar server configuration (single-tier: OTLP ingestion + Admin API).
 #
+# Used by docker-compose.yml for development.
+# Auth: standalone — static API keys from [[api_keys]] below.
+#
 # - OTLP_PORT      env var overrides otlp_port
 # - QUERY_API_PORT env var overrides query_api_port
 
-otlp_port = 4317
+otlp_port      = 4317
 query_api_port = 8081
-batch_size = 1000
+batch_size     = 1000
 batch_timeout_seconds = 10
 
 [postgres]
 max_connections = 20
 
-[admin_api]
-jwt_secret = "dev-jwt-secret-change-in-production"
-jwt_expiry_hours = 24
-admin_api_port = 8081
-
+# Authentication: standalone — validate tokens against the [[api_keys]] list.
 [auth]
-enabled = true
-type = "api-key"
-cache_ttl_seconds = 300
-mode = "platform"
+# mode = "standalone"  # default
 
-[auth.platform]
-gateway_service_token = "local-gateway-token"
-
-
-# Set to false to make OTLP gRPC open (no API key required). Default: true.
+# Set to false to allow OTLP without a key (open ingest). Default: true.
 # otlp_require_api_key = false
 
+[[api_keys]]
+key        = "zk_dev_local"
+tenant_id  = "local"
+project_id = "default"
+name       = "local dev"
+
 [ingestor]
-storage_type = "local"   # or "s3" for production
+storage_type = "local"
 
 [ingestor.storage.local]
 path = "/app/data/trace-batches"
 
-# Uncomment for S3 storage
+# Uncomment for S3 storage:
 # [ingestor.storage.s3]
 # bucket = "my-traces-bucket"
 # region = "us-east-1"

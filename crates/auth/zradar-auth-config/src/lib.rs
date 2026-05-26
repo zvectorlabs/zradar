@@ -1,5 +1,7 @@
-//! Config-based API key authentication (standalone mode) and gateway service token
-//! validation (platform mode).
+//! Static API-key authenticator for OSS zradar standalone mode.
+//!
+//! Validates bearer tokens against a map built from `[[api_keys]]` in `config.toml`.
+//! This is the only authenticator shipped in the default OSS build.
 
 use std::collections::HashMap;
 
@@ -44,46 +46,11 @@ impl Authenticator for ConfigAuthenticator {
     }
 }
 
-/// Validates the Agnitiv gateway service token for `auth.mode = "platform"`.
-///
-/// The gateway presents this shared credential instead of a per-user JWT.
-/// On success, returns an empty `RequestContext` — the real tenant, project,
-/// and user context is populated from trusted headers in `AuthContext::from_request_parts`.
-///
-/// Constant-time comparison prevents timing attacks on the token value.
-pub struct PlatformAuthenticator {
-    /// Expected gateway service token (from `auth.platform.gateway_service_token` config).
-    expected_token: String,
-}
-
-impl PlatformAuthenticator {
-    /// Creates a new platform authenticator with the configured gateway service token.
-    pub fn new(gateway_service_token: impl Into<String>) -> Self {
-        Self {
-            expected_token: gateway_service_token.into(),
-        }
-    }
-}
-
-#[async_trait]
-impl Authenticator for PlatformAuthenticator {
-    async fn authenticate(&self, token: &str) -> anyhow::Result<RequestContext> {
-        // Constant-time comparison to prevent timing side-channels
-        if !constant_time_eq(token.as_bytes(), self.expected_token.as_bytes()) {
-            anyhow::bail!("Invalid gateway service token");
-        }
-        // Return empty context — headers fill it in the extractor
-        Ok(RequestContext::default())
-    }
-}
-
 /// Constant-time byte slice comparison (no short-circuit on mismatch).
 ///
 /// Not a crypto primitive — avoids trivially visible timing differences.
-/// For full protection, use `subtle::ConstantTimeEq` in a future hardening pass.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
-        // Still run comparison on `a` vs itself to consume similar time
         let _ = a
             .iter()
             .zip(a.iter())
@@ -94,4 +61,13 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         .zip(b.iter())
         .fold(0u8, |acc, (x, y)| acc | (x ^ y))
         == 0
+}
+
+/// Validates a shared bearer token against a known expected value.
+///
+/// Intended for use by caller-supplied gateway integrations that need
+/// constant-time token comparison without pulling in platform-specific code.
+/// Returns `true` when `token` matches `expected`.
+pub fn validate_service_token(token: &[u8], expected: &[u8]) -> bool {
+    constant_time_eq(token, expected)
 }

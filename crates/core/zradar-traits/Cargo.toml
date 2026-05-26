@@ -23,5 +23,8 @@ utoipa = { workspace = true, optional = true }
 # SQL database support (required for Postgres plugin)
 sqlx = { workspace = true }
 
+# HTTP (for AdminAuthorizer HeaderMap parameter)
+axum = { workspace = true }
+
 # Internal dependencies
 zradar-models = { path = "../zradar-models", default-features = false }

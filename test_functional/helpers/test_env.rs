@@ -15,7 +15,9 @@ pub struct TestEnv {
     pub ctx: TestContext,
     /// REST client with API key already set.
     pub client: ApiClient,
-    /// Project ID from the test API key config (parsed as UUID or nil).
+    /// Tenant ID — unique per test for full isolation.
+    pub tenant_id: Uuid,
+    /// Project ID — unique per test for full isolation.
     pub project_id: Uuid,
     /// Raw API key string.
     pub api_key: String,
@@ -32,11 +34,10 @@ impl TestEnv {
         let ctx = TestContext::new();
         ctx.wait_for_ready(30).await?;
 
-        // Each test gets a unique project_id for data isolation.
-        // The server reads x-tenant-id / x-project-id headers and uses
-        // them to override the values from the static API key config.
+        // Each test gets a unique tenant_id and project_id for full data isolation.
+        // Spawned OtlpClients must clone both to keep writes and queries aligned.
+        let tenant_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        let tenant_id = Uuid::nil(); // shared tenant is fine
 
         let api_key = ctx.config.api_key.clone();
         let mut client = ApiClient::new(ctx.config.api_url.clone());
@@ -52,6 +53,7 @@ impl TestEnv {
         Ok(Self {
             ctx,
             client,
+            tenant_id,
             project_id,
             api_key,
             otlp,

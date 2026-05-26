@@ -3,53 +3,23 @@ name = "zradar-server"
 version = "0.1.0"
 edition.workspace = true
 license = "Apache-2.0"
-description = "zradar server binary"
+description = "zradar OSS standalone binary — config API-key auth, no platform wrapper dependencies"
 
 [[bin]]
 name = "zradar"
 path = "src/main.rs"
 
 [dependencies]
-# Core
+# OSS runtime and auth
+zradar-runtime = { path = "../../runtime/zradar-runtime" }
+zradar-auth-config = { path = "../../auth/zradar-auth-config" }
+
+# Core (for Config type and traits)
 zradar-models = { path = "../../core/zradar-models" }
 zradar-traits = { path = "../../core/zradar-traits" }
-zradar-parquet = { path = "../../core/zradar-parquet" }
-zradar-wal = { path = "../../core/zradar-wal" }
 
-# Services
-api-optel = { path = "../../services/api-optel" }
-api = { path = "../../services/api" }
-
-# Plugins (direct use, no infrastructure layer)
-# Note: Multiple plugins cause symbol conflicts with extern "C" functions
-# Only include what's needed for current configuration
-zradar-plugin-postgres = { path = "../../plugins/zradar-plugin-postgres" }
-zradar-plugin-s3 = { path = "../../plugins/zradar-plugin-s3" }
-zradar-retention = { path = "../../core/zradar-retention" }
-
-# Async traits
-async-trait = { workspace = true }
-uuid = { workspace = true }
-tokio-util = { workspace = true }
-
-# OpenTelemetry Protocol
-opentelemetry-proto = { workspace = true }
-
-# gRPC
-tonic = { workspace = true }
+# Async
 tokio = { workspace = true }
-
-# Database
-sqlx = { workspace = true }
-
-# HTTP/API
-axum = { workspace = true }
-tower-http = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-# Serialization
-bytes = { workspace = true }
-chrono = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }

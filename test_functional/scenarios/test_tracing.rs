@@ -159,7 +159,7 @@ async fn test_trace_for_blocked_project_rejected() -> Result<()> {
     env.client.set_project_id(blocked_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(Uuid::nil().to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(blocked_project_id.to_string());
 
     let settings_resp = env
@@ -206,7 +206,7 @@ async fn test_trace_project_ingestion_rate_limited() -> Result<()> {
         .set_project_id(rate_limited_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(Uuid::nil().to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(rate_limited_project_id.to_string());
 
     let settings_resp = env
@@ -259,7 +259,7 @@ async fn test_metrics_project_ingestion_rate_limited() -> Result<()> {
         .set_project_id(rate_limited_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(Uuid::nil().to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(rate_limited_project_id.to_string());
 
     let settings_resp = env
@@ -302,7 +302,7 @@ async fn test_logs_project_ingestion_rate_limited() -> Result<()> {
         .set_project_id(rate_limited_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(Uuid::nil().to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(rate_limited_project_id.to_string());
 
     let settings_resp = env
@@ -460,6 +460,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
+    let tenant_id = env.tenant_id;
     let project_id = env.project_id;
 
     let mut handles = vec![];
@@ -469,6 +470,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
         let key = api_key.clone();
         let url = grpc_url.clone();
         let svc = service_name.clone();
+        let tid_ctx = tenant_id;
         let pid = project_id;
         let trace_id = TestDataGenerator::trace_id();
         trace_ids.push(trace_id);
@@ -477,6 +479,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
         let handle = tokio::spawn(async move {
             let otlp_client = OtlpClient::new(url)
                 .with_api_key(key)
+                .with_tenant_id(tid_ctx.to_string())
                 .with_project_id(pid.to_string());
             let span_id = TestDataGenerator::span_id();
             let span_name = format!("concurrent.{}", i);

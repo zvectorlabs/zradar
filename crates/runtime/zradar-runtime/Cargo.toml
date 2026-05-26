@@ -1,0 +1,59 @@
+[package]
+name = "zradar-runtime"
+version = "0.1.0"
+edition.workspace = true
+description = "Reusable server runtime for zradar — used by zradar-server and external platform wrapper binaries"
+license = "Apache-2.0"
+
+[dependencies]
+# Auth
+zradar-auth-config = { path = "../../auth/zradar-auth-config" }
+
+# Core
+zradar-models = { path = "../../core/zradar-models" }
+zradar-traits = { path = "../../core/zradar-traits" }
+zradar-parquet = { path = "../../core/zradar-parquet" }
+zradar-wal = { path = "../../core/zradar-wal" }
+zradar-retention = { path = "../../core/zradar-retention" }
+
+# Services
+api-optel = { path = "../../services/api-optel" }
+api = { path = "../../services/api" }
+
+# Plugins (compiled-in for current architecture)
+zradar-plugin-postgres = { path = "../../plugins/zradar-plugin-postgres" }
+zradar-plugin-s3 = { path = "../../plugins/zradar-plugin-s3" }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# OpenTelemetry Protocol
+opentelemetry-proto = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# HTTP/API
+axum = { workspace = true }
+tower-http = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }

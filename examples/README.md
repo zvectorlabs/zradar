@@ -13,38 +13,22 @@ Example client applications demonstrating how to send OTLP telemetry to zradar.
    cargo run --release
    ```
 
-2. **Create an API key:**
+2. **Configure your API key:**
+
+   Add your key to `config.toml` (see `config.toml.example`):
+
+   ```toml
+   [[api_keys]]
+   key        = "zk_live_your_key_here"
+   tenant_id  = "my-org"
+   project_id = "my-project"
+   name       = "example key"
+   ```
+
+   Then export it for the example scripts:
+
    ```bash
-   # Login to get JWT token
-   TOKEN=$(curl -X POST http://localhost:8081/api/v1/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{"email":"admin@example.com","password":"changeme123"}' \
-     | jq -r '.token')
-
-   # Create organization
-   ORG_ID=$(curl -X POST http://localhost:8081/api/v1/organizations \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"name":"my-org","display_name":"My Organization"}' \
-     | jq -r '.id')
-
-   # Create project
-   PROJECT_ID=$(curl -X POST http://localhost:8081/api/v1/projects \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"organization_id":"'$ORG_ID'","name":"production","display_name":"Production"}' \
-     | jq -r '.id')
-
-   # Create API key
-   API_KEY=$(curl -X POST http://localhost:8081/api/v1/api-keys \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"project_id":"'$PROJECT_ID'","name":"example-key","description":"Key for examples"}' \
-     | jq -r '.key')
-
-   # Save the API key
-   echo "export ZVRADAR_API_KEY=$API_KEY" >> ~/.zradar_env
-   source ~/.zradar_env
+   export ZVRADAR_API_KEY=zk_live_your_key_here
    ```
 
 ## Examples
@@ -269,7 +253,7 @@ psql zradar -c "
 ### Swagger UI
 
 1. Open http://localhost:8081/swagger-ui/
-2. Authenticate with JWT token
+2. Authorize with your API key from `config.toml` (`Bearer zk_live_...`)
 3. Try the API endpoints
 
 ## Troubleshooting

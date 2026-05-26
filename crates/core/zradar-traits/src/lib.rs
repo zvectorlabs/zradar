@@ -7,12 +7,16 @@
 //! - Repository traits (`FileListRepository`, `TelemetryReader`, `TelemetryWriter`)
 //! - Block storage (`BlockStorage`)
 
+pub mod admin_authorizer;
 pub mod auth;
 pub mod block_storage;
+pub mod capability;
 pub mod repositories;
 
+pub use admin_authorizer::{AdminAuth, AdminAuthorizer};
 pub use auth::Authenticator;
 pub use block_storage::BlockStorage;
+pub use capability::Capability;
 
 // Re-export repository traits
 pub use repositories::{
