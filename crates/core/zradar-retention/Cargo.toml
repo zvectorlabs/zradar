@@ -1,6 +1,6 @@
 [package]
 name = "zradar-retention"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 description = "Retention system for zradar — config, cleanup, and query enforcement"
 
