@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  RUST_VERSION: "1.93.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude test_functional
+
+      - name: Clippy
+        run: cargo clippy --workspace --exclude test_functional --all-targets -- -D warnings
+
+  build:
+    name: Build ${{ matrix.suffix }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            suffix: linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            suffix: linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install cross linker (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: release-${{ matrix.target }}
+
+      - name: Build zradar binary
+        run: cargo build --release -p zradar-server --bin zradar --target ${{ matrix.target }}
+
+      - name: Package artifact
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          OUT_DIR="dist"
+          mkdir -p "${OUT_DIR}"
+          BIN="target/${{ matrix.target }}/release/zradar"
+          ARCHIVE="${OUT_DIR}/zradar-${VERSION}-${{ matrix.suffix }}.tar.gz"
+          tar -czf "${ARCHIVE}" -C "$(dirname "${BIN}")" "$(basename "${BIN}")"
+          (cd "${OUT_DIR}" && sha256sum "$(basename "${ARCHIVE}")" > "$(basename "${ARCHIVE}").sha256")
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zradar-${{ matrix.suffix }}
+          path: dist/*
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: zradar-*
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

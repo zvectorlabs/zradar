@@ -1,6 +1,6 @@
 [package]
 name = "zradar-runtime"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 description = "Reusable server runtime for zradar — used by zradar-server and external platform wrapper binaries"
 license = "Apache-2.0"

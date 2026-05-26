@@ -1,4 +1,5 @@
-.PHONY: help dev dev-logs run-dev start stop restart logs clean test test-all functional_tests functional_tests_fast build-prod prod deploy
+.PHONY: help dev dev-logs run-dev start stop restart logs clean test test-all functional_tests functional_tests_fast build-prod prod deploy \
+	show-version version-bump release-publish build-release
 
 # Default target
 help:
@@ -31,6 +32,14 @@ help:
 	@echo ""
 	@echo "🚀 Deployment Commands:"
 	@echo "  make deploy         - Deploy with external databases (production)"
+	@echo ""
+	@echo "📦 Release Commands:"
+	@echo "  make show-version   - Show current workspace version"
+	@echo "  make version-bump BUMP=patch   - Bump VERSION + workspace Cargo.toml only"
+	@echo "  make version-bump NEW_VERSION=0.2.0"
+	@echo "  make release-publish BUMP=patch  - Bump, commit, tag vX.Y.Z, push (triggers GitHub release)"
+	@echo "  make release-publish DRY_RUN=1 BUMP=minor   - Preview without changes"
+	@echo "  make release-publish SKIP_PUSH=1 BUMP=patch - Commit + tag locally only"
 	@echo ""
 	@echo "🔧 Utility Commands:"
 	@echo "  make health         - Check service health"
@@ -248,13 +257,40 @@ hook:
 	done
 
 # =============================================================================
+# RELEASE (version bump, tag, GitHub binary build)
+# =============================================================================
+
+# Show current semver (VERSION file; target name avoids clash with VERSION on case-insensitive FS)
+show-version:
+	@tr -d '[:space:]' < VERSION; echo
+
+# Bump VERSION + [workspace.package].version only (does not commit or tag)
+version-bump:
+	@chmod +x scripts/bump-version.sh
+	@if [ -n "$(NEW_VERSION)" ]; then \
+		./scripts/bump-version.sh "$(NEW_VERSION)"; \
+	else \
+		./scripts/bump-version.sh "$(BUMP)"; \
+	fi
+
+# One-shot: bump → commit → annotated tag → push branch + tag (triggers .github/workflows/release.yml)
+release-publish: hook
+	@chmod +x scripts/release-publish.sh scripts/bump-version.sh
+	@BUMP="$(BUMP)" NEW_VERSION="$(NEW_VERSION)" DRY_RUN="$(DRY_RUN)" \
+		SKIP_PUSH="$(SKIP_PUSH)" SKIP_CHECK="$(SKIP_CHECK)" REMOTE="$(REMOTE)" \
+		./scripts/release-publish.sh $(if $(NEW_VERSION),$(NEW_VERSION),$(BUMP))
+
+# =============================================================================
 # LOCAL RUST DEVELOPMENT (without Docker)
 # =============================================================================
 
-# Build release locally
-release:
+# Build release binary locally
+build-release:
 	@echo "📦 Building release..."
-	@cargo build --release
+	@cargo build --release -p zradar-server --bin zradar
+
+# Alias for local release build (not version publish)
+release: build-release
 
 # Run locally (requires external databases)
 run:

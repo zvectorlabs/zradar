@@ -1,6 +1,6 @@
 [package]
 name = "zradar-plugin-postgres"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 description = "PostgreSQL plugin - default implementation for all repositories"
 

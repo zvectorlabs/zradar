@@ -1,6 +1,6 @@
 [package]
 name = "zradar-auth-config"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 description = "Static API-key authenticator for OSS zradar standalone mode"
 license = "Apache-2.0"

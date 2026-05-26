@@ -1,6 +1,6 @@
 [package]
 name = "zradar-parquet"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 description = "Parquet storage layer for zradar — write and query telemetry via Arrow/DataFusion"
 
