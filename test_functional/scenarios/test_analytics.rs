@@ -90,10 +90,7 @@ async fn test_analytics_endpoints() -> Result<()> {
     assert_eq!(total_count, 4.0, "Should have 4 total traces");
 
     // Get metrics summary
-    let metrics_response = env
-        .client
-        .get(&format!("/api/v1/analytics/metrics?"))
-        .await?;
+    let metrics_response = env.client.get("/api/v1/analytics/metrics?").await?;
     assert_eq!(metrics_response.status(), 200);
     let metrics: MetricsSummary = metrics_response.json().await?;
     assert_eq!(metrics.total_traces, 4);

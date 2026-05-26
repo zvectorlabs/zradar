@@ -37,6 +37,7 @@ impl MockApiKeyAuthorizer {
         }
     }
 
+    #[allow(dead_code)]
     fn with_context(token: &'static str, tenant_id: &str, project_id: &str) -> Self {
         Self {
             expected_token: token,

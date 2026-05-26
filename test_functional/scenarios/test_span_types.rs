@@ -290,8 +290,8 @@ async fn test_rest_api_filter_by_span_type() -> Result<()> {
     env.otlp.export_traces(request2).await?;
 
     // Poll until at least one GENERATION span appears
-    let filter_url = format!("/api/v1/spans?span_type=GENERATION");
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let filter_url = "/api/v1/spans?span_type=GENERATION";
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(
         !spans.is_empty(),
@@ -380,8 +380,8 @@ async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
     env.otlp.export_traces(request3).await?;
 
     // Poll until GENERATION+TOOL spans appear
-    let filter_url = format!("/api/v1/spans?span_types=GENERATION,TOOL");
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let filter_url = "/api/v1/spans?span_types=GENERATION,TOOL";
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(
         spans.len() >= 2,
