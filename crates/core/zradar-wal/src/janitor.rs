@@ -7,9 +7,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use crate::Wal;
 use crate::checkpoint::CheckpointStore;
 use crate::segment;
-use crate::Wal;
 
 /// Background task that garbage-collects old WAL segments.
 pub struct WalJanitor {

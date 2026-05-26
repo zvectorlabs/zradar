@@ -4,7 +4,7 @@
 # - QUERY_API_PORT env var overrides query_api_port
 
 otlp_port = 4317
-query_api_port = 8080
+query_api_port = 8081
 batch_size = 1000
 batch_timeout_seconds = 10
 
@@ -14,12 +14,18 @@ max_connections = 20
 [admin_api]
 jwt_secret = "dev-jwt-secret-change-in-production"
 jwt_expiry_hours = 24
-admin_api_port = 8080
+admin_api_port = 8081
 
 [auth]
 enabled = true
 type = "api-key"
 cache_ttl_seconds = 300
+mode = "platform"
+
+[auth.platform]
+gateway_service_token = "local-gateway-token"
+
+
 # Set to false to make OTLP gRPC open (no API key required). Default: true.
 # otlp_require_api_key = false
 

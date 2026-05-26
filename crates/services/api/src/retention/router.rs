@@ -8,6 +8,7 @@ use super::handlers::{
     RetentionState, get_project_retention, get_retention_config, list_retention_configs,
     run_cleanup, set_project_retention, set_retention_config,
 };
+use crate::http::AuthMode;
 
 /// Build the retention admin router.
 ///
@@ -16,7 +17,11 @@ use super::handlers::{
 /// - `PUT  /api/v1/admin/retention/config` — update org retention config
 ///
 /// Authentication: `Authorization: Bearer <api-key>` on every request.
-pub fn retention_router(state: Arc<RetentionState>, auth: Arc<dyn Authenticator>) -> Router {
+pub fn retention_router(
+    state: Arc<RetentionState>,
+    auth: Arc<dyn Authenticator>,
+    auth_mode: AuthMode,
+) -> Router {
     Router::new()
         .route("/api/v1/admin/retention/run", routing::post(run_cleanup))
         .route(
@@ -31,6 +36,7 @@ pub fn retention_router(state: Arc<RetentionState>, auth: Arc<dyn Authenticator>
             "/api/v1/projects/:id/retention",
             routing::get(get_project_retention).put(set_project_retention),
         )
+        .layer(Extension(auth_mode))
         .layer(Extension(auth))
         .with_state(state)
 }

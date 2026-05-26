@@ -91,13 +91,19 @@ The Parquet path includes batching, atomic writes, bloom filters, DataFusion `Li
 
 ## Quick start
 
-Use the repository `make` targets for local development.
-
 ```bash
 make help
 make dev
 make health
 ```
+
+After `make dev` is healthy:
+
+- **OTLP gRPC:** `localhost:4317` (traces, metrics, logs)
+- **Admin HTTP API:** `http://localhost:8081` (queries, analytics, settings)
+- **OpenAPI / Swagger:** `http://localhost:8081/swagger-ui/`
+
+Send sample telemetry from `examples/` (see `examples/README.md`), then query traces via the API or Swagger.
 
 Run checks:
 
@@ -150,6 +156,16 @@ Try zradar if you are building:
 - tool-using agents where failures happen across many spans
 - observability infrastructure that should stay OpenTelemetry-native
 - telemetry systems where Parquet storage is preferable to keeping everything in an OLTP database
+
+## Deployment
+
+Build and run the server image from this directory:
+
+```bash
+docker build -t zradar .
+```
+
+Expose OTLP on **4317** and the Admin API on **8081**. Configure PostgreSQL, storage, and API keys via `config.toml` (see `config.toml.example`). Any client that speaks HTTP and OpenTelemetry can integrate; zradar does not bundle a web interface.
 
 ## Documentation
 

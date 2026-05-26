@@ -16,8 +16,8 @@ pub mod replay;
 pub mod segment;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -45,7 +45,11 @@ impl Wal {
     /// Open (or create) the WAL directory. Finds the active segment or starts fresh.
     ///
     /// Spawns the group-commit fsync background task.
-    pub async fn open(dir: &Path, config: WalConfig, cancel: CancellationToken) -> Result<Self, WalError> {
+    pub async fn open(
+        dir: &Path,
+        config: WalConfig,
+        cancel: CancellationToken,
+    ) -> Result<Self, WalError> {
         std::fs::create_dir_all(dir)?;
 
         let segments = list_segments(dir)?;
@@ -104,8 +108,8 @@ impl Wal {
         let symlink_path = dir.join("current.seg");
         let fsync_fn: Arc<dyn Fn() -> Result<(), std::io::Error> + Send + Sync> =
             Arc::new(move || {
-                let real_path = std::fs::read_link(&symlink_path)
-                    .unwrap_or_else(|_| symlink_path.clone());
+                let real_path =
+                    std::fs::read_link(&symlink_path).unwrap_or_else(|_| symlink_path.clone());
                 let parent = symlink_path.parent().unwrap_or(Path::new("."));
                 let target = if real_path.is_relative() {
                     parent.join(&real_path)
@@ -148,7 +152,9 @@ impl Wal {
 
         // Check if we need to seal and rotate
         if writer.size() + serialized.len() as u64 > self.inner.config.segment_max_bytes {
-            writer.fsync().map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+            writer
+                .fsync()
+                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
             let new_id = writer.id() + 1;
             let new_writer = SegmentWriter::create(&self.inner.dir, new_id)
                 .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
@@ -160,9 +166,9 @@ impl Wal {
         writer
             .append(&serialized)
             .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
-        writer.flush().map_err(|e| {
-            AppendError::Io(std::io::Error::other(e.to_string()))
-        })?;
+        writer
+            .flush()
+            .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
 
         drop(writer);
 
@@ -315,8 +321,7 @@ mod tests {
         assert_eq!(wal.next_offset(), 1000);
 
         // Verify all records are readable in offset order
-        let mut reader =
-            segment::SegmentReader::open(tmp.path(), 0).unwrap();
+        let mut reader = segment::SegmentReader::open(tmp.path(), 0).unwrap();
         let mut offsets = Vec::new();
         while let Some(rec) = reader.next_record().unwrap() {
             offsets.push(rec.assigned_offset);

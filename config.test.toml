@@ -38,6 +38,11 @@ name = "functional-test-key"
 # Ingestor configuration
 [ingestor]
 
+# Direct OTLP → Parquet (no WAL). Functional tests poll query APIs with a short
+# timeout; the default WAL path adds async flush lag and flakes under parallel runs.
+[ingestor.wal]
+enabled = false
+
 [ingestor.storage]
 parquet_data_dir = "./data-test/parquet-files"
 

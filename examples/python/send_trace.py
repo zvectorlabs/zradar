@@ -202,8 +202,8 @@ def main():
     trace.get_tracer_provider().force_flush()
     
     print("\n✨ Done! Check zradar dashboard to see your traces")
-    print(f"   Admin API: http://localhost:8080")
-    print(f"   Swagger UI: http://localhost:8080/swagger-ui/")
+    print(f"   Admin API: http://localhost:8081")
+    print(f"   Swagger UI: http://localhost:8081/swagger-ui/")
 
 
 if __name__ == "__main__":

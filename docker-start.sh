@@ -35,7 +35,7 @@ if [ "$MODE" = "prod" ]; then
     POSTGRES_PORT="9001"
 else
     COMPOSE_FILE="docker-compose.yml"
-    API_PORT="8080"
+    API_PORT="8081"
     OTLP_PORT="4317"
     POSTGRES_PORT="5432"
 fi
@@ -140,13 +140,11 @@ echo "  🔹 Admin API:     http://localhost:${API_PORT}"
 echo "  🔹 PostgreSQL:    localhost:${POSTGRES_PORT}"
 
 if [ "$MODE" = "dev" ]; then
-    echo "  🔹 Adminer UI:    http://localhost:8081"
     echo ""
     echo "🔧 Development Features:"
     echo "  ✅ Hot reload enabled (code changes auto-rebuild)"
     echo "  ✅ Direct database access on standard ports"
     echo "  ✅ Debug logging enabled"
-    echo "  ✅ Database GUI at http://localhost:8081"
 fi
 
 echo ""

@@ -28,6 +28,8 @@ data/trace-batches/*
 data/postgres/*
 !data/postgres/.gitkeep
 data/parquet-files/*
+data/wal/*
+!data/wal/.gitkeep
 
 data-test/
 

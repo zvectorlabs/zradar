@@ -9,7 +9,7 @@ use zradar_models::{NewAuditLog, NewProjectSettings, ProjectSettings};
 use zradar_traits::{AuditLogRepository, SettingsRepository};
 
 use crate::errors::{ControlError, Result};
-use crate::http::auth_extractor::AuthContext;
+use crate::http::{AuthContext, Capability};
 
 pub struct SettingsState {
     pub repository: Arc<dyn SettingsRepository>,
@@ -28,8 +28,12 @@ pub struct UpdateProjectSettingsRequest {
 
 pub async fn get_project_settings(
     State(state): State<Arc<SettingsState>>,
+    auth: AuthContext,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<ProjectSettings>> {
+    auth.require(Capability::ReadSettings)?;
+    auth.enforce_path_project(project_id)?;
+
     let settings = match state.repository.get_settings(project_id).await? {
         Some(settings) => settings,
         None => {
@@ -45,10 +49,12 @@ pub async fn get_project_settings(
 
 pub async fn update_project_settings(
     State(state): State<Arc<SettingsState>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(project_id): Path<Uuid>,
     Json(body): Json<UpdateProjectSettingsRequest>,
 ) -> Result<Json<ProjectSettings>> {
+    auth.require(Capability::WriteSettings)?;
+    auth.enforce_path_project(project_id)?;
     validate_settings(&body)?;
 
     let settings = state
@@ -65,8 +71,8 @@ pub async fn update_project_settings(
         .await?;
 
     if let Some(audit_log_repo) = &state.audit_log_repo {
-        let actor_tenant_id = Uuid::parse_str(&ctx.tenant_id).ok();
-        let actor_project_id = Uuid::parse_str(&ctx.project_id).ok();
+        let actor_tenant_id = auth.tenant_uuid().ok();
+        let actor_project_id = auth.project_uuid().ok();
         audit_log_repo
             .create_audit_log(NewAuditLog {
                 actor_tenant_id,

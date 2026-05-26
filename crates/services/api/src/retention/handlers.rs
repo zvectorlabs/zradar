@@ -13,7 +13,7 @@ use uuid::Uuid;
 use zradar_retention::{CleanupJob, CleanupStats, OrgRetentionConfig, RetentionConfigStore};
 use zradar_traits::{AuditLogRepository, RetentionPolicyRepository};
 
-use crate::http::auth_extractor::AuthContext;
+use crate::http::{AuthContext, Capability};
 
 /// Shared state for retention handlers.
 pub struct RetentionState {
@@ -59,15 +59,20 @@ pub struct RunCleanupResponse {
 )]
 pub async fn run_cleanup(
     State(state): State<Arc<RetentionState>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(params): Query<RunCleanupParams>,
 ) -> impl IntoResponse {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    if let Err(e) = auth.require(Capability::Admin) {
+        return e.into_response();
+    }
 
-    // If retention_days override is specified, temporarily upsert a config
-    // so the cleanup uses the requested window.
+    // Platform mode: ignore org_id override from params — always scope to ctx tenant.
+    // Standalone mode: allow org_id override for intra-org admin operations.
     if let Some(days) = params.retention_days {
-        let org_id = params.org_id.unwrap_or(tenant_id);
+        let org_id = match auth.tenant_or_standalone_override(params.org_id) {
+            Ok(org_id) => org_id,
+            Err(e) => return e.into_response(),
+        };
         state.config_store.upsert(OrgRetentionConfig {
             org_id,
             default_days: days,
@@ -130,11 +135,17 @@ pub struct ProjectRetentionResponse {
 )]
 pub async fn set_retention_config(
     State(state): State<Arc<RetentionState>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Json(body): Json<SetRetentionConfigRequest>,
 ) -> impl IntoResponse {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    let org_id = body.org_id.unwrap_or(tenant_id);
+    if let Err(e) = auth.require(Capability::Admin) {
+        return e.into_response();
+    }
+
+    let org_id = match auth.tenant_or_reject_platform_override(body.org_id) {
+        Ok(org_id) => org_id,
+        Err(e) => return e.into_response(),
+    };
 
     let saved = match state
         .policy_repo
@@ -162,8 +173,8 @@ pub async fn set_retention_config(
     });
 
     if let Some(audit_log_repo) = &state.audit_log_repo {
-        let actor_tenant_id = Uuid::parse_str(&ctx.tenant_id).ok();
-        let actor_project_id = Uuid::parse_str(&ctx.project_id).ok();
+        let actor_tenant_id = auth.tenant_uuid().ok();
+        let actor_project_id = auth.project_uuid().ok();
         if let Err(e) = audit_log_repo
             .create_audit_log(zradar_models::NewAuditLog {
                 actor_tenant_id,
@@ -277,10 +288,13 @@ pub async fn list_retention_configs(State(state): State<Arc<RetentionState>>) ->
 
 pub async fn get_project_retention(
     State(state): State<Arc<RetentionState>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(project_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    let org_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    let org_id = match auth.tenant_uuid() {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
 
     match state.policy_repo.get_policy(org_id).await {
         Ok(Some(policy)) => {
@@ -335,11 +349,17 @@ pub async fn get_project_retention(
 
 pub async fn set_project_retention(
     State(state): State<Arc<RetentionState>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(project_id): Path<Uuid>,
     Json(body): Json<SetProjectRetentionRequest>,
 ) -> impl IntoResponse {
-    let org_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
+    if let Err(e) = auth.require(Capability::WriteSettings) {
+        return e.into_response();
+    }
+    let org_id = match auth.tenant_uuid() {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
 
     let (default_days, mut project_overrides) = match state.policy_repo.get_policy(org_id).await {
         Ok(Some(policy)) => {

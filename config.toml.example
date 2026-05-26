@@ -4,18 +4,18 @@
 # DOCKER PORT MAPPINGS (when using docker-compose.yml):
 # - PostgreSQL:  localhost:9001 → postgres:5432
 # - OTLP gRPC:   localhost:9005 → zradar:4317
-# - Admin API:   localhost:9006 → zradar:8080
+# - Admin API:   localhost:8081 → zradar:8081
 #
 # USAGE SCENARIOS:
 # 1. Inside Docker container: Use service names (postgres)
-# 2. Local app → Docker services: Use localhost with mapped ports (9001, 9005, 9006)
+# 2. Local app → Docker services: Use localhost with mapped ports (5432, 4317, 8081)
 # 3. Native development: Use localhost with standard ports (5432)
 
 # OTLP gRPC port (standard OpenTelemetry port)
 otlp_port = 4317
 
 # Admin API HTTP port
-admin_api_port = 8080
+admin_api_port = 8081
 
 # PostgreSQL configuration (control plane: file_list, stream_stats, settings, retention, audit)
 # Connection string is provided via DATABASE_URL environment variable.

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 /// Three-stage backpressure ladder for the WAL.
 ///
 /// The stages are computed from:
@@ -10,15 +11,14 @@
 ///   Slowdown → Reject: when WAL fill reaches `backpressure_reject_pct`
 ///   any → Reject: when `dir_free_bytes < wal_min_free_bytes`
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use crate::Wal;
 use crate::config::WalConfig;
 use crate::segment;
-use crate::Wal;
 
 /// Current backpressure state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -158,8 +158,6 @@ async fn test_error_analytics() -> Result<()> {
 
     let body: Value = response.json().await?;
     let breakdowns = body.as_array().expect("Expected array response");
-<<<<<<< Updated upstream
-=======
     for breakdown in breakdowns {
         assert!(
             breakdown
@@ -183,7 +181,6 @@ async fn test_error_analytics() -> Result<()> {
             "Each error breakdown should include numeric percentage"
         );
     }
->>>>>>> Stashed changes
     println!("Found {} error types", breakdowns.len());
 
     println!("✅ Error analytics test passed");

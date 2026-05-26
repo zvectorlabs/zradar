@@ -9,7 +9,7 @@ use zradar_models::AuditLog;
 use zradar_traits::{AuditLogFilters, AuditLogRepository};
 
 use crate::errors::Result;
-use crate::http::auth_extractor::AuthContext;
+use crate::http::{AuthContext, Capability};
 
 pub struct AuditState {
     pub repository: Arc<dyn AuditLogRepository>,
@@ -38,14 +38,20 @@ pub struct AuditLogResponse {
 
 pub async fn list_audit_logs(
     State(state): State<Arc<AuditState>>,
-    AuthContext(_ctx): AuthContext,
+    auth: AuthContext,
     Query(query): Query<AuditLogQuery>,
 ) -> Result<Json<AuditLogResponse>> {
+    auth.require(Capability::Admin)?;
+
+    // In platform mode, ignore caller-provided org_id/project_id filters and
+    // always scope to the authenticated tenant/project to prevent cross-tenant reads.
+    let (org_id, project_id) = auth.audit_scope(query.org_id, query.project_id)?;
+
     let page = state
         .repository
         .list_audit_logs(AuditLogFilters {
-            org_id: query.org_id,
-            project_id: query.project_id,
+            org_id,
+            project_id,
             action: query.action,
             resource_type: query.resource_type,
             resource_id: query.resource_id,

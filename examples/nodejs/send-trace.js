@@ -284,8 +284,8 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     console.log('\n✨ Done! Check zradar dashboard to see your traces');
-    console.log('   Admin API: http://localhost:8080');
-    console.log('   Swagger UI: http://localhost:8080/swagger-ui/');
+    console.log('   Admin API: http://localhost:8081');
+    console.log('   Swagger UI: http://localhost:8081/swagger-ui/');
 
   } catch (error) {
     console.error('Error:', error);

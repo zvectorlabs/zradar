@@ -9,8 +9,8 @@
 //! # Platform mode (Agnitiv gateway)
 //! Token is validated as the gateway service credential. `x-tenant-id` and
 //! `x-project-id` are **required** trusted headers — the request is rejected with
-//! 400 if either is missing or empty. Optional `x-user-id`, `x-org-slug`, and
-//! `x-permissions` are parsed into the context for audit and M02 enforcement.
+//! 400 if either is missing or empty. Gateway-specific authorization headers are
+//! translated into zradar-native capabilities at this boundary.
 
 use axum::{
     Extension,
@@ -19,8 +19,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uuid::Uuid;
 use zradar_models::RequestContext;
 use zradar_traits::Authenticator;
+
+use crate::errors::{ControlError, Result as ApiResult};
 
 /// Authentication mode injected as an axum extension by the router.
 ///
@@ -32,11 +35,165 @@ pub enum AuthMode {
     Platform,
 }
 
-/// Axum extractor that resolves the `RequestContext` from the Bearer token.
+/// zradar-native authorization capabilities.
+///
+/// HTTP handlers depend on these capabilities instead of gateway-specific
+/// permission strings or transport headers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capability {
+    ReadTraces,
+    ReadDashboards,
+    ReadLogs,
+    ReadMetrics,
+    ReadSettings,
+    WriteSettings,
+    Admin,
+}
+
+/// Axum extractor that resolves the `RequestContext` and configured auth mode
+/// from the Bearer token.
 ///
 /// Requires both `Extension(Arc<dyn Authenticator>)` and `Extension(AuthMode)`
 /// to be present on the router.
-pub struct AuthContext(pub RequestContext);
+pub struct AuthContext {
+    /// Request-scoped tenant/project/user context.
+    ctx: RequestContext,
+    /// Auth mode read from config and injected by the router.
+    mode: AuthMode,
+    /// zradar-native capabilities resolved by the auth adapter.
+    capabilities: Vec<Capability>,
+}
+
+impl AuthContext {
+    /// Creates an auth context from resolved request context and mode.
+    ///
+    /// This is primarily useful for focused tests; production requests should
+    /// use the extractor implementation.
+    #[doc(hidden)]
+    pub fn from_context(
+        ctx: RequestContext,
+        mode: AuthMode,
+        capabilities: Vec<Capability>,
+    ) -> Self {
+        Self {
+            ctx,
+            mode,
+            capabilities,
+        }
+    }
+
+    /// Returns the request context resolved by authentication.
+    pub fn context(&self) -> &RequestContext {
+        &self.ctx
+    }
+
+    /// Returns the auth mode resolved from server configuration.
+    pub fn mode(&self) -> AuthMode {
+        self.mode
+    }
+
+    /// Returns true when the request was authenticated through platform mode.
+    pub fn is_platform(&self) -> bool {
+        self.mode == AuthMode::Platform
+    }
+
+    /// Enforces a zradar capability in platform mode.
+    ///
+    /// Standalone callers are authorized by API key scope and always pass here.
+    pub fn require(&self, capability: Capability) -> ApiResult<()> {
+        if self.mode == AuthMode::Standalone {
+            return Ok(());
+        }
+
+        if self.capabilities.contains(&capability) {
+            Ok(())
+        } else {
+            Err(ControlError::Forbidden(format!(
+                "missing capability: {capability:?}"
+            )))
+        }
+    }
+
+    /// Parses the authenticated tenant ID.
+    pub fn tenant_uuid(&self) -> ApiResult<Uuid> {
+        parse_ctx_uuid(&self.ctx.tenant_id, "tenant_id")
+    }
+
+    /// Parses the authenticated project ID.
+    pub fn project_uuid(&self) -> ApiResult<Uuid> {
+        parse_ctx_uuid(&self.ctx.project_id, "project_id")
+    }
+
+    /// Returns the authenticated project ID string.
+    pub fn project_id(&self) -> &str {
+        &self.ctx.project_id
+    }
+
+    /// Enforces that a path project matches the authenticated project in platform mode.
+    pub fn enforce_path_project(&self, path_project: Uuid) -> ApiResult<()> {
+        if !self.is_platform() {
+            return Ok(());
+        }
+
+        if self.project_uuid()? != path_project {
+            return Err(ControlError::Forbidden(
+                "path project_id does not match authenticated project".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Returns the tenant unless standalone mode explicitly supplies an org override.
+    ///
+    /// Platform mode ignores the caller-provided override and always uses the
+    /// trusted tenant from context.
+    pub fn tenant_or_standalone_override(&self, requested_org: Option<Uuid>) -> ApiResult<Uuid> {
+        let tenant_id = self.tenant_uuid()?;
+        if self.is_platform() {
+            Ok(tenant_id)
+        } else {
+            Ok(requested_org.unwrap_or(tenant_id))
+        }
+    }
+
+    /// Returns the tenant or rejects a platform org override that differs from it.
+    pub fn tenant_or_reject_platform_override(
+        &self,
+        requested_org: Option<Uuid>,
+    ) -> ApiResult<Uuid> {
+        let tenant_id = self.tenant_uuid()?;
+        if !self.is_platform() {
+            return Ok(requested_org.unwrap_or(tenant_id));
+        }
+
+        if let Some(requested) = requested_org
+            && requested != tenant_id
+        {
+            return Err(ControlError::Forbidden(
+                "org_id override not allowed in platform mode".to_string(),
+            ));
+        }
+
+        Ok(tenant_id)
+    }
+
+    /// Returns tenant/project filters scoped for audit reads.
+    ///
+    /// Standalone keeps caller-provided filters. Platform ignores caller filters
+    /// and uses the trusted tenant/project from context.
+    pub fn audit_scope(
+        &self,
+        requested_org: Option<Uuid>,
+        requested_project: Option<Uuid>,
+    ) -> ApiResult<(Option<Uuid>, Option<Uuid>)> {
+        if self.is_platform() {
+            Ok((Some(self.tenant_uuid()?), Some(self.project_uuid()?)))
+        } else {
+            Ok((requested_org, requested_project))
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AuthError(pub String);
@@ -60,10 +217,9 @@ where
                 .await
                 .map_err(|_| AuthError("Authenticator not configured".to_string()))?;
 
-        let Extension(mode): Extension<AuthMode> =
-            Extension::from_request_parts(parts, state)
-                .await
-                .map_err(|_| AuthError("Auth mode not configured".to_string()))?;
+        let Extension(mode): Extension<AuthMode> = Extension::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AuthError("Auth mode not configured".to_string()))?;
 
         let token = parts
             .headers
@@ -77,12 +233,19 @@ where
             .await
             .map_err(|_| AuthError("Invalid credentials".to_string()))?;
 
-        let ctx = match mode {
-            AuthMode::Standalone => build_standalone_context(base_ctx, parts),
-            AuthMode::Platform => build_platform_context(parts)?,
+        let (ctx, capabilities) = match mode {
+            AuthMode::Standalone => (build_standalone_context(base_ctx, parts), Vec::new()),
+            AuthMode::Platform => {
+                let platform = PlatformHeaders::from_request(parts)?;
+                (platform.context, platform.capabilities)
+            }
         };
 
-        Ok(AuthContext(ctx))
+        Ok(AuthContext {
+            ctx,
+            mode,
+            capabilities,
+        })
     }
 }
 
@@ -101,61 +264,69 @@ fn build_standalone_context(mut base_ctx: RequestContext, parts: &Parts) -> Requ
     base_ctx
 }
 
-/// Builds context for platform mode.
+/// Trusted-header adapter for gateway-managed deployments.
 ///
-/// `x-tenant-id` and `x-project-id` are **required**; the request is rejected
-/// with 400 (mapped to 401 via `AuthError`) if either is absent or empty.
-/// Additional trusted headers are parsed if present.
-///
-/// The authenticator has already confirmed the gateway service token is valid
-/// before this function is called, so we trust all gateway-provided headers.
-fn build_platform_context(parts: &Parts) -> Result<RequestContext, AuthError> {
-    let tenant_id = header_str(parts, "x-tenant-id")
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AuthError(
-                "Platform mode requires x-tenant-id header (Agnitiv org_id)".to_string(),
-            )
-        })?;
+/// Transport headers are intentionally kept private to this boundary. The rest
+/// of zradar sees only [`RequestContext`] plus zradar-native [`Capability`] values.
+struct PlatformHeaders {
+    context: RequestContext,
+    capabilities: Vec<Capability>,
+}
 
-    let project_id = header_str(parts, "x-project-id")
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AuthError(
-                "Platform mode requires x-project-id header (validated project ID)".to_string(),
-            )
-        })?;
+impl PlatformHeaders {
+    /// Builds neutral request context and capabilities from trusted gateway headers.
+    fn from_request(parts: &Parts) -> Result<Self, AuthError> {
+        let tenant_id = header_str(parts, "x-tenant-id")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .ok_or_else(|| AuthError("Platform mode requires tenant context header".to_string()))?;
 
-    let user_id = header_str(parts, "x-user-id")
-        .unwrap_or("")
-        .to_string();
+        let project_id = header_str(parts, "x-project-id")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                AuthError("Platform mode requires project context header".to_string())
+            })?;
 
-    let org_slug = header_str(parts, "x-org-slug")
-        .unwrap_or("")
-        .to_string();
+        let capabilities = header_str(parts, "x-zradar-capabilities")
+            .map(parse_capabilities)
+            .unwrap_or_default();
 
-    let permissions = header_str(parts, "x-permissions")
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .map(str::to_string)
-                .collect()
+        Ok(Self {
+            context: RequestContext {
+                tenant_id,
+                project_id,
+            },
+            capabilities,
         })
-        .unwrap_or_default();
+    }
+}
 
-    Ok(RequestContext {
-        tenant_id,
-        project_id,
-        user_id,
-        org_slug,
-        permissions,
-    })
+/// Parses zradar-native capability wire values.
+fn parse_capabilities(header: &str) -> Vec<Capability> {
+    header
+        .split(',')
+        .filter_map(|p| match p.trim() {
+            "read_traces" => Some(Capability::ReadTraces),
+            "read_dashboards" => Some(Capability::ReadDashboards),
+            "read_logs" => Some(Capability::ReadLogs),
+            "read_metrics" => Some(Capability::ReadMetrics),
+            "read_settings" => Some(Capability::ReadSettings),
+            "write_settings" => Some(Capability::WriteSettings),
+            "admin" => Some(Capability::Admin),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Reads a header value as a `&str` from the request parts.
 fn header_str<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
     parts.headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Parses a UUID string from trusted request context.
+pub fn parse_ctx_uuid(value: &str, field: &str) -> ApiResult<Uuid> {
+    Uuid::parse_str(value).map_err(|_| {
+        ControlError::InvalidInput(format!("invalid {field} in request context: {value}"))
+    })
 }

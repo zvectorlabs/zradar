@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 use crate::helpers::ApiClient;
 
 /// Default poll timeout used by the convenience helpers below.
-pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(10);
+///
+/// WAL-disabled test config writes directly to Parquet; 30s covers Parquet
+/// registration + DataFusion listing under parallel functional test runs.
+pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default interval between poll attempts.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(200);

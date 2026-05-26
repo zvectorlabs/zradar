@@ -262,7 +262,8 @@ pub fn list_segments(dir: &Path) -> Result<Vec<u64>, SegmentError> {
         let entry = entry?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if name_str.ends_with(".seg") && name_str != "current.seg"
+        if name_str.ends_with(".seg")
+            && name_str != "current.seg"
             && let Ok(id) = name_str.trim_end_matches(".seg").parse::<u64>()
         {
             segments.push(id);
@@ -276,8 +277,8 @@ pub fn list_segments(dir: &Path) -> Result<Vec<u64>, SegmentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use crate::record::{SignalType, WalRecord};
+    use bytes::Bytes;
     use tempfile::TempDir;
 
     fn sample_record(offset: u64) -> WalRecord {

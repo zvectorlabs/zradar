@@ -1,4 +1,7 @@
-use api::http::{AuthContext, AuthMode};
+use api::{
+    errors::ControlError,
+    http::{AuthContext, AuthMode, Capability},
+};
 use async_trait::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::Request;
@@ -70,9 +73,10 @@ async fn test_standalone_accepts_valid_bearer_token() {
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
     assert!(result.is_ok());
-    let AuthContext(ctx) = result.unwrap();
-    assert_eq!(ctx.tenant_id, Uuid::nil().to_string());
-    assert_eq!(ctx.project_id, Uuid::nil().to_string());
+    let auth = result.unwrap();
+    assert_eq!(auth.mode(), AuthMode::Standalone);
+    assert_eq!(auth.context().tenant_id, Uuid::nil().to_string());
+    assert_eq!(auth.context().project_id, Uuid::nil().to_string());
 }
 
 #[tokio::test]
@@ -93,9 +97,10 @@ async fn test_standalone_applies_tenant_and_project_header_overrides() {
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
     assert!(result.is_ok());
-    let AuthContext(ctx) = result.unwrap();
-    assert_eq!(ctx.tenant_id, tenant_id);
-    assert_eq!(ctx.project_id, project_id);
+    let auth = result.unwrap();
+    assert_eq!(auth.mode(), AuthMode::Standalone);
+    assert_eq!(auth.context().tenant_id, tenant_id);
+    assert_eq!(auth.context().project_id, project_id);
 }
 
 #[tokio::test]
@@ -124,7 +129,10 @@ async fn test_standalone_rejects_missing_authorization_header() {
     );
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
-    assert!(result.is_err(), "Expected rejection when Authorization header is absent");
+    assert!(
+        result.is_err(),
+        "Expected rejection when Authorization header is absent"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -135,14 +143,13 @@ async fn test_standalone_rejects_missing_authorization_header() {
 async fn test_platform_accepts_valid_gateway_token_with_required_headers() {
     let tenant_id = Uuid::new_v4().to_string();
     let project_id = Uuid::new_v4().to_string();
-    let user_id = Uuid::new_v4().to_string();
     let request = Request::builder()
         .header("authorization", "Bearer gw-token")
         .header("x-tenant-id", &tenant_id)
         .header("x-project-id", &project_id)
-        .header("x-user-id", &user_id)
+        .header("x-user-id", &Uuid::new_v4().to_string())
         .header("x-org-slug", "acme")
-        .header("x-permissions", "zradar:traces:read,zradar:dashboards:read")
+        .header("x-zradar-capabilities", "read_traces,read_dashboards")
         .body(())
         .unwrap();
     let mut parts = make_parts_with_extensions(
@@ -152,13 +159,16 @@ async fn test_platform_accepts_valid_gateway_token_with_required_headers() {
     );
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
-    assert!(result.is_ok(), "Expected success with valid gateway token and required headers");
-    let AuthContext(ctx) = result.unwrap();
-    assert_eq!(ctx.tenant_id, tenant_id);
-    assert_eq!(ctx.project_id, project_id);
-    assert_eq!(ctx.user_id, user_id);
-    assert_eq!(ctx.org_slug, "acme");
-    assert_eq!(ctx.permissions, vec!["zradar:traces:read", "zradar:dashboards:read"]);
+    assert!(
+        result.is_ok(),
+        "Expected success with valid gateway token and required headers"
+    );
+    let auth = result.unwrap();
+    assert_eq!(auth.mode(), AuthMode::Platform);
+    assert_eq!(auth.context().tenant_id, tenant_id);
+    assert_eq!(auth.context().project_id, project_id);
+    assert!(auth.require(Capability::ReadTraces).is_ok());
+    assert!(auth.require(Capability::ReadDashboards).is_ok());
 }
 
 #[tokio::test]
@@ -194,7 +204,10 @@ async fn test_platform_rejects_missing_x_tenant_id() {
     );
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
-    assert!(result.is_err(), "Expected rejection when x-tenant-id is missing");
+    assert!(
+        result.is_err(),
+        "Expected rejection when x-tenant-id is missing"
+    );
 }
 
 #[tokio::test]
@@ -212,7 +225,10 @@ async fn test_platform_rejects_missing_x_project_id() {
     );
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
-    assert!(result.is_err(), "Expected rejection when x-project-id is missing");
+    assert!(
+        result.is_err(),
+        "Expected rejection when x-project-id is missing"
+    );
 }
 
 #[tokio::test]
@@ -234,14 +250,14 @@ async fn test_platform_rejects_empty_x_tenant_id() {
 }
 
 #[tokio::test]
-async fn test_platform_accepts_no_permissions_header() {
+async fn test_platform_accepts_no_capabilities_header_but_authorization_denies() {
     let tenant_id = Uuid::new_v4().to_string();
     let project_id = Uuid::new_v4().to_string();
     let request = Request::builder()
         .header("authorization", "Bearer gw-token")
         .header("x-tenant-id", &tenant_id)
         .header("x-project-id", &project_id)
-        // No x-permissions header
+        // No x-zradar-capabilities header
         .body(())
         .unwrap();
     let mut parts = make_parts_with_extensions(
@@ -252,8 +268,10 @@ async fn test_platform_accepts_no_permissions_header() {
 
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
     assert!(result.is_ok());
-    let AuthContext(ctx) = result.unwrap();
-    assert!(ctx.permissions.is_empty());
+    let auth = result.unwrap();
+    assert_eq!(auth.mode(), AuthMode::Platform);
+    let err = auth.require(Capability::ReadTraces).unwrap_err();
+    assert!(matches!(err, ControlError::Forbidden(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -278,5 +296,8 @@ async fn test_platform_spoofed_context_headers_rejected_without_valid_gateway_to
     // Even though the context headers are present, the invalid service token
     // must be rejected before any context is parsed.
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
-    assert!(result.is_err(), "Expected rejection: user JWT must not bypass platform gateway token check");
+    assert!(
+        result.is_err(),
+        "Expected rejection: user JWT must not bypass platform gateway token check"
+    );
 }

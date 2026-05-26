@@ -1,20 +1,20 @@
+use std::sync::Arc;
 /// WAL flusher: drains committed records into the Parquet write path.
 ///
 /// Runs as a background task, reading records past the checkpoint and
 /// forwarding them to `TelemetryWriter`. After each batch completes,
 /// the checkpoint advances.
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use crate::Wal;
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::record::WalRecord;
 use crate::segment::{self, SegmentReader};
-use crate::Wal;
 
 /// Callback trait for the flusher to write records to Parquet.
 ///
@@ -106,9 +106,12 @@ impl WalFlusher {
         let active_seg_id = self.wal.active_segment_id().await;
 
         // Determine the starting point. `None` checkpoint means nothing has been flushed.
-        let start_segment_id = checkpoint.as_ref().map_or(0, |cp| cp.last_flushed_segment_id);
+        let start_segment_id = checkpoint
+            .as_ref()
+            .map_or(0, |cp| cp.last_flushed_segment_id);
         // `None` means all offsets should be flushed; we use a sentinel.
-        let already_flushed_offset: Option<u64> = checkpoint.as_ref().map(|cp| cp.last_flushed_offset);
+        let already_flushed_offset: Option<u64> =
+            checkpoint.as_ref().map(|cp| cp.last_flushed_offset);
 
         // Process segments from checkpoint forward
         for &seg_id in &segments {
@@ -144,7 +147,10 @@ impl WalFlusher {
                     }
                     Ok(None) => break,
                     Err(segment::SegmentError::Record(_)) => {
-                        debug!(segment_id = seg_id, "torn write at tail during flush, stopping");
+                        debug!(
+                            segment_id = seg_id,
+                            "torn write at tail during flush, stopping"
+                        );
                         break;
                     }
                     Err(e) => {
@@ -260,7 +266,10 @@ mod tests {
         assert_eq!(total_records, 5, "all 5 records should be flushed");
 
         // Checkpoint should be advanced
-        let cp = checkpoint_store.load().unwrap().expect("checkpoint should exist");
+        let cp = checkpoint_store
+            .load()
+            .unwrap()
+            .expect("checkpoint should exist");
         assert_eq!(cp.last_flushed_offset, 4); // offsets 0..4
 
         cancel.cancel();

@@ -47,15 +47,23 @@ pub enum RecordReadError {
     #[error("torn write: incomplete length prefix at offset {offset}")]
     TornWriteIncomplete { offset: u64 },
 
-    #[error("torn write: CRC mismatch at offset {offset} (expected {expected:#010x}, got {actual:#010x})")]
+    #[error(
+        "torn write: CRC mismatch at offset {offset} (expected {expected:#010x}, got {actual:#010x})"
+    )]
     TornWriteCrcMismatch {
         offset: u64,
         expected: u32,
         actual: u32,
     },
 
-    #[error("torn write: record truncated at offset {offset}, need {need} bytes but only {have} available")]
-    TornWriteTruncated { offset: u64, need: usize, have: usize },
+    #[error(
+        "torn write: record truncated at offset {offset}, need {need} bytes but only {have} available"
+    )]
+    TornWriteTruncated {
+        offset: u64,
+        need: usize,
+        have: usize,
+    },
 
     #[error("invalid signal type {value} at offset {offset}")]
     InvalidSignalType { offset: u64, value: u8 },
@@ -135,12 +143,11 @@ impl WalRecord {
 
         let mut cursor = &body[4..]; // skip CRC
         let signal_byte = cursor.get_u8();
-        let signal_type = SignalType::from_u8(signal_byte).ok_or(
-            RecordReadError::InvalidSignalType {
+        let signal_type =
+            SignalType::from_u8(signal_byte).ok_or(RecordReadError::InvalidSignalType {
                 offset: segment_offset,
                 value: signal_byte,
-            },
-        )?;
+            })?;
 
         let mut tenant_bytes = [0u8; 16];
         tenant_bytes.copy_from_slice(&cursor[..16]);
