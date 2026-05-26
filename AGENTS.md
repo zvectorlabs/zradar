@@ -122,7 +122,7 @@ make test
 
 Storage responsibilities:
 
-- PostgreSQL: control plane data, organizations, projects, API keys, audit logs, and queues by default.
+- PostgreSQL: control plane data — file_list, stream_stats, settings, retention policies, and audit logs.
 - Parquet: telemetry data such as traces, spans, metrics, and logs.
 
 ## Rust Best Practices

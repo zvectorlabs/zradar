@@ -19,7 +19,7 @@ make functional_tests
 | Category | Tests | What |
 |----------|-------|------|
 | Health | 4 | `/health`, `/health/ready`, `/health/live` |
-| Auth | 7 | Login, registration, JWT tokens, permissions |
+| Auth | 7 | API key validation, invalid key rejection, permissions |
 | Organizations | 7 | CRUD operations, validation, hierarchy |
 | Projects | 6 | CRUD operations, org relationships |
 | API Keys | 7 | Create, revoke, lifecycle, `zvr_` prefix |
@@ -71,6 +71,10 @@ The script times out if `/health` never responds. Typical causes:
 - **Port in use** — Another process on 9015/9016. Run `lsof -i:9015` to check.
 
 **Tip:** Run with `-r` to keep Docker running and iterate: `make functional_tests_fast -r`
+
+**Common failure: `ResourceExhausted` / "Ingestion backpressure: disk usage … exceeds threshold"**
+
+The OTLP circuit breaker rejects writes when the filesystem hosting `parquet_data_dir` is above 95% (default). Free disk space on that volume and re-run the suite.
 
 ## 🛠️ Test Structure
 

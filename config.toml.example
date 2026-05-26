@@ -3,12 +3,12 @@
 #
 # DOCKER PORT MAPPINGS (when using docker-compose.yml):
 # - PostgreSQL:  localhost:9001 → postgres:5432
-# - OTLP gRPC:   localhost:9005 → zradar:4317
+# - OTLP gRPC:   localhost:4317 → zradar:4317
 # - Admin API:   localhost:8081 → zradar:8081
 #
 # USAGE SCENARIOS:
 # 1. Inside Docker container: Use service names (postgres)
-# 2. Local app → Docker services: Use localhost with mapped ports (5432, 4317, 8081)
+# 2. Local app → Docker services: Use localhost with mapped ports
 # 3. Native development: Use localhost with standard ports (5432)
 
 # OTLP gRPC port (standard OpenTelemetry port)
@@ -17,7 +17,7 @@ otlp_port = 4317
 # Admin API HTTP port
 admin_api_port = 8081
 
-# PostgreSQL configuration (control plane: file_list, stream_stats, settings, retention, audit)
+# PostgreSQL configuration (control plane: file_list, settings, retention, audit)
 # Connection string is provided via DATABASE_URL environment variable.
 #
 # Docker (inside container): postgresql://zradar:zradar_password@postgres:5432/zradar
@@ -26,21 +26,28 @@ admin_api_port = 8081
 [postgres]
 max_connections = 20
 
-# Admin API JWT configuration
-[admin_api]
-jwt_secret = "your-secret-key-change-this-in-production"
-jwt_expiry_hours = 24
-
-# Authentication configuration
+# Authentication: static API keys from config (standalone mode).
+#
+# Each key grants access to the specified tenant and project.
+# Use a unique key per project. Keys are validated on every request.
 [auth]
-enabled = true
-cache_ttl_seconds = 300
+# mode = "standalone"  # default — API keys from [[api_keys]] below
 
-# Static API keys (development). Production should use a managed identity provider.
+# Set to false to accept OTLP without an API key (open ingest). Default: true.
+# otlp_require_api_key = false
+
+[[api_keys]]
+key        = "zk_live_changeme"
+tenant_id  = "my-org"
+project_id = "my-project"
+name       = "default"
+
+# Add more keys for additional projects:
 # [[api_keys]]
-# key   = "dev-key"
-# org   = "00000000-0000-0000-0000-000000000000"
-# scope = "ingest,query"
+# key        = "zk_live_another"
+# tenant_id  = "my-org"
+# project_id = "another-project"
+# name       = "another"
 
 # Ingestion / storage configuration
 [ingestor]
@@ -50,20 +57,21 @@ cache_ttl_seconds = 300
 [ingestor.storage.local]
 path = "./data/trace-batches"
 
-[ingestor.storage.s3]
-bucket = "zradar-traces-prod"
-region = "us-east-1"
+# Uncomment for S3-compatible storage:
+# [ingestor.storage.s3]
+# bucket = "zradar-traces-prod"
+# region = "us-east-1"
 
 # Parquet ingestion lifecycle (write buffer, compaction, memory cache, fsync).
 # All of these are durability/throughput tuning knobs; the durable-by-default
 # path is direct write (no buffer) with fsync + atomic rename.
 [ingestor.storage.parquet]
-write_buffer_enabled        = false
-write_buffer_size_bytes     = 8388608   # 8 MiB
+write_buffer_enabled             = false
+write_buffer_size_bytes          = 8388608   # 8 MiB
 write_buffer_flush_interval_secs = 30
-fsync_before_rename         = true
-compaction_enabled          = false
-memory_cache_enabled        = false
+fsync_before_rename              = true
+compaction_enabled               = false
+memory_cache_enabled             = false
 
 # Database migrations.
 # - On first run (empty database), migrations always run.
@@ -74,12 +82,12 @@ auto_migrate = true
 # ============================================================================
 # ENVIRONMENT VARIABLE OVERRIDES
 # ============================================================================
-# DATABASE_URL              - PostgreSQL connection string (overrides [postgres])
-# STORAGE_TYPE              - "local" or "s3"     (overrides [ingestor].storage_type)
-# RUST_LOG                  - Logging level       (e.g., "info,zradar=debug")
-# OTLP_PORT                 - OTLP gRPC port      (overrides otlp_port)
-# QUERY_API_PORT            - Admin API port      (overrides admin_api_port)
-# AUTO_MIGRATE              - Enable PostgreSQL auto-migrations (true/false)
+# DATABASE_URL    - PostgreSQL connection string (overrides [postgres])
+# STORAGE_TYPE    - "local" or "s3"     (overrides [ingestor].storage_type)
+# RUST_LOG        - Logging level       (e.g., "info,zradar=debug")
+# OTLP_PORT       - OTLP gRPC port      (overrides otlp_port)
+# QUERY_API_PORT  - Admin API port      (overrides admin_api_port)
+# AUTO_MIGRATE    - Enable PostgreSQL auto-migrations (true/false)
 #
 # Docker Compose example:
 #   DATABASE_URL: postgres://zradar:zradar_password@postgres:5432/zradar

@@ -1,13 +1,13 @@
 use axum::{Extension, Router, routing::get};
 use std::sync::Arc;
-use zradar_traits::Authenticator;
+use zradar_traits::AdminAuthorizer;
 
 use super::handlers::{SettingsState, get_project_settings, update_project_settings};
 use crate::http::AuthMode;
 
 pub fn settings_router(
     state: Arc<SettingsState>,
-    auth: Arc<dyn Authenticator>,
+    auth: Arc<dyn AdminAuthorizer>,
     auth_mode: AuthMode,
 ) -> Router {
     Router::new()

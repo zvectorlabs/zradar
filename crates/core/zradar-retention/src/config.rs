@@ -6,8 +6,8 @@
 //!
 //! Configuration is populated either from the server's static config
 //! (`ParquetStorageConfig::retention_days` as the global default) or from
-//! an Agnitiv platform config push (Phase 04).  Until Phase 04 lands, calling
-//! code sets the global default and leaves org-level overrides empty.
+//! a platform config push (Phase 04). Until Phase 04 lands, calling code sets
+//! the global default and leaves org-level overrides empty.
 
 use std::collections::HashMap;
 

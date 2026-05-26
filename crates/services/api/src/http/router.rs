@@ -5,7 +5,7 @@
 
 use axum::{Extension, Router};
 use std::sync::Arc;
-use zradar_traits::Authenticator;
+use zradar_traits::AdminAuthorizer;
 
 use crate::http::auth_extractor::AuthMode;
 use crate::telemetry::QueryService;
@@ -20,11 +20,11 @@ use crate::telemetry::QueryService;
 /// - `/api/v1/metrics*`      — metrics query
 ///
 /// Authentication:
-/// - Standalone: `Authorization: Bearer <api-key>`
+/// - Standalone: `Authorization: Bearer <api-key>` validated by `AdminAuthorizer`
 /// - Platform:   `Authorization: Bearer <gateway-service-token>` + trusted context headers
 pub fn create_admin_router(
     query_service: Arc<QueryService>,
-    auth: Arc<dyn Authenticator>,
+    auth: Arc<dyn AdminAuthorizer>,
     auth_mode: AuthMode,
 ) -> Router {
     Router::new()

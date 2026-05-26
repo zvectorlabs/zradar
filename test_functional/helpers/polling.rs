@@ -13,9 +13,9 @@ use crate::helpers::ApiClient;
 
 /// Default poll timeout used by the convenience helpers below.
 ///
-/// WAL-disabled test config writes directly to Parquet; 30s covers Parquet
-/// registration + DataFusion listing under parallel functional test runs.
-pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Set to 0 so tests fail immediately on the first miss rather than waiting.
+/// Raise this only if a test genuinely requires async propagation time.
+pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(0);
 
 /// Default interval between poll attempts.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(200);

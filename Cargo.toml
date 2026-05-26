@@ -12,6 +12,12 @@ members = [
     "crates/plugins/zradar-plugin-postgres",
     "crates/plugins/zradar-plugin-s3",
 
+    # Auth implementations (OSS: config key only)
+    "crates/auth/zradar-auth-config",
+
+    # Runtime (pluggable server startup)
+    "crates/runtime/zradar-runtime",
+
     # Services (business logic)
     "crates/services/api",
     "crates/services/api-optel",

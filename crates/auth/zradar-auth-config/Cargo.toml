@@ -1,0 +1,12 @@
+[package]
+name = "zradar-auth-config"
+version = "0.1.0"
+edition.workspace = true
+description = "Static API-key authenticator for OSS zradar standalone mode"
+license = "Apache-2.0"
+
+[dependencies]
+zradar-models = { path = "../../core/zradar-models" }
+zradar-traits = { path = "../../core/zradar-traits" }
+async-trait = { workspace = true }
+anyhow = { workspace = true }

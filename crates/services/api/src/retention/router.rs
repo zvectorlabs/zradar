@@ -2,7 +2,7 @@
 
 use axum::{Extension, Router, routing};
 use std::sync::Arc;
-use zradar_traits::Authenticator;
+use zradar_traits::AdminAuthorizer;
 
 use super::handlers::{
     RetentionState, get_project_retention, get_retention_config, list_retention_configs,
@@ -16,10 +16,10 @@ use crate::http::AuthMode;
 /// - `POST /api/v1/admin/retention/run`   — trigger cleanup
 /// - `PUT  /api/v1/admin/retention/config` — update org retention config
 ///
-/// Authentication: `Authorization: Bearer <api-key>` on every request.
+/// Authentication: `Authorization: Bearer <api-key>` validated by `AdminAuthorizer`.
 pub fn retention_router(
     state: Arc<RetentionState>,
-    auth: Arc<dyn Authenticator>,
+    auth: Arc<dyn AdminAuthorizer>,
     auth_mode: AuthMode,
 ) -> Router {
     Router::new()
