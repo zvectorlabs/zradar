@@ -146,8 +146,10 @@ async fn test_analytics_group_by_agent_name() -> Result<()> {
         assert!(item.get("timestamp").is_some(), "Should have timestamp");
         assert!(item.get("value").is_some(), "Should have value");
 
-        if let Some(groups) = item.get("groups")
-            && let Some(agent) = groups.get("agent_name").and_then(|v| v.as_str())
+        if let Some(agent) = item
+            .get("groups")
+            .and_then(|g| g.get("agent_name"))
+            .and_then(|v| v.as_str())
         {
             found_agents.insert(agent.to_string());
         }
@@ -213,8 +215,10 @@ async fn test_analytics_group_by_llm_model() -> Result<()> {
 
     let mut found_models = std::collections::HashSet::new();
     for item in &items {
-        if let Some(groups) = item.get("groups")
-            && let Some(model) = groups.get("llm_model").and_then(|v| v.as_str())
+        if let Some(model) = item
+            .get("groups")
+            .and_then(|g| g.get("llm_model"))
+            .and_then(|v| v.as_str())
         {
             found_models.insert(model.to_string());
         }
