@@ -125,8 +125,8 @@ async fn test_log_service_name_filter() -> Result<()> {
         .export_logs(env.otlp.build_log_request("svc-beta", 9, "from beta"))
         .await?;
 
-    let url = format!("/api/v1/logs?service_name=svc-alpha");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/logs?service_name=svc-alpha";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     for item in &items {
         assert_eq!(
@@ -201,8 +201,8 @@ async fn test_log_search_text_filter() -> Result<()> {
         )
         .await?;
 
-    let url = format!("/api/v1/logs?search_text=unique-needle-xyz");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/logs?search_text=unique-needle-xyz";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     assert!(!items.is_empty(), "Expected to find log with search_text");
     for item in &items {

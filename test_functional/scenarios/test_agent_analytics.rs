@@ -70,7 +70,7 @@ async fn test_analytics_default_trace_count() -> Result<()> {
             .build_multi_span_trace_with_attributes("analytics-service", &trace_id, span_defs);
     env.otlp.export_traces(request).await?;
 
-    let trace_id_hex = hex::encode(&trace_id);
+    let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
     // Call analytics without group_by — should return daily trace counts
@@ -146,10 +146,10 @@ async fn test_analytics_group_by_agent_name() -> Result<()> {
         assert!(item.get("timestamp").is_some(), "Should have timestamp");
         assert!(item.get("value").is_some(), "Should have value");
 
-        if let Some(groups) = item.get("groups") {
-            if let Some(agent) = groups.get("agent_name").and_then(|v| v.as_str()) {
-                found_agents.insert(agent.to_string());
-            }
+        if let Some(groups) = item.get("groups")
+            && let Some(agent) = groups.get("agent_name").and_then(|v| v.as_str())
+        {
+            found_agents.insert(agent.to_string());
         }
     }
 
@@ -213,10 +213,10 @@ async fn test_analytics_group_by_llm_model() -> Result<()> {
 
     let mut found_models = std::collections::HashSet::new();
     for item in &items {
-        if let Some(groups) = item.get("groups") {
-            if let Some(model) = groups.get("llm_model").and_then(|v| v.as_str()) {
-                found_models.insert(model.to_string());
-            }
+        if let Some(groups) = item.get("groups")
+            && let Some(model) = groups.get("llm_model").and_then(|v| v.as_str())
+        {
+            found_models.insert(model.to_string());
         }
     }
 
@@ -258,7 +258,7 @@ async fn test_analytics_total_tokens_by_agent() -> Result<()> {
             .build_multi_span_trace_with_attributes("analytics-service", &trace_id, span_defs);
     env.otlp.export_traces(request).await?;
 
-    let trace_id_hex = hex::encode(&trace_id);
+    let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
     // Query total_tokens by agent_name

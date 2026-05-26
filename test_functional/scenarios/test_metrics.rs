@@ -22,8 +22,8 @@ async fn test_gauge_metric_ingestion_and_retrieval() -> Result<()> {
     env.otlp.export_metrics(request).await?;
     println!("✅ Gauge metric sent via OTLP");
 
-    let url = format!("/api/v1/metrics?metric_name=cpu.usage");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/metrics?metric_name=cpu.usage";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     let m = &items[0];
     assert_eq!(m["metric_name"].as_str().unwrap(), "cpu.usage");
@@ -52,8 +52,8 @@ async fn test_counter_metric_type() -> Result<()> {
         .build_counter_metric("test-service", "requests.total", 100.0);
     env.otlp.export_metrics(request).await?;
 
-    let url = format!("/api/v1/metrics?metric_name=requests.total");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/metrics?metric_name=requests.total";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     assert_eq!(items[0]["metric_type"].as_str().unwrap(), "COUNTER");
 
@@ -97,8 +97,8 @@ async fn test_metric_name_filter() -> Result<()> {
         .export_metrics(env.otlp.build_gauge_metric("svc", "metric.beta", 2.0))
         .await?;
 
-    let url = format!("/api/v1/metrics?metric_name=metric.alpha");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/metrics?metric_name=metric.alpha";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     // All returned items must be for metric.alpha only
     for item in &items {
@@ -126,8 +126,8 @@ async fn test_metric_service_name_filter() -> Result<()> {
         .export_metrics(env.otlp.build_gauge_metric("service-b", "cpu.usage", 20.0))
         .await?;
 
-    let url = format!("/api/v1/metrics?service_name=service-a");
-    let items = wait_for_items_default(&env.client, &url).await?;
+    let url = "/api/v1/metrics?service_name=service-a";
+    let items = wait_for_items_default(&env.client, url).await?;
 
     for item in &items {
         assert_eq!(
@@ -156,11 +156,11 @@ async fn test_metric_series_query() -> Result<()> {
     }
 
     // Wait for at least one metric point to land before querying series
-    let items_url = format!("/api/v1/metrics?metric_name=latency.p99");
-    wait_for_items_default(&env.client, &items_url).await?;
+    let items_url = "/api/v1/metrics?metric_name=latency.p99";
+    wait_for_items_default(&env.client, items_url).await?;
 
-    let series_url = format!("/api/v1/metrics/series?metric_name=latency.p99");
-    let response = env.client.get(&series_url).await?;
+    let series_url = "/api/v1/metrics/series?metric_name=latency.p99";
+    let response = env.client.get(series_url).await?;
     let status = response.status();
     if status != 200 {
         let body = response.text().await.unwrap_or_default();
@@ -200,12 +200,12 @@ async fn test_metrics_tenant_isolation() -> Result<()> {
     env_a.otlp.export_metrics(request).await?;
 
     // Wait for project A's metric to land
-    let url_a = format!("/api/v1/metrics?metric_name=isolated.metric");
-    wait_for_items_default(&env_a.client, &url_a).await?;
+    let url_a = "/api/v1/metrics?metric_name=isolated.metric";
+    wait_for_items_default(&env_a.client, url_a).await?;
 
     // Project B must not see Project A's metrics
-    let url_b = format!("/api/v1/metrics?metric_name=isolated.metric");
-    let response = env_b.client.get(&url_b).await?;
+    let url_b = "/api/v1/metrics?metric_name=isolated.metric";
+    let response = env_b.client.get(url_b).await?;
     assert_eq!(response.status(), 200);
     let data: Value = response.json().await?;
     let items = data["items"].as_array().unwrap();

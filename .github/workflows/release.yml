@@ -32,10 +32,10 @@ jobs:
           workspaces: .
 
       - name: Unit tests
-        run: cargo test --workspace --exclude test_functional
+        run: cargo test --workspace --exclude zradar-functional-tests
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude test_functional --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude zradar-functional-tests --all-targets -- -D warnings
 
   build:
     name: Build ${{ matrix.suffix }}

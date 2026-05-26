@@ -20,6 +20,8 @@ fn str_val(s: &str) -> AnyValue {
     }
 }
 
+type SpanDefRef<'a> = (&'a str, &'a [u8; 8], Option<&'a [u8; 8]>);
+
 // ============================================================================
 // Agent Workflow Tests
 // ============================================================================
@@ -956,7 +958,6 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
                 .with_project_id(pid.to_string());
 
             let root_span_id = TestDataGenerator::span_id();
-            let _spans: Vec<(&str, &[u8; 8], Option<&[u8; 8]>)> = Vec::new();
 
             // We need owned span IDs that live long enough
             let child_ids: Vec<[u8; 8]> = (0..children_per_trace)
@@ -971,7 +972,7 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
 
             // We need to use build_multi_span_trace which takes SpanDef
             // But SpanDef borrows, so we build inline
-            let mut span_defs: Vec<(&str, &[u8; 8], Option<&[u8; 8]>)> = Vec::new();
+            let mut span_defs: Vec<SpanDefRef<'_>> = Vec::new();
             span_defs.push((&root_name, &root_span_id, None));
             for c in 0..children_per_trace {
                 span_defs.push((&child_names[c], &child_ids[c], Some(&root_span_id)));
@@ -1196,7 +1197,7 @@ async fn test_filter_spans_by_agent_name() -> Result<()> {
 
     // Test filtering by agent_name = "planner"
     let filter_url = "/api/v1/spans?agent_name=planner";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for planner agent");
     for span in &spans {
@@ -1213,7 +1214,7 @@ async fn test_filter_spans_by_agent_name() -> Result<()> {
 
     // Test filtering by agent_name = "researcher"
     let filter_url = "/api/v1/spans?agent_name=researcher";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for researcher agent");
     for span in &spans {
@@ -1272,7 +1273,7 @@ async fn test_filter_spans_by_llm_model() -> Result<()> {
 
     // Test filtering by llm_model = "gpt-4"
     let filter_url = "/api/v1/spans?llm_model=gpt-4";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for gpt-4 model");
     for span in &spans {
@@ -1289,7 +1290,7 @@ async fn test_filter_spans_by_llm_model() -> Result<()> {
 
     // Test filtering by llm_model = "claude-3"
     let filter_url = "/api/v1/spans?llm_model=claude-3";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for claude-3 model");
     for span in &spans {
@@ -1348,7 +1349,7 @@ async fn test_filter_spans_by_session_id() -> Result<()> {
 
     // Test filtering by session_id = "session-123"
     let filter_url = "/api/v1/spans?session_id=session-123";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for session-123");
     for span in &spans {
@@ -1365,7 +1366,7 @@ async fn test_filter_spans_by_session_id() -> Result<()> {
 
     // Test filtering by session_id = "session-456"
     let filter_url = "/api/v1/spans?session_id=session-456";
-    let spans = wait_for_items_default(&env.client, &filter_url).await?;
+    let spans = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!spans.is_empty(), "Should find spans for session-456");
     for span in &spans {
@@ -1428,7 +1429,7 @@ async fn test_filter_traces_by_agent_name() -> Result<()> {
 
     // Test filtering by agent_name = "planner"
     let filter_url = "/api/v1/traces?agent_name=planner";
-    let traces = wait_for_items_default(&env.client, &filter_url).await?;
+    let traces = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!traces.is_empty(), "Should find traces for planner agent");
     for trace in &traces {
@@ -1481,7 +1482,7 @@ async fn test_filter_traces_by_llm_model() -> Result<()> {
 
     // Test filtering by llm_model = "gpt-4"
     let filter_url = "/api/v1/traces?llm_model=gpt-4";
-    let traces = wait_for_items_default(&env.client, &filter_url).await?;
+    let traces = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!traces.is_empty(), "Should find traces for gpt-4 model");
     for trace in &traces {
@@ -1532,7 +1533,7 @@ async fn test_filter_traces_by_session_id() -> Result<()> {
 
     // Test filtering by session_id = "session-123"
     let filter_url = "/api/v1/traces?session_id=session-123";
-    let traces = wait_for_items_default(&env.client, &filter_url).await?;
+    let traces = wait_for_items_default(&env.client, filter_url).await?;
 
     assert!(!traces.is_empty(), "Should find traces for session-123");
     for trace in &traces {
