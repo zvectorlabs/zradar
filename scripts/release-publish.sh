@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/release-publish.sh patch
-#   ./scripts/release-publish.sh 0.2.0
+#   ./scripts/release-publish.sh 0.2.0       # bump to 0.2.0, or tag 0.2.0 if already current
 #   DRY_RUN=1 ./scripts/release-publish.sh patch
 #   SKIP_PUSH=1 ./scripts/release-publish.sh minor
 
@@ -43,25 +43,40 @@ fi
 current="$(tr -d '[:space:]' < VERSION)"
 echo "Current version: ${current}"
 
-if [[ "${DRY_RUN}" == "1" ]]; then
-  echo "[dry-run] ./scripts/bump-version.sh ${BUMP_ARG}"
+resolve_new_version() {
   if [[ "${BUMP_ARG}" =~ ^(patch|minor|major)$ ]]; then
-  case "${BUMP_ARG}" in
-    patch) new_version="$(echo "${current}" | awk -F. '{printf "%d.%d.%d\n", $1, $2, $3+1}')" ;;
-    minor) new_version="$(echo "${current}" | awk -F. '{printf "%d.%d.0\n", $1, $2+1}')" ;;
-    major) new_version="$(echo "${current}" | awk -F. '{printf "%d.0.0\n", $1+1}')" ;;
-  esac
+    case "${BUMP_ARG}" in
+      patch) echo "${current}" | awk -F. '{printf "%d.%d.%d\n", $1, $2, $3+1}' ;;
+      minor) echo "${current}" | awk -F. '{printf "%d.%d.0\n", $1, $2+1}' ;;
+      major) echo "${current}" | awk -F. '{printf "%d.0.0\n", $1+1}' ;;
+    esac
   else
-    new_version="${BUMP_ARG}"
+    echo "${BUMP_ARG}"
   fi
-else
+}
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  new_version="$(resolve_new_version)"
+elif [[ "${BUMP_ARG}" =~ ^(patch|minor|major)$ ]] || [[ "${BUMP_ARG}" != "${current}" ]]; then
   new_version="$(./scripts/bump-version.sh "${BUMP_ARG}")"
+else
+  new_version="${current}"
+  echo "Version already ${new_version}; skipping bump (publish current version)"
 fi
 
 tag="v${new_version}"
 commit_msg="chore(release): ${tag}"
 
-echo "New version: ${new_version} (tag ${tag})"
+echo "Release version: ${new_version} (tag ${tag})"
+
+if git rev-parse "${tag}" >/dev/null 2>&1; then
+  echo "error: tag ${tag} already exists locally; delete it or pick a new version" >&2
+  exit 1
+fi
+if git ls-remote --exit-code --tags "${REMOTE}" "refs/tags/${tag}" >/dev/null 2>&1; then
+  echo "error: tag ${tag} already exists on ${REMOTE}" >&2
+  exit 1
+fi
 
 if [[ "${SKIP_CHECK}" != "1" ]]; then
   echo "Running cargo check..."
@@ -72,8 +87,21 @@ if [[ "${SKIP_CHECK}" != "1" ]]; then
   fi
 fi
 
-run git add VERSION Cargo.toml
-run git commit -m "${commit_msg}"
+version_changes=0
+if ! git diff --quiet VERSION Cargo.toml 2>/dev/null; then
+  version_changes=1
+fi
+if ! git diff --cached --quiet VERSION Cargo.toml 2>/dev/null; then
+  version_changes=1
+fi
+
+if [[ "${version_changes}" == "1" ]]; then
+  run git add VERSION Cargo.toml
+  run git commit -m "${commit_msg}"
+else
+  echo "No VERSION/Cargo.toml changes; skipping version commit"
+fi
+
 run git tag -a "${tag}" -m "zradar ${tag}"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"

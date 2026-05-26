@@ -38,6 +38,7 @@ help:
 	@echo "  make version-bump BUMP=patch   - Bump VERSION + workspace Cargo.toml only"
 	@echo "  make version-bump NEW_VERSION=0.2.0"
 	@echo "  make release-publish BUMP=patch  - Bump, commit, tag vX.Y.Z, push (triggers GitHub release)"
+	@echo "  make release-publish NEW_VERSION=0.3.0 - Tag/push 0.3.0 if VERSION already set"
 	@echo "  make release-publish DRY_RUN=1 BUMP=minor   - Preview without changes"
 	@echo "  make release-publish SKIP_PUSH=1 BUMP=patch - Commit + tag locally only"
 	@echo ""
