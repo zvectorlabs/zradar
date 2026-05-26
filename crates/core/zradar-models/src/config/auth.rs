@@ -27,11 +27,9 @@ pub struct ApiKeyConfig {
 ///   Tenant and project context are bound to the key itself; optional header overrides
 ///   are allowed for intra-org routing.
 ///
-/// - `Platform`: Agnitiv-managed deployment — callers are the Agnitiv gateway.
-///   The gateway presents a shared `gateway_service_token` instead of a user JWT.
-///   Tenant, project, user ID, and permissions are forwarded as trusted headers
-///   (`x-tenant-id`, `x-project-id`, `x-user-id`, `x-permissions`) and must be
-///   present; ad-hoc API key authentication is disabled in this mode.
+/// - `Platform`: Gateway-managed deployment. The gateway presents a shared
+///   `gateway_service_token` and forwards trusted request context headers;
+///   ad-hoc API key authentication is disabled in this mode.
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {

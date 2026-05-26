@@ -21,6 +21,9 @@ pub enum ControlError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
@@ -46,6 +49,7 @@ impl IntoResponse for ControlError {
             }
             ControlError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             ControlError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            ControlError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             ControlError::InvalidInput(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             ControlError::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);

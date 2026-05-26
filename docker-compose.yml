@@ -47,16 +47,16 @@ services:
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
 
       OTLP_PORT: 4317
-      QUERY_API_PORT: 8080
+      QUERY_API_PORT: 8081
     ports:
       - "4317:4317" # OTLP gRPC
-      - "8080:8080" # Admin API
+      - "8081:8081" # Admin API
     volumes:
       # Mount source for hot reload
       - ./crates:/app/crates:ro
       - ./test_functional:/app/test_functional:ro
       - ./Cargo.toml:/app/Cargo.toml:ro
-      - ./Cargo.lock:/app/Cargo.lock:ro
+      - ./Cargo.lock:/app/Cargo.lock:rw
       - ./config.server.toml:/app/config.toml:ro
       - ./data/trace-batches:/app/data/trace-batches
       # Note: Migrations are embedded in the application binary

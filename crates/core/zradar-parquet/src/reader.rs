@@ -166,15 +166,14 @@ impl ParquetFileReader {
             } else {
                 // Normalize relative paths to absolute for DataFusion ListingTable.
                 // If path starts with './', resolve to absolute path.
-                let normalized = if file.file_path.starts_with("./") {
+                if file.file_path.starts_with("./") {
                     std::fs::canonicalize(&file.file_path)
                         .with_context(|| format!("Failed to resolve path: {}", file.file_path))?
                         .to_string_lossy()
                         .into_owned()
                 } else {
                     file.file_path.clone()
-                };
-                normalized
+                }
             };
             self.populate_memory_cache(&local_path).await?;
             resolved_paths.push(local_path);
@@ -228,13 +227,13 @@ impl ParquetFileReader {
     }
 
     async fn populate_memory_cache(&self, local_path: &str) -> anyhow::Result<()> {
-        if let Some(cache) = &self.memory_cache {
-            if cache.get(local_path).is_none() {
-                let bytes = tokio::fs::read(local_path).await.with_context(|| {
-                    format!("Failed to read file for memory cache: {local_path}")
-                })?;
-                cache.insert(local_path, bytes::Bytes::from(bytes));
-            }
+        if let Some(cache) = &self.memory_cache
+            && cache.get(local_path).is_none()
+        {
+            let bytes = tokio::fs::read(local_path)
+                .await
+                .with_context(|| format!("Failed to read file for memory cache: {local_path}"))?;
+            cache.insert(local_path, bytes::Bytes::from(bytes));
         }
         Ok(())
     }

@@ -60,7 +60,6 @@ make migrate
 make sqlx-prepare
 make clean-sqlx
 make db-shell
-make db-gui
 ```
 
 ### Builds and Runtime

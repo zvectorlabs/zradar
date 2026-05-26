@@ -5,7 +5,7 @@ Uses [uv](https://docs.astral.sh/uv/) for dependencies — no manual `venv` or `
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
-- zradar running (OTLP on `localhost:4317`, Admin API on `localhost:8080`)
+- zradar running (OTLP on `localhost:4317`, Admin API on `localhost:8081`)
 
 ## Run
 

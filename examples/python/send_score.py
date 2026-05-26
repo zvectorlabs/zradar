@@ -18,7 +18,7 @@ from opentelemetry.sdk.resources import Resource
 import logging
 
 # Configuration
-ZVRADAR_URL = "http://localhost:8080"
+ZVRADAR_URL = "http://localhost:8081"
 ZVRADAR_OTLP = "http://localhost:4317"
 API_KEY = "your_api_key_here"  # Replace with actual API key
 PROJECT_ID = "your_project_id"  # Replace with actual project ID

@@ -55,8 +55,11 @@ impl WalReplayer {
             return Ok(0);
         }
 
-        let start_segment_id = checkpoint.as_ref().map_or(0, |cp| cp.last_flushed_segment_id);
-        let already_flushed_offset: Option<u64> = checkpoint.as_ref().map(|cp| cp.last_flushed_offset);
+        let start_segment_id = checkpoint
+            .as_ref()
+            .map_or(0, |cp| cp.last_flushed_segment_id);
+        let already_flushed_offset: Option<u64> =
+            checkpoint.as_ref().map(|cp| cp.last_flushed_offset);
 
         let mut total_replayed: u64 = 0;
         let mut last_good_segment_id: u64 = start_segment_id;
@@ -159,10 +162,7 @@ impl WalReplayer {
             })?;
         }
 
-        info!(
-            records_replayed = total_replayed,
-            "WAL replay complete"
-        );
+        info!(records_replayed = total_replayed, "WAL replay complete");
 
         Ok(total_replayed)
     }
@@ -171,9 +171,9 @@ impl WalReplayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Wal;
     use crate::config::WalConfig;
     use crate::record::SignalType;
-    use crate::Wal;
     use bytes::Bytes;
     use std::sync::Mutex;
     use tempfile::TempDir;
@@ -306,7 +306,10 @@ mod tests {
         // Append garbage to simulate torn write
         let seg_path = segment::segment_path(tmp.path(), 0);
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().append(true).open(&seg_path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&seg_path)
+            .unwrap();
         f.write_all(&[0xFF; 20]).unwrap();
 
         let sink = Arc::new(MockSink::default());
@@ -369,6 +372,11 @@ mod tests {
 
         let result = replayer.replay().await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("corrupt segment header"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("corrupt segment header")
+        );
     }
 }

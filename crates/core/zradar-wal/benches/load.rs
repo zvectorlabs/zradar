@@ -10,9 +10,9 @@ use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
 use bytes::Bytes;
+use zradar_wal::Wal;
 use zradar_wal::config::WalConfig;
 use zradar_wal::record::{SignalType, WalRecord};
-use zradar_wal::Wal;
 
 fn make_record(payload_size: usize) -> WalRecord {
     WalRecord {

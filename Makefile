@@ -1,4 +1,4 @@
-.PHONY: help dev start stop restart logs clean test functional_tests build-prod prod deploy
+.PHONY: help dev dev-logs run-dev start stop restart logs clean test test-all functional_tests functional_tests_fast build-prod prod deploy
 
 # Default target
 help:
@@ -6,7 +6,8 @@ help:
 	@echo ""
 	@echo "📦 Development Commands (default):"
 	@echo "  make dev            - Start development environment (hot reload, default)"
-	@echo "  make dev-logs       - Start development and follow logs (Ctrl+C to stop)"
+	@echo "  make run-dev        - Start development and follow logs (Ctrl+C to stop)"
+	@echo "  make dev-logs       - Alias for run-dev"
 	@echo "  make start          - Alias for 'make dev'"
 	@echo "  make stop           - Stop all services"
 	@echo "  make restart        - Restart development environment"
@@ -18,9 +19,10 @@ help:
 	@echo ""
 	@echo "🧪 Testing Commands:"
 	@echo "  make test           - Run unit tests"
-	@echo "  make functional_tests - Run functional tests (fresh Docker)"
-	@echo "  make functional_tests_fast - Run functional tests (reuse Docker)"
-	@echo "  make functional_tests_fast TEST_NAME=test_name - Run specific test"
+	@echo "  make functional_tests_fast - Functional tests, reuse Docker (use for repeated runs)"
+	@echo "  make functional_tests_fast TEST_NAME=test_log_ingestion - Single test filter"
+	@echo "  make functional_tests - Functional tests, fresh Docker (CI / clean slate)"
+	@echo "  make test-all       - Unit tests + functional_tests (fresh Docker)"
 	@echo ""
 	@echo "🏗️  Production Build Commands:"
 	@echo "  make build-prod     - Build production Docker images"
@@ -34,7 +36,6 @@ help:
 	@echo "  make health         - Check service health"
 	@echo "  make shell          - Open shell in zradar container"
 	@echo "  make db-shell       - Open PostgreSQL shell"
-	@echo "  make db-gui         - Open database GUI (Adminer)"
 	@echo "  make migrate        - Run database migrations"
 	@echo "  make sqlx-prepare   - Generate SQLx offline query cache"
 	@echo "  make clean-sqlx     - Regenerate SQLx cache"
@@ -52,9 +53,11 @@ dev: hook ensure-sqlx-cache
 	@./docker-start.sh dev
 
 # Start development environment and follow logs
-dev-logs: hook ensure-sqlx-cache
+run-dev: hook ensure-sqlx-cache
 	@echo "🔧 Starting development environment with log following..."
 	@./docker-start.sh dev follow
+
+dev-logs: run-dev
 
 # Ensure SQLx cache exists (generate if missing)
 ensure-sqlx-cache:
@@ -90,7 +93,7 @@ status:
 	@docker-compose ps
 	@echo ""
 	@echo "🏥 Health Check:"
-	@curl -s http://localhost:8080/health | jq . 2>/dev/null || echo "❌ Health check failed or jq not installed"
+	@curl -s http://localhost:8081/health | jq . 2>/dev/null || echo "❌ Health check failed or jq not installed"
 
 # Clean containers and Docker volumes (keeps data/ directory)
 clean:
@@ -164,16 +167,23 @@ test:
 	@echo "🧪 Running unit tests..."
 	@cargo test
 
-# Run functional tests (fresh Docker environment)
+# Run unit tests + functional tests (fresh Docker environment)
+test-all: test functional_tests
+	@echo "✅ All tests passed"
+
+# Run functional tests (fresh Docker — tears down containers after run)
 functional_tests:
 	@echo "🧪 Running functional tests (fresh Docker)..."
 	@chmod +x scripts/test-rust-functional.sh
 	@./scripts/test-rust-functional.sh
 
-# Run functional tests with Docker reuse (faster)
-# Usage: make functional_tests_fast TEST_NAME=test_name
+# Run functional tests with Docker/server reuse (preferred for local iteration).
+# Reuses Postgres + test server when healthy; leaves containers up for the next run.
+# Usage:
+#   make functional_tests_fast
+#   make functional_tests_fast TEST_NAME=test_log_ingestion_and_retrieval
 functional_tests_fast:
-	@echo "🧪 Running functional tests (reuse Docker)..."
+	@echo "🧪 Running functional tests (reuse mode — fast iteration)..."
 	@chmod +x scripts/test-rust-functional.sh
 	@./scripts/test-rust-functional.sh -r $(if $(TEST_NAME),$(TEST_NAME),)
 
@@ -184,8 +194,8 @@ functional_tests_fast:
 # Check service health
 health:
 	@echo "💓 Checking health..."
-	@curl -sf http://localhost:8080/health && echo "✅ Service healthy" || echo "❌ Service not healthy"
-	@curl -sf http://localhost:8080/health/ready && echo "✅ Service ready" || echo "❌ Service not ready"
+	@curl -sf http://localhost:8081/health && echo "✅ Service healthy" || echo "❌ Service not healthy"
+	@curl -sf http://localhost:8081/health/ready && echo "✅ Service ready" || echo "❌ Service not ready"
 
 # Open shell in zradar container
 shell:
@@ -194,11 +204,6 @@ shell:
 # Open PostgreSQL shell
 db-shell:
 	@docker-compose exec postgres psql -U zradar -d zradar
-
-# Open database GUI (Adminer)
-db-gui:
-	@echo "🗄️  Opening Adminer at http://localhost:8081"
-	@open http://localhost:8081 2>/dev/null || xdg-open http://localhost:8081 2>/dev/null || echo "Open http://localhost:8081 in your browser"
 
 # Run database migrations
 migrate:

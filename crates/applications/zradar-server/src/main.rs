@@ -347,13 +347,13 @@ async fn main() -> Result<()> {
         .unwrap_or_default();
 
     let otlp_writer: Arc<dyn zradar_traits::TelemetryWriter> = if wal_config.enabled {
+        use zradar_wal::Wal;
         use zradar_wal::checkpoint::CheckpointStore;
         use zradar_wal::config::WalConfig;
         use zradar_wal::flusher::{FlushSink, WalFlusher};
         use zradar_wal::janitor::WalJanitor;
         use zradar_wal::record::{SignalType, WalRecord};
         use zradar_wal::replay::WalReplayer;
-        use zradar_wal::Wal;
 
         let wal_dir = std::path::PathBuf::from(&wal_config.wal_dir);
         tokio::fs::create_dir_all(&wal_dir).await?;
@@ -412,8 +412,8 @@ async fn main() -> Result<()> {
                             metrics.extend(batch);
                         }
                         SignalType::Log => {
-                            let batch: Vec<LogRecord> =
-                                serde_json::from_slice(&rec.payload).map_err(|e| {
+                            let batch: Vec<LogRecord> = serde_json::from_slice(&rec.payload)
+                                .map_err(|e| {
                                     anyhow::anyhow!(
                                         "WAL flush: failed to deserialize logs at offset {}: {}",
                                         rec.assigned_offset,
@@ -456,9 +456,7 @@ async fn main() -> Result<()> {
         }
 
         // Open WAL for new writes
-        let wal = Arc::new(
-            Wal::open(&wal_dir, native_config.clone(), cancel_token.clone()).await?,
-        );
+        let wal = Arc::new(Wal::open(&wal_dir, native_config.clone(), cancel_token.clone()).await?);
 
         // Start flusher
         let flusher = WalFlusher::new(
@@ -494,17 +492,12 @@ async fn main() -> Result<()> {
 
         #[async_trait::async_trait]
         impl zradar_traits::TelemetryWriter for WalTelemetryWriter {
-            async fn insert_spans(
-                &self,
-                spans: &[zradar_models::Span],
-            ) -> anyhow::Result<()> {
+            async fn insert_spans(&self, spans: &[zradar_models::Span]) -> anyhow::Result<()> {
                 if spans.is_empty() {
                     return Ok(());
                 }
-                let tenant_id = uuid::Uuid::parse_str(&spans[0].tenant_id)
-                    .unwrap_or_default();
-                let project_id = uuid::Uuid::parse_str(&spans[0].project_id)
-                    .unwrap_or_default();
+                let tenant_id = uuid::Uuid::parse_str(&spans[0].tenant_id).unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&spans[0].project_id).unwrap_or_default();
                 let payload = serde_json::to_vec(spans)?;
                 let record = WalRecord {
                     signal_type: SignalType::Trace,
@@ -514,12 +507,15 @@ async fn main() -> Result<()> {
                     assigned_offset: 0,
                     payload: bytes::Bytes::from(payload),
                 };
-                let handle = self.wal.append(record).await.map_err(|e| {
-                    anyhow::anyhow!("WAL append failed: {}", e)
-                })?;
-                handle.durable().await.map_err(|e| {
-                    anyhow::anyhow!("WAL fsync failed: {}", e)
-                })?;
+                let handle = self
+                    .wal
+                    .append(record)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL append failed: {}", e))?;
+                handle
+                    .durable()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL fsync failed: {}", e))?;
                 Ok(())
             }
 
@@ -530,10 +526,8 @@ async fn main() -> Result<()> {
                 if metrics.is_empty() {
                     return Ok(());
                 }
-                let tenant_id = uuid::Uuid::parse_str(&metrics[0].tenant_id)
-                    .unwrap_or_default();
-                let project_id = uuid::Uuid::parse_str(&metrics[0].project_id)
-                    .unwrap_or_default();
+                let tenant_id = uuid::Uuid::parse_str(&metrics[0].tenant_id).unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&metrics[0].project_id).unwrap_or_default();
                 let payload = serde_json::to_vec(metrics)?;
                 let record = WalRecord {
                     signal_type: SignalType::Metric,
@@ -543,26 +537,24 @@ async fn main() -> Result<()> {
                     assigned_offset: 0,
                     payload: bytes::Bytes::from(payload),
                 };
-                let handle = self.wal.append(record).await.map_err(|e| {
-                    anyhow::anyhow!("WAL append failed: {}", e)
-                })?;
-                handle.durable().await.map_err(|e| {
-                    anyhow::anyhow!("WAL fsync failed: {}", e)
-                })?;
+                let handle = self
+                    .wal
+                    .append(record)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL append failed: {}", e))?;
+                handle
+                    .durable()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL fsync failed: {}", e))?;
                 Ok(())
             }
 
-            async fn insert_logs(
-                &self,
-                logs: &[zradar_models::LogRecord],
-            ) -> anyhow::Result<()> {
+            async fn insert_logs(&self, logs: &[zradar_models::LogRecord]) -> anyhow::Result<()> {
                 if logs.is_empty() {
                     return Ok(());
                 }
-                let tenant_id = uuid::Uuid::parse_str(&logs[0].tenant_id)
-                    .unwrap_or_default();
-                let project_id = uuid::Uuid::parse_str(&logs[0].project_id)
-                    .unwrap_or_default();
+                let tenant_id = uuid::Uuid::parse_str(&logs[0].tenant_id).unwrap_or_default();
+                let project_id = uuid::Uuid::parse_str(&logs[0].project_id).unwrap_or_default();
                 let payload = serde_json::to_vec(logs)?;
                 let record = WalRecord {
                     signal_type: SignalType::Log,
@@ -572,12 +564,15 @@ async fn main() -> Result<()> {
                     assigned_offset: 0,
                     payload: bytes::Bytes::from(payload),
                 };
-                let handle = self.wal.append(record).await.map_err(|e| {
-                    anyhow::anyhow!("WAL append failed: {}", e)
-                })?;
-                handle.durable().await.map_err(|e| {
-                    anyhow::anyhow!("WAL fsync failed: {}", e)
-                })?;
+                let handle = self
+                    .wal
+                    .append(record)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL append failed: {}", e))?;
+                handle
+                    .durable()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("WAL fsync failed: {}", e))?;
                 Ok(())
             }
         }
@@ -695,19 +690,21 @@ async fn main() -> Result<()> {
         AuthMode::Standalone
     };
     let admin_api = create_admin_router(query_service, authenticator.clone(), auth_mode);
-    let retention_api = retention_router(retention_state, authenticator.clone());
+    let retention_api = retention_router(retention_state, authenticator.clone(), auth_mode);
     let settings_api = settings_router(
         Arc::new(SettingsState {
             repository: settings_repo,
             audit_log_repo: Some(audit_log_repo.clone()),
         }),
         authenticator.clone(),
+        auth_mode,
     );
     let audit_api = audit_router(
         Arc::new(AuditState {
             repository: audit_log_repo,
         }),
         authenticator,
+        auth_mode,
     );
     let metrics_state = wal_metrics.clone();
     let metrics_route = axum::routing::get(move || {

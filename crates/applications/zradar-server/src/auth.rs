@@ -26,7 +26,6 @@ impl ConfigAuthenticator {
                     RequestContext {
                         tenant_id: k.tenant_id.clone(),
                         project_id: k.project_id.clone(),
-                        ..Default::default()
                     },
                 )
             })
@@ -85,8 +84,14 @@ impl Authenticator for PlatformAuthenticator {
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         // Still run comparison on `a` vs itself to consume similar time
-        let _ = a.iter().zip(a.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+        let _ = a
+            .iter()
+            .zip(a.iter())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y));
         return false;
     }
-    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }

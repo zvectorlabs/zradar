@@ -25,7 +25,9 @@ async fn test_complete_observability_workflow() -> Result<()> {
 
     let trace_id_hex = hex::encode(trace_id);
     let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
-    let spans = trace_data["spans"].as_array().expect("trace should have spans");
+    let spans = trace_data["spans"]
+        .as_array()
+        .expect("trace should have spans");
     assert_eq!(spans.len(), 1, "workflow should persist exactly one span");
     let span = &spans[0];
     assert_eq!(span["trace_id"].as_str().unwrap(), trace_id_hex);
@@ -69,7 +71,9 @@ async fn test_multi_service_observability() -> Result<()> {
     for (trace_id, service, operation) in expected {
         let trace_id_hex = hex::encode(trace_id);
         let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
-        let spans = trace_data["spans"].as_array().expect("trace should have spans");
+        let spans = trace_data["spans"]
+            .as_array()
+            .expect("trace should have spans");
         assert_eq!(spans.len(), 1, "each synthetic trace should have one span");
         assert_eq!(spans[0]["service_name"].as_str().unwrap(), service);
         assert_eq!(spans[0]["operation_name"].as_str().unwrap(), operation);

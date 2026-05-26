@@ -42,16 +42,16 @@ impl CircuitBreaker {
     }
 
     pub async fn check(&self) -> Result<(), String> {
-        if let Some(disk_usage) = disk_usage_percent(&self.data_dir).await {
-            if disk_usage > self.max_disk_usage_percent {
-                return Err(format!("disk usage {}% exceeds threshold", disk_usage));
-            }
+        if let Some(disk_usage) = disk_usage_percent(&self.data_dir).await
+            && disk_usage > self.max_disk_usage_percent
+        {
+            return Err(format!("disk usage {}% exceeds threshold", disk_usage));
         }
 
-        if let Some(memory_usage) = memory_usage_percent().await {
-            if memory_usage > self.max_memory_usage_percent {
-                return Err(format!("memory usage {}% exceeds threshold", memory_usage));
-            }
+        if let Some(memory_usage) = memory_usage_percent().await
+            && memory_usage > self.max_memory_usage_percent
+        {
+            return Err(format!("memory usage {}% exceeds threshold", memory_usage));
         }
 
         let queue_depth = self.queue_depth.load(Ordering::Relaxed);

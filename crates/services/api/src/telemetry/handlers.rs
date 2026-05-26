@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::{service::QueryService, types::*};
 use crate::errors::Result;
-use crate::http::AuthContext;
+use crate::http::{AuthContext, Capability};
 
 /// Query traces
 #[utoipa::path(
@@ -40,12 +40,12 @@ use crate::http::AuthContext;
 )]
 pub async fn query_traces(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut filters): Query<TraceQueryFilters>,
 ) -> Result<Json<PaginatedResponse<TraceSummary>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into filters
-    filters.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadTraces)?;
+    filters.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let traces = service.query_traces(tenant_id, filters).await?;
     Ok(Json(traces))
 }
@@ -67,12 +67,13 @@ pub async fn query_traces(
 )]
 pub async fn get_trace(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(trace_id): Path<String>,
 ) -> Result<Json<TraceDetail>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
-    let trace = service.get_trace(tenant_id, project_id, &trace_id).await?;
+    auth.require(Capability::ReadTraces)?;
+    let trace = service
+        .get_trace(auth.tenant_uuid()?, auth.project_uuid()?, &trace_id)
+        .await?;
     Ok(Json(trace))
 }
 
@@ -93,12 +94,13 @@ pub async fn get_trace(
 )]
 pub async fn get_span(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(span_id): Path<String>,
 ) -> Result<Json<SpanDetail>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
-    let span = service.get_span(tenant_id, project_id, &span_id).await?;
+    auth.require(Capability::ReadTraces)?;
+    let span = service
+        .get_span(auth.tenant_uuid()?, auth.project_uuid()?, &span_id)
+        .await?;
     Ok(Json(span))
 }
 
@@ -129,12 +131,12 @@ pub async fn get_span(
 )]
 pub async fn query_spans(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut filters): Query<SpanQueryFilters>,
 ) -> Result<Json<PaginatedResponse<SpanDetail>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into filters
-    filters.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadTraces)?;
+    filters.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let spans = service.query_spans(tenant_id, filters).await?;
     Ok(Json(spans))
 }
@@ -159,12 +161,12 @@ pub async fn query_spans(
 )]
 pub async fn get_analytics(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<AnalyticsResult>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into query
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let results = service.get_analytics(tenant_id, query).await?;
     Ok(Json(results))
 }
@@ -187,12 +189,12 @@ pub async fn get_analytics(
 )]
 pub async fn get_metrics_summary(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<MetricsSummary>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into query
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadMetrics)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let summary = service.get_metrics_summary(tenant_id, query).await?;
     Ok(Json(summary))
 }
@@ -216,12 +218,12 @@ pub async fn get_metrics_summary(
 )]
 pub async fn get_top_endpoints(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<TopNQuery>,
 ) -> Result<Json<Vec<TopEndpoint>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into query
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let results = service.get_top_endpoints(tenant_id, query).await?;
     Ok(Json(results))
 }
@@ -244,34 +246,36 @@ pub async fn get_top_endpoints(
 )]
 pub async fn get_error_breakdown(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<ErrorAnalyticsQuery>,
 ) -> Result<Json<Vec<ErrorBreakdown>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into query
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let results = service.get_error_breakdown(tenant_id, query).await?;
     Ok(Json(results))
 }
 
 pub async fn get_llm_analytics(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<LlmAnalytics>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let results = service.get_llm_analytics(tenant_id, query).await?;
     Ok(Json(results))
 }
 
 pub async fn get_agent_analytics(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<AgentAnalytics>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    query.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let results = service.get_agent_analytics(tenant_id, query).await?;
     Ok(Json(results))
 }
@@ -301,12 +305,12 @@ pub async fn get_agent_analytics(
 )]
 pub async fn query_logs(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut filters): Query<LogQueryFilters>,
 ) -> Result<Json<PaginatedResponse<LogDetail>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into filters
-    filters.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadLogs)?;
+    filters.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let logs = service.query_logs(tenant_id, filters).await?;
     Ok(Json(logs))
 }
@@ -328,12 +332,13 @@ pub async fn query_logs(
 )]
 pub async fn get_log(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Path(log_id): Path<String>,
 ) -> Result<Json<LogDetail>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    let project_id = Uuid::parse_str(&ctx.project_id).unwrap_or_else(|_| Uuid::nil());
-    let log = service.get_log(tenant_id, project_id, &log_id).await?;
+    auth.require(Capability::ReadLogs)?;
+    let log = service
+        .get_log(auth.tenant_uuid()?, auth.project_uuid()?, &log_id)
+        .await?;
     Ok(Json(log))
 }
 
@@ -359,12 +364,12 @@ pub async fn get_log(
 )]
 pub async fn query_metrics(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut filters): Query<MetricQueryFilters>,
 ) -> Result<Json<PaginatedResponse<MetricDetail>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into filters
-    filters.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadMetrics)?;
+    filters.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let metrics = service.query_metrics(tenant_id, filters).await?;
     Ok(Json(metrics))
 }
@@ -391,12 +396,12 @@ pub async fn query_metrics(
 )]
 pub async fn query_metric_series(
     State(service): State<Arc<QueryService>>,
-    AuthContext(ctx): AuthContext,
+    auth: AuthContext,
     Query(mut filters): Query<MetricSeriesFilters>,
 ) -> Result<Json<Vec<MetricSeriesPoint>>> {
-    let tenant_id = Uuid::parse_str(&ctx.tenant_id).unwrap_or_else(|_| Uuid::nil());
-    // Inject project_id from headers into filters
-    filters.project_id = ctx.project_id.clone();
+    auth.require(Capability::ReadMetrics)?;
+    filters.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
     let series = service.query_metric_series(tenant_id, filters).await?;
     Ok(Json(series))
 }

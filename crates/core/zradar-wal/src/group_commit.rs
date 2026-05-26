@@ -4,7 +4,7 @@
 /// on the active segment, then notifies all pending callers that their data is durable.
 use std::sync::Arc;
 
-use tokio::sync::{oneshot, Mutex, Notify};
+use tokio::sync::{Mutex, Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 
 /// Handle returned to callers of `Wal::append`. Awaiting `durable()` blocks until the
@@ -88,8 +88,7 @@ impl FsyncQueue {
 
     /// Current fsync count (for testing).
     pub fn fsync_count(&self) -> u64 {
-        self.fsync_count
-            .load(std::sync::atomic::Ordering::Relaxed)
+        self.fsync_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
