@@ -215,6 +215,7 @@ impl ZradarRuntimeBuilder {
                             file_list_repo.clone(),
                             s3.clone(),
                             parquet_lifecycle_config.clone(),
+                            parquet_data_dir.clone(),
                         );
                         tokio::spawn(mover.run(cancel_token.clone()));
                         info!("FileMover background task started");
@@ -316,10 +317,13 @@ impl ZradarRuntimeBuilder {
             EnforcementStrategy::Clamp,
         ));
 
-        let query_service = Arc::new(QueryService::with_enforcer(
-            parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
-            query_enforcer,
-        ));
+        let query_service = Arc::new(
+            QueryService::with_enforcer(
+                parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
+                query_enforcer,
+            )
+            .with_file_list_repo(file_list_repo.clone()),
+        );
 
         info!("Storage layer initialized");
 

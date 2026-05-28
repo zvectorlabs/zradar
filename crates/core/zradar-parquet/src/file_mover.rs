@@ -24,6 +24,7 @@ pub struct FileMover {
     file_list_repo: Arc<dyn FileListRepository>,
     block_storage: Arc<dyn BlockStorage>,
     config: ParquetStorageConfig,
+    data_dir: PathBuf,
 }
 
 impl FileMover {
@@ -32,11 +33,13 @@ impl FileMover {
         file_list_repo: Arc<dyn FileListRepository>,
         block_storage: Arc<dyn BlockStorage>,
         config: ParquetStorageConfig,
+        data_dir: PathBuf,
     ) -> Self {
         Self {
             file_list_repo,
             block_storage,
             config,
+            data_dir,
         }
     }
 
@@ -109,13 +112,9 @@ impl FileMover {
                 }
             };
 
-            // S3 key mirrors the local path structure (strip leading './')
-            let s3_key = file
-                .file_path
-                .trim_start_matches("./")
-                .trim_start_matches('/');
+            let s3_key = s3_key_for_local_file(&self.data_dir, &local_path);
 
-            match self.block_storage.upload(s3_key, &data).await {
+            match self.block_storage.upload(&s3_key, &data).await {
                 Ok(s3_url) => {
                     self.file_list_repo
                         .update_location(file.id, "s3", &s3_url)
@@ -162,6 +161,41 @@ impl FileMover {
 
         Ok(())
     }
+}
+
+fn s3_key_for_local_file(data_dir: &std::path::Path, local_path: &std::path::Path) -> String {
+    let data_dir_key = path_to_s3_key(data_dir);
+    let relative = local_path
+        .strip_prefix(data_dir)
+        .ok()
+        .map(path_to_s3_key)
+        .filter(|key| !key.is_empty());
+
+    let Some(relative_key) = relative else {
+        return path_to_s3_key(local_path);
+    };
+
+    let data_dir_basename = data_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let duplicate_prefix = format!("{data_dir_basename}/");
+    let normalized_relative = relative_key
+        .strip_prefix(&duplicate_prefix)
+        .unwrap_or(&relative_key);
+
+    if data_dir_key.is_empty() {
+        normalized_relative.to_string()
+    } else {
+        format!("{data_dir_key}/{normalized_relative}")
+    }
+}
+
+fn path_to_s3_key(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .replace('\\', "/")
 }
 
 #[cfg(test)]
@@ -236,6 +270,7 @@ mod tests {
             Arc::new(EmptyFileListRepo),
             Arc::new(MockBlockStorage::new()),
             ParquetStorageConfig::default(),
+            PathBuf::from("/tmp/zradar/files"),
         );
 
         // Should succeed with no eligible files
@@ -254,6 +289,7 @@ mod tests {
                 file_push_interval_secs: 3600, // long interval — cancel fires first
                 ..ParquetStorageConfig::default()
             },
+            PathBuf::from("/tmp/zradar/files"),
         );
 
         // Cancel immediately
@@ -262,5 +298,30 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), mover.run(cancel))
             .await
             .expect("FileMover should stop when cancelled");
+    }
+
+    #[test]
+    fn test_s3_key_for_local_file_collapses_duplicate_data_dir_basename() {
+        let key = s3_key_for_local_file(
+            std::path::Path::new("/workspace/zradar-platform/files"),
+            std::path::Path::new(
+                "/workspace/zradar-platform/files/files/tenant/traces/service/2026/05/28/00/a.parquet",
+            ),
+        );
+
+        assert_eq!(
+            key,
+            "workspace/zradar-platform/files/tenant/traces/service/2026/05/28/00/a.parquet"
+        );
+    }
+
+    #[test]
+    fn test_s3_key_for_local_file_preserves_non_duplicate_relative_prefix() {
+        let key = s3_key_for_local_file(
+            std::path::Path::new("/data/parquet"),
+            std::path::Path::new("/data/parquet/files/tenant/traces/a.parquet"),
+        );
+
+        assert_eq!(key, "data/parquet/files/tenant/traces/a.parquet");
     }
 }

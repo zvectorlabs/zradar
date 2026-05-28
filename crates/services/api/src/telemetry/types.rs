@@ -219,6 +219,9 @@ pub struct SpanDetail {
     pub start_time: DateTime<Utc>,
     pub duration_ms: i64,
     pub status: String,
+    pub agent_name: Option<String>,
+    pub agent_type: Option<String>,
+    pub session_id: Option<String>,
     pub attributes: HashMap<String, String>,
 }
 
@@ -268,6 +271,30 @@ pub struct AgentAnalytics {
     pub error_count: i64,
     pub total_tokens: f64,
     pub avg_duration_ms: f64,
+}
+
+/// Storage usage query filters.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct StorageUsageQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub signal_type: Option<String>,
+    pub location: Option<String>,
+}
+
+/// Aggregated storage usage for active telemetry files.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StorageUsage {
+    pub tenant_id: String,
+    pub project_id: String,
+    pub signal_type: String,
+    pub location: String,
+    pub file_count: i64,
+    pub records: i64,
+    pub original_size: i64,
+    pub compressed_size: i64,
 }
 
 /// Paginated response
