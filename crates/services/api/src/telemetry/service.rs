@@ -8,23 +8,31 @@ use super::types::{
     AgentAnalytics, AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown,
     LlmAnalytics, LogDetail, LogQueryFilters, MetricDetail, MetricQueryFilters,
     MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse, SpanDetail, SpanQueryFilters,
-    TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary,
+    StorageUsage, StorageUsageQuery, TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters,
+    TraceSummary,
 };
 use crate::errors::{ControlError, Result};
 
 // Use storage-level traits from zradar-traits
+use zradar_models::FileListFilter;
 use zradar_traits::{
-    AnalyticsQueryFilters as StorageAnalyticsFilters, LogQueryFilters as StorageLogFilters,
-    MetricQueryFilters as StorageMetricFilters, MetricSeriesFilters as StorageMetricSeriesFilters,
-    Pagination, SpanQueryFilters as StorageSpanFilters, TelemetryReader as StorageTelemetryReader,
-    TimeRange, TraceQueryFilters as StorageTraceFilters,
+    AnalyticsQueryFilters as StorageAnalyticsFilters, FileListRepository,
+    LogQueryFilters as StorageLogFilters, MetricQueryFilters as StorageMetricFilters,
+    MetricSeriesFilters as StorageMetricSeriesFilters, Pagination,
+    SpanQueryFilters as StorageSpanFilters, TelemetryReader as StorageTelemetryReader, TimeRange,
+    TraceQueryFilters as StorageTraceFilters,
 };
 
 use zradar_retention::QueryEnforcer;
 
+fn non_empty_string(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
 /// Query service for telemetry operations
 pub struct QueryService {
     pub storage: Arc<dyn StorageTelemetryReader>,
+    pub file_list_repo: Option<Arc<dyn FileListRepository>>,
     /// Optional query enforcer that clamps time ranges to the retention window.
     pub enforcer: Option<Arc<QueryEnforcer>>,
 }
@@ -34,6 +42,7 @@ impl QueryService {
     pub fn new(storage: Arc<dyn StorageTelemetryReader>) -> Self {
         Self {
             storage,
+            file_list_repo: None,
             enforcer: None,
         }
     }
@@ -45,8 +54,15 @@ impl QueryService {
     ) -> Self {
         Self {
             storage,
+            file_list_repo: None,
             enforcer: Some(enforcer),
         }
+    }
+
+    /// Add file metadata access for storage usage analytics.
+    pub fn with_file_list_repo(mut self, file_list_repo: Arc<dyn FileListRepository>) -> Self {
+        self.file_list_repo = Some(file_list_repo);
+        self
     }
 
     /// Apply retention enforcement to a start time (nanoseconds).
@@ -168,6 +184,9 @@ impl QueryService {
                 start_time: DateTime::from_timestamp_nanos(s.timestamp),
                 duration_ms: (s.duration_ns / 1_000_000),
                 status: s.status_code.clone(),
+                agent_name: non_empty_string(s.agent_name.clone()),
+                agent_type: non_empty_string(s.agent_type.clone()),
+                session_id: non_empty_string(s.session_id.clone()),
                 attributes: serde_json::from_str(&s.attributes).unwrap_or_default(),
             })
             .collect();
@@ -247,6 +266,9 @@ impl QueryService {
                 start_time: DateTime::from_timestamp_nanos(s.timestamp),
                 duration_ms: s.duration_ns / 1_000_000,
                 status: s.status_code,
+                agent_name: non_empty_string(s.agent_name),
+                agent_type: non_empty_string(s.agent_type),
+                session_id: non_empty_string(s.session_id),
                 attributes: serde_json::from_str(&s.attributes).unwrap_or_default(),
             })
             .collect();
@@ -287,6 +309,9 @@ impl QueryService {
             start_time: DateTime::from_timestamp_nanos(span.timestamp),
             duration_ms: span.duration_ns / 1_000_000,
             status: span.status_code,
+            agent_name: non_empty_string(span.agent_name),
+            agent_type: non_empty_string(span.agent_type),
+            session_id: non_empty_string(span.session_id),
             attributes: serde_json::from_str(&span.attributes).unwrap_or_default(),
         })
     }
@@ -757,6 +782,62 @@ impl QueryService {
                 }
             })
             .collect())
+    }
+
+    /// Return active storage usage grouped by signal type and storage location.
+    pub async fn get_storage_usage(
+        &self,
+        tenant_id: Uuid,
+        filters: StorageUsageQuery,
+    ) -> Result<Vec<StorageUsage>> {
+        let project_id = Uuid::parse_str(&filters.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        let file_list_repo = self.file_list_repo.as_ref().ok_or_else(|| {
+            ControlError::Internal(
+                "Storage usage metadata repository is not configured".to_string(),
+            )
+        })?;
+
+        let files = file_list_repo
+            .query_files(FileListFilter {
+                tenant_id: Some(tenant_id),
+                project_id: Some(project_id),
+                signal_type: filters.signal_type,
+                time_range_start: filters.start_time.map(|start| start.timestamp_micros()),
+                time_range_end: filters.end_time.map(|end| end.timestamp_micros()),
+                location: filters.location,
+                deleted: Some(false),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| ControlError::Internal(format!("Storage metadata error: {}", e)))?;
+
+        let mut grouped: HashMap<(String, String), StorageUsage> = HashMap::new();
+        for file in files {
+            let key = (file.signal_type.clone(), file.location.clone());
+            let usage = grouped.entry(key).or_insert_with(|| StorageUsage {
+                tenant_id: file.tenant_id.to_string(),
+                project_id: file.project_id.to_string(),
+                signal_type: file.signal_type.clone(),
+                location: file.location.clone(),
+                file_count: 0,
+                records: 0,
+                original_size: 0,
+                compressed_size: 0,
+            });
+            usage.file_count += 1;
+            usage.records += file.records;
+            usage.original_size += file.original_size;
+            usage.compressed_size += file.compressed_size;
+        }
+
+        let mut usage: Vec<StorageUsage> = grouped.into_values().collect();
+        usage.sort_by(|a, b| {
+            a.signal_type
+                .cmp(&b.signal_type)
+                .then_with(|| a.location.cmp(&b.location))
+        });
+        Ok(usage)
     }
 
     /// Query log records

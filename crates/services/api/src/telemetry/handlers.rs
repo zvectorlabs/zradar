@@ -280,6 +280,18 @@ pub async fn get_agent_analytics(
     Ok(Json(results))
 }
 
+pub async fn get_storage_usage(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<StorageUsageQuery>,
+) -> Result<Json<Vec<StorageUsage>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let results = service.get_storage_usage(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
 /// Query log records
 #[utoipa::path(
     get,
