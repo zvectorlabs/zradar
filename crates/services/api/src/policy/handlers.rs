@@ -63,8 +63,10 @@ pub async fn upsert_policies(
     };
     let now = chrono::Utc::now().timestamp_micros();
 
-    for policy_config in body.policies {
-        let policy = Policy {
+    let policies = body
+        .policies
+        .into_iter()
+        .map(|policy_config| Policy {
             id: None,
             tenant_id,
             project_id: policy_config.project_id,
@@ -76,15 +78,15 @@ pub async fn upsert_policies(
             effective_from: policy_config.effective_from.unwrap_or(now),
             effective_until: policy_config.effective_until,
             source: policy_config.source.unwrap_or(PolicySource::Api),
-        };
+        })
+        .collect();
 
-        if let Err(e) = state.store.upsert(policy).await {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
+    if let Err(e) = state.store.upsert_many(policies).await {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response();
     }
 
     StatusCode::NO_CONTENT.into_response()

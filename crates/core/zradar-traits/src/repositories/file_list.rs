@@ -22,6 +22,13 @@ pub trait FileListRepository: Send + Sync {
     /// overlaps the filter's `[time_range_start, time_range_end]`.
     async fn query_files(&self, filter: FileListFilter) -> anyhow::Result<Vec<FileListEntry>>;
 
+    async fn sum_compressed_size(&self, filter: FileListFilter) -> anyhow::Result<i64> {
+        let files = self.query_files(filter).await?;
+        Ok(files.into_iter().fold(0_i64, |total, file| {
+            total.saturating_add(file.compressed_size.max(0))
+        }))
+    }
+
     async fn query_compactable_groups(
         &self,
         cutoff_us: i64,

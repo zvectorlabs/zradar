@@ -1,6 +1,8 @@
 use crate::client::PostgresClient;
 use async_trait::async_trait;
+use chrono::{Datelike, TimeZone};
 use sqlx::{Postgres, QueryBuilder, Row};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -175,10 +177,14 @@ impl PostgresUsageFlushWorker {
 
         loop {
             tokio::select! {
-                Some(event) = self.receiver.recv() => {
+                event = self.receiver.recv() => {
                     match event {
-                        UsageEvent::Write(sample) => writes.push(sample),
-                        UsageEvent::Query(sample) => queries.push(sample),
+                        Some(UsageEvent::Write(sample)) => writes.push(sample),
+                        Some(UsageEvent::Query(sample)) => queries.push(sample),
+                        None => {
+                            self.flush(&mut writes, &mut queries).await;
+                            return;
+                        }
                     }
                     self.record_buffered_samples(writes.len(), queries.len());
                     self.enforce_retry_buffer_limit(&mut writes, &mut queries);
@@ -189,10 +195,6 @@ impl PostgresUsageFlushWorker {
                 }
                 _ = tick.tick() => {
                     self.flush(&mut writes, &mut queries).await;
-                }
-                else => {
-                    self.flush(&mut writes, &mut queries).await;
-                    return;
                 }
             }
         }
@@ -267,19 +269,40 @@ impl PostgresUsageFlushWorker {
         writes: &mut Vec<WriteSample>,
         queries: &mut Vec<QuerySample>,
     ) {
-        while writes.len().saturating_add(queries.len()) > self.retry_buffer_max_samples {
-            if writes.len() >= queries.len() && !writes.is_empty() {
-                writes.remove(0);
-                self.metrics
-                    .write_samples_dropped_total
-                    .fetch_add(1, Ordering::Relaxed);
-            } else if !queries.is_empty() {
-                queries.remove(0);
-                self.metrics
-                    .query_samples_dropped_total
-                    .fetch_add(1, Ordering::Relaxed);
-            } else {
-                break;
+        let total_len = writes.len().saturating_add(queries.len());
+        if total_len > self.retry_buffer_max_samples {
+            let mut remaining = total_len - self.retry_buffer_max_samples;
+            let mut write_len = writes.len();
+            let mut query_len = queries.len();
+            let mut writes_to_drop = 0_usize;
+            let mut queries_to_drop = 0_usize;
+
+            while remaining > 0 {
+                if write_len >= query_len && write_len > 0 {
+                    writes_to_drop += 1;
+                    write_len -= 1;
+                } else if query_len > 0 {
+                    queries_to_drop += 1;
+                    query_len -= 1;
+                } else {
+                    break;
+                }
+                remaining -= 1;
+            }
+
+            if writes_to_drop > 0 {
+                writes.drain(0..writes_to_drop);
+                self.metrics.write_samples_dropped_total.fetch_add(
+                    u64::try_from(writes_to_drop).unwrap_or(u64::MAX),
+                    Ordering::Relaxed,
+                );
+            }
+            if queries_to_drop > 0 {
+                queries.drain(0..queries_to_drop);
+                self.metrics.query_samples_dropped_total.fetch_add(
+                    u64::try_from(queries_to_drop).unwrap_or(u64::MAX),
+                    Ordering::Relaxed,
+                );
             }
         }
         self.record_buffered_samples(writes.len(), queries.len());
@@ -313,6 +336,7 @@ impl PostgresDecisionAuditSink {
 #[async_trait]
 impl ThresholdSink for PostgresThresholdSink {
     async fn emit(&self, event: ThresholdEvent) -> Result<(), PolicyError> {
+        let period_start = threshold_dedupe_period_start(&event);
         sqlx::query(
             r#"
             INSERT INTO threshold_dedupe (
@@ -342,7 +366,7 @@ impl ThresholdSink for PostgresThresholdSink {
         .bind(operation_kind(event.operation))
         .bind(event.limit_kind)
         .bind(i16::try_from(event.threshold_pct).unwrap_or(i16::MAX))
-        .bind(event.period_start.unwrap_or(0))
+        .bind(period_start)
         .bind(event.emitted_at)
         .execute(self.client.pool())
         .await
@@ -1040,158 +1064,307 @@ async fn insert_query_samples(
     Ok(())
 }
 
+struct IngestionDailyAggregate {
+    tenant_id: Uuid,
+    project_id: Uuid,
+    signal_kind: &'static str,
+    day_micros: i64,
+    compressed_bytes: i64,
+    original_bytes: i64,
+    records: i64,
+    file_count: i64,
+    updated_at: i64,
+}
+
+struct QueryDailyAggregate {
+    tenant_id: Uuid,
+    project_id: Uuid,
+    signal_kind: &'static str,
+    day_micros: i64,
+    bytes_scanned: i64,
+    rows_scanned: i64,
+    query_count: i64,
+    updated_at: i64,
+}
+
+struct MonthlyUsageAggregate {
+    tenant_id: Uuid,
+    project_id: Uuid,
+    signal_kind: &'static str,
+    operation: &'static str,
+    period_start_micros: i64,
+    used_bytes: i64,
+    updated_at: i64,
+}
+
 async fn upsert_ingestion_daily(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     samples: &[WriteSample],
 ) -> Result<(), sqlx::Error> {
-    for sample in samples {
-        sqlx::query(
-            r#"
-            INSERT INTO ingestion_daily (
-                tenant_id,
-                project_id,
-                signal_kind,
-                day,
-                compressed_bytes,
-                original_bytes,
-                records,
-                file_count,
-                updated_at
-            ) VALUES (
-                $1,
-                $2,
-                $3,
-                (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date,
-                $5,
-                $6,
-                $7,
-                $8,
-                $9
-            )
-            ON CONFLICT (tenant_id, project_id, signal_kind, day)
-            DO UPDATE SET
-                compressed_bytes = ingestion_daily.compressed_bytes + EXCLUDED.compressed_bytes,
-                original_bytes = ingestion_daily.original_bytes + EXCLUDED.original_bytes,
-                records = ingestion_daily.records + EXCLUDED.records,
-                file_count = ingestion_daily.file_count + EXCLUDED.file_count,
-                updated_at = GREATEST(ingestion_daily.updated_at, EXCLUDED.updated_at)
-            "#,
-        )
-        .bind(sample.tenant_id)
-        .bind(sample.project_id)
-        .bind(signal_kind(sample.signal))
-        .bind(sample.flushed_at)
-        .bind(sample.compressed_bytes)
-        .bind(sample.original_bytes.unwrap_or(0))
-        .bind(sample.records)
-        .bind(1_i64)
-        .bind(sample.flushed_at)
-        .execute(&mut **tx)
-        .await?;
+    let aggregates = aggregate_ingestion_daily(samples);
+    if aggregates.is_empty() {
+        return Ok(());
     }
 
+    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
+        r#"
+        INSERT INTO ingestion_daily (
+            tenant_id,
+            project_id,
+            signal_kind,
+            day,
+            compressed_bytes,
+            original_bytes,
+            records,
+            file_count,
+            updated_at
+        )
+        "#,
+    );
+
+    builder.push_values(aggregates.iter(), |mut b, aggregate| {
+        b.push_bind(aggregate.tenant_id)
+            .push_bind(aggregate.project_id)
+            .push_bind(aggregate.signal_kind)
+            .push("(to_timestamp(")
+            .push_bind(aggregate.day_micros)
+            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
+            .push_bind(aggregate.compressed_bytes)
+            .push_bind(aggregate.original_bytes)
+            .push_bind(aggregate.records)
+            .push_bind(aggregate.file_count)
+            .push_bind(aggregate.updated_at);
+    });
+
+    builder.push(
+        r#"
+        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        DO UPDATE SET
+            compressed_bytes = ingestion_daily.compressed_bytes + EXCLUDED.compressed_bytes,
+            original_bytes = ingestion_daily.original_bytes + EXCLUDED.original_bytes,
+            records = ingestion_daily.records + EXCLUDED.records,
+            file_count = ingestion_daily.file_count + EXCLUDED.file_count,
+            updated_at = GREATEST(ingestion_daily.updated_at, EXCLUDED.updated_at)
+        "#,
+    );
+
+    builder.build().execute(&mut **tx).await?;
+
     Ok(())
+}
+
+fn aggregate_ingestion_daily(samples: &[WriteSample]) -> Vec<IngestionDailyAggregate> {
+    let mut aggregates = HashMap::<(Uuid, Uuid, &'static str, i64), IngestionDailyAggregate>::new();
+
+    for sample in samples {
+        let signal_kind = signal_kind(sample.signal);
+        let day_micros = day_start_micros(sample.flushed_at);
+        let entry = aggregates
+            .entry((sample.tenant_id, sample.project_id, signal_kind, day_micros))
+            .or_insert(IngestionDailyAggregate {
+                tenant_id: sample.tenant_id,
+                project_id: sample.project_id,
+                signal_kind,
+                day_micros,
+                compressed_bytes: 0,
+                original_bytes: 0,
+                records: 0,
+                file_count: 0,
+                updated_at: sample.flushed_at,
+            });
+
+        entry.compressed_bytes = entry
+            .compressed_bytes
+            .saturating_add(sample.compressed_bytes);
+        entry.original_bytes = entry
+            .original_bytes
+            .saturating_add(sample.original_bytes.unwrap_or(0));
+        entry.records = entry.records.saturating_add(sample.records);
+        entry.file_count = entry.file_count.saturating_add(1);
+        entry.updated_at = entry.updated_at.max(sample.flushed_at);
+    }
+
+    aggregates.into_values().collect()
 }
 
 async fn upsert_query_usage_daily(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     samples: &[QuerySample],
 ) -> Result<(), sqlx::Error> {
-    for sample in samples {
-        sqlx::query(
-            r#"
-            INSERT INTO query_usage_daily (
-                tenant_id,
-                project_id,
-                signal_kind,
-                day,
-                bytes_scanned,
-                rows_scanned,
-                query_count,
-                updated_at
-            ) VALUES (
-                $1,
-                $2,
-                $3,
-                (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date,
-                $5,
-                $6,
-                $7,
-                $8
-            )
-            ON CONFLICT (tenant_id, project_id, signal_kind, day)
-            DO UPDATE SET
-                bytes_scanned = query_usage_daily.bytes_scanned + EXCLUDED.bytes_scanned,
-                rows_scanned = query_usage_daily.rows_scanned + EXCLUDED.rows_scanned,
-                query_count = query_usage_daily.query_count + EXCLUDED.query_count,
-                updated_at = GREATEST(query_usage_daily.updated_at, EXCLUDED.updated_at)
-            "#,
-        )
-        .bind(sample.tenant_id)
-        .bind(sample.project_id)
-        .bind(signal_kind(sample.signal))
-        .bind(sample.submitted_at)
-        .bind(sample.bytes_scanned)
-        .bind(sample.rows_scanned.unwrap_or(0))
-        .bind(1_i64)
-        .bind(sample.submitted_at)
-        .execute(&mut **tx)
-        .await?;
+    let aggregates = aggregate_query_daily(samples);
+    if aggregates.is_empty() {
+        return Ok(());
     }
 
+    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
+        r#"
+        INSERT INTO query_usage_daily (
+            tenant_id,
+            project_id,
+            signal_kind,
+            day,
+            bytes_scanned,
+            rows_scanned,
+            query_count,
+            updated_at
+        )
+        "#,
+    );
+
+    builder.push_values(aggregates.iter(), |mut b, aggregate| {
+        b.push_bind(aggregate.tenant_id)
+            .push_bind(aggregate.project_id)
+            .push_bind(aggregate.signal_kind)
+            .push("(to_timestamp(")
+            .push_bind(aggregate.day_micros)
+            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
+            .push_bind(aggregate.bytes_scanned)
+            .push_bind(aggregate.rows_scanned)
+            .push_bind(aggregate.query_count)
+            .push_bind(aggregate.updated_at);
+    });
+
+    builder.push(
+        r#"
+        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        DO UPDATE SET
+            bytes_scanned = query_usage_daily.bytes_scanned + EXCLUDED.bytes_scanned,
+            rows_scanned = query_usage_daily.rows_scanned + EXCLUDED.rows_scanned,
+            query_count = query_usage_daily.query_count + EXCLUDED.query_count,
+            updated_at = GREATEST(query_usage_daily.updated_at, EXCLUDED.updated_at)
+        "#,
+    );
+
+    builder.build().execute(&mut **tx).await?;
+
     Ok(())
+}
+
+fn aggregate_query_daily(samples: &[QuerySample]) -> Vec<QueryDailyAggregate> {
+    let mut aggregates = HashMap::<(Uuid, Uuid, &'static str, i64), QueryDailyAggregate>::new();
+
+    for sample in samples {
+        let signal_kind = signal_kind(sample.signal);
+        let day_micros = day_start_micros(sample.submitted_at);
+        let entry = aggregates
+            .entry((sample.tenant_id, sample.project_id, signal_kind, day_micros))
+            .or_insert(QueryDailyAggregate {
+                tenant_id: sample.tenant_id,
+                project_id: sample.project_id,
+                signal_kind,
+                day_micros,
+                bytes_scanned: 0,
+                rows_scanned: 0,
+                query_count: 0,
+                updated_at: sample.submitted_at,
+            });
+
+        entry.bytes_scanned = entry.bytes_scanned.saturating_add(sample.bytes_scanned);
+        entry.rows_scanned = entry
+            .rows_scanned
+            .saturating_add(sample.rows_scanned.unwrap_or(0));
+        entry.query_count = entry.query_count.saturating_add(1);
+        entry.updated_at = entry.updated_at.max(sample.submitted_at);
+    }
+
+    aggregates.into_values().collect()
 }
 
 async fn upsert_ingest_query_monthly_for_writes(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     samples: &[WriteSample],
 ) -> Result<(), sqlx::Error> {
-    for sample in samples {
-        upsert_monthly_usage(
-            tx,
-            sample.tenant_id,
-            sample.project_id,
-            sample.signal,
-            Operation::Ingest,
-            sample.flushed_at,
-            sample.compressed_bytes,
-        )
-        .await?;
-    }
-
-    Ok(())
+    let aggregates = aggregate_monthly_usage_for_writes(samples);
+    upsert_monthly_usage_aggregates(tx, aggregates).await
 }
 
 async fn upsert_ingest_query_monthly_for_queries(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     samples: &[QuerySample],
 ) -> Result<(), sqlx::Error> {
+    let aggregates = aggregate_monthly_usage_for_queries(samples);
+    upsert_monthly_usage_aggregates(tx, aggregates).await
+}
+
+fn aggregate_monthly_usage_for_writes(samples: &[WriteSample]) -> Vec<MonthlyUsageAggregate> {
+    let mut aggregates =
+        HashMap::<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
+
     for sample in samples {
-        upsert_monthly_usage(
-            tx,
+        aggregate_monthly_usage(
+            &mut aggregates,
+            sample.tenant_id,
+            sample.project_id,
+            sample.signal,
+            Operation::Ingest,
+            sample.flushed_at,
+            sample.compressed_bytes,
+        );
+    }
+
+    aggregates.into_values().collect()
+}
+
+fn aggregate_monthly_usage_for_queries(samples: &[QuerySample]) -> Vec<MonthlyUsageAggregate> {
+    let mut aggregates =
+        HashMap::<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
+
+    for sample in samples {
+        aggregate_monthly_usage(
+            &mut aggregates,
             sample.tenant_id,
             sample.project_id,
             sample.signal,
             Operation::Query,
             sample.submitted_at,
             sample.bytes_scanned,
-        )
-        .await?;
+        );
     }
 
-    Ok(())
+    aggregates.into_values().collect()
 }
 
-async fn upsert_monthly_usage(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
+fn aggregate_monthly_usage(
+    aggregates: &mut HashMap<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>,
     tenant_id: Uuid,
     project_id: Uuid,
     signal: SignalKind,
     operation: Operation,
     observed_at: i64,
     used_bytes: i64,
+) {
+    let period_start_micros = month_start_micros(observed_at);
+    let entry = aggregates
+        .entry((
+            tenant_id,
+            project_id,
+            signal,
+            operation,
+            period_start_micros,
+        ))
+        .or_insert(MonthlyUsageAggregate {
+            tenant_id,
+            project_id,
+            signal_kind: signal_kind(signal),
+            operation: operation_kind(operation),
+            period_start_micros,
+            used_bytes: 0,
+            updated_at: observed_at,
+        });
+
+    entry.used_bytes = entry.used_bytes.saturating_add(used_bytes);
+    entry.updated_at = entry.updated_at.max(observed_at);
+}
+
+async fn upsert_monthly_usage_aggregates(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    aggregates: Vec<MonthlyUsageAggregate>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    if aggregates.is_empty() {
+        return Ok(());
+    }
+
+    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO ingest_query_monthly (
             tenant_id,
@@ -1203,36 +1376,34 @@ async fn upsert_monthly_usage(
             limit_bytes,
             last_breach_at,
             updated_at
-        ) VALUES (
-            $1,
-            $2,
-            $3,
-            $4,
-            date_trunc(
-                'month',
-                to_timestamp($5::double precision / 1000000.0) AT TIME ZONE 'UTC'
-            )::date,
-            $6,
-            $7,
-            NULL,
-            $8
         )
+        "#,
+    );
+
+    builder.push_values(aggregates.iter(), |mut b, aggregate| {
+        b.push_bind(aggregate.tenant_id)
+            .push_bind(aggregate.project_id)
+            .push_bind(aggregate.signal_kind)
+            .push_bind(aggregate.operation)
+            .push("date_trunc('month', to_timestamp(")
+            .push_bind(aggregate.period_start_micros)
+            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
+            .push_bind(aggregate.used_bytes)
+            .push_bind(0_i64)
+            .push_bind(None::<i64>)
+            .push_bind(aggregate.updated_at);
+    });
+
+    builder.push(
+        r#"
         ON CONFLICT (tenant_id, project_id, signal_kind, operation, period_start)
         DO UPDATE SET
             used_bytes = ingest_query_monthly.used_bytes + EXCLUDED.used_bytes,
             updated_at = GREATEST(ingest_query_monthly.updated_at, EXCLUDED.updated_at)
         "#,
-    )
-    .bind(tenant_id)
-    .bind(project_id)
-    .bind(signal_kind(signal))
-    .bind(operation_kind(operation))
-    .bind(observed_at)
-    .bind(used_bytes)
-    .bind(0_i64)
-    .bind(observed_at)
-    .execute(&mut **tx)
-    .await?;
+    );
+
+    builder.build().execute(&mut **tx).await?;
 
     Ok(())
 }
@@ -1244,6 +1415,30 @@ fn operation_kind(operation: Operation) -> &'static str {
         Operation::Store => "store",
         Operation::All => "all",
     }
+}
+
+fn threshold_dedupe_period_start(event: &ThresholdEvent) -> i64 {
+    const HOUR_MICROS: i64 = 3_600 * 1_000_000;
+    event
+        .period_start
+        .unwrap_or_else(|| event.emitted_at - event.emitted_at.rem_euclid(HOUR_MICROS))
+}
+
+fn day_start_micros(timestamp_micros: i64) -> i64 {
+    const DAY_MICROS: i64 = 86_400 * 1_000_000;
+    timestamp_micros - timestamp_micros.rem_euclid(DAY_MICROS)
+}
+
+fn month_start_micros(timestamp_micros: i64) -> i64 {
+    let Some(datetime) = chrono::DateTime::from_timestamp_micros(timestamp_micros) else {
+        return timestamp_micros;
+    };
+
+    chrono::Utc
+        .with_ymd_and_hms(datetime.year(), datetime.month(), 1, 0, 0, 0)
+        .single()
+        .map(|datetime| datetime.timestamp_micros())
+        .unwrap_or(timestamp_micros)
 }
 
 fn parse_operation_kind(value: &str) -> Result<Operation, PolicyError> {
@@ -1275,6 +1470,49 @@ fn parse_signal_kind(value: &str) -> Result<SignalKind, PolicyError> {
 mod tests {
     use super::*;
 
+    fn write_sample(
+        tenant_id: Uuid,
+        project_id: Uuid,
+        signal: SignalKind,
+        compressed_bytes: i64,
+        original_bytes: Option<i64>,
+        records: i64,
+        flushed_at: i64,
+    ) -> WriteSample {
+        WriteSample {
+            tenant_id,
+            project_id,
+            signal,
+            stream_name: None,
+            compressed_bytes,
+            original_bytes,
+            records,
+            file_id: None,
+            decision: DecisionSummary::Allow,
+            flushed_at,
+        }
+    }
+
+    fn query_sample(
+        tenant_id: Uuid,
+        project_id: Uuid,
+        signal: SignalKind,
+        bytes_scanned: i64,
+        rows_scanned: Option<i64>,
+        submitted_at: i64,
+    ) -> QuerySample {
+        QuerySample {
+            tenant_id,
+            project_id,
+            signal,
+            bytes_scanned,
+            rows_scanned,
+            query_time_ms: None,
+            decision: DecisionSummary::Allow,
+            submitted_at,
+        }
+    }
+
     #[test]
     fn signal_kind_round_trips_supported_values() {
         assert_eq!(
@@ -1301,5 +1539,164 @@ mod tests {
         assert!(rendered.contains("zradar_usage_tracker_flush_batches_total 0"));
         assert!(rendered.contains("zradar_usage_tracker_flush_samples_total 0"));
         assert!(rendered.contains("zradar_usage_tracker_buffered_samples 0"));
+    }
+
+    #[test]
+    fn threshold_dedupe_uses_period_or_hour_bucket() {
+        let emitted_at = (5 * 3_600 * 1_000_000) + 123_456;
+        let mut event = ThresholdEvent {
+            tenant_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            signal: SignalKind::Traces,
+            operation: Operation::Ingest,
+            limit_kind: "rate".to_string(),
+            threshold_pct: 70,
+            observed_value: 70,
+            limit_value: 100,
+            period_start: None,
+            emitted_at,
+        };
+
+        assert_eq!(threshold_dedupe_period_start(&event), 5 * 3_600 * 1_000_000);
+
+        event.period_start = Some(42);
+        assert_eq!(threshold_dedupe_period_start(&event), 42);
+    }
+
+    #[test]
+    fn aggregate_ingestion_daily_groups_by_tenant_project_signal_day() {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let day = 2 * 86_400 * 1_000_000;
+        let aggregates = aggregate_ingestion_daily(&[
+            write_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Traces,
+                10,
+                Some(20),
+                3,
+                day + 1,
+            ),
+            write_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Traces,
+                15,
+                None,
+                4,
+                day + 2,
+            ),
+            write_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Logs,
+                7,
+                Some(9),
+                1,
+                day + 3,
+            ),
+        ]);
+
+        assert_eq!(aggregates.len(), 2);
+        let traces = aggregates
+            .iter()
+            .find(|aggregate| aggregate.signal_kind == "traces")
+            .unwrap();
+        assert_eq!(traces.compressed_bytes, 25);
+        assert_eq!(traces.original_bytes, 20);
+        assert_eq!(traces.records, 7);
+        assert_eq!(traces.file_count, 2);
+        assert_eq!(traces.day_micros, day);
+        assert_eq!(traces.updated_at, day + 2);
+    }
+
+    #[test]
+    fn aggregate_query_daily_groups_by_tenant_project_signal_day() {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let day = 3 * 86_400 * 1_000_000;
+        let aggregates = aggregate_query_daily(&[
+            query_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Metrics,
+                10,
+                Some(3),
+                day + 1,
+            ),
+            query_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Metrics,
+                15,
+                None,
+                day + 2,
+            ),
+            query_sample(tenant_id, project_id, SignalKind::Logs, 7, Some(1), day + 3),
+        ]);
+
+        assert_eq!(aggregates.len(), 2);
+        let metrics = aggregates
+            .iter()
+            .find(|aggregate| aggregate.signal_kind == "metrics")
+            .unwrap();
+        assert_eq!(metrics.bytes_scanned, 25);
+        assert_eq!(metrics.rows_scanned, 3);
+        assert_eq!(metrics.query_count, 2);
+        assert_eq!(metrics.day_micros, day);
+        assert_eq!(metrics.updated_at, day + 2);
+    }
+
+    #[test]
+    fn aggregate_monthly_usage_groups_by_operation_and_month() {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let may_1 = chrono::DateTime::parse_from_rfc3339("2024-05-01T00:00:00Z")
+            .unwrap()
+            .timestamp_micros();
+        let may_15 = chrono::DateTime::parse_from_rfc3339("2024-05-15T12:00:00Z")
+            .unwrap()
+            .timestamp_micros();
+        let may_20 = chrono::DateTime::parse_from_rfc3339("2024-05-20T12:00:00Z")
+            .unwrap()
+            .timestamp_micros();
+
+        let writes = aggregate_monthly_usage_for_writes(&[
+            write_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Traces,
+                10,
+                Some(10),
+                1,
+                may_15,
+            ),
+            write_sample(
+                tenant_id,
+                project_id,
+                SignalKind::Traces,
+                15,
+                Some(15),
+                1,
+                may_20,
+            ),
+        ]);
+        let queries = aggregate_monthly_usage_for_queries(&[
+            query_sample(tenant_id, project_id, SignalKind::Traces, 9, None, may_15),
+            query_sample(tenant_id, project_id, SignalKind::Traces, 11, None, may_20),
+        ]);
+
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].operation, "ingest");
+        assert_eq!(writes[0].period_start_micros, may_1);
+        assert_eq!(writes[0].used_bytes, 25);
+        assert_eq!(writes[0].updated_at, may_20);
+
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].operation, "query");
+        assert_eq!(queries[0].period_start_micros, may_1);
+        assert_eq!(queries[0].used_bytes, 20);
+        assert_eq!(queries[0].updated_at, may_20);
     }
 }

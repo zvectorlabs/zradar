@@ -238,8 +238,8 @@ impl QueryService {
             return Ok(None);
         };
 
-        let files = file_list_repo
-            .query_files(FileListFilter {
+        let compressed_size = file_list_repo
+            .sum_compressed_size(FileListFilter {
                 tenant_id: Some(tenant_id),
                 project_id: Some(project_id),
                 signal_type: Some(signal_type.to_string()),
@@ -251,9 +251,7 @@ impl QueryService {
             .await
             .map_err(|e| ControlError::Internal(format!("Storage metadata error: {}", e)))?;
 
-        Ok(Some(files.into_iter().fold(0_u64, |total, file| {
-            total.saturating_add(u64::try_from(file.compressed_size).unwrap_or(0))
-        })))
+        Ok(Some(u64::try_from(compressed_size).unwrap_or(0)))
     }
 
     async fn record_query_usage(

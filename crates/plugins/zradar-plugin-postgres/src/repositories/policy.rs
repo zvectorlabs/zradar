@@ -169,6 +169,107 @@ impl PolicyStore for PostgresPolicyStore {
         self.refresh().await
     }
 
+    async fn upsert_many(&self, policies: Vec<Policy>) -> Result<(), PolicyError> {
+        if policies.is_empty() {
+            return Ok(());
+        }
+
+        let mut prepared = Vec::with_capacity(policies.len());
+        for policy in policies {
+            let limit_json = serde_json::to_value(&policy.limit)
+                .map_err(|e| PolicyError::Invalid(e.to_string()))?;
+            prepared.push((policy, limit_json));
+        }
+
+        let now = chrono::Utc::now().timestamp_micros();
+        let mut tx = self
+            .client
+            .pool()
+            .begin()
+            .await
+            .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
+
+        for (policy, limit_json) in prepared {
+            let limit_kind = limit_kind(&policy.limit);
+            if policy.project_id.is_some() {
+                sqlx::query(
+                    r#"
+                    INSERT INTO policies (
+                        tenant_id, project_id, signal_kind, operation, limit_kind,
+                        limit_json, grace_pct, hard_block_pct, effective_from,
+                        effective_until, source, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (tenant_id, project_id, signal_kind, operation, limit_kind)
+                    WHERE project_id IS NOT NULL AND effective_until IS NULL
+                    DO UPDATE SET
+                        limit_json = EXCLUDED.limit_json,
+                        grace_pct = EXCLUDED.grace_pct,
+                        hard_block_pct = EXCLUDED.hard_block_pct,
+                        effective_from = EXCLUDED.effective_from,
+                        effective_until = EXCLUDED.effective_until,
+                        source = EXCLUDED.source,
+                        updated_at = EXCLUDED.updated_at
+                    "#,
+                )
+                .bind(policy.tenant_id)
+                .bind(policy.project_id)
+                .bind(signal_kind(policy.signal))
+                .bind(operation(policy.operation))
+                .bind(limit_kind)
+                .bind(limit_json)
+                .bind(i16::from(policy.grace_pct))
+                .bind(i16::from(policy.hard_block_pct))
+                .bind(policy.effective_from)
+                .bind(policy.effective_until)
+                .bind(policy_source(policy.source))
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO policies (
+                        tenant_id, project_id, signal_kind, operation, limit_kind,
+                        limit_json, grace_pct, hard_block_pct, effective_from,
+                        effective_until, source, updated_at
+                    ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    ON CONFLICT (tenant_id, signal_kind, operation, limit_kind)
+                    WHERE project_id IS NULL AND effective_until IS NULL
+                    DO UPDATE SET
+                        limit_json = EXCLUDED.limit_json,
+                        grace_pct = EXCLUDED.grace_pct,
+                        hard_block_pct = EXCLUDED.hard_block_pct,
+                        effective_from = EXCLUDED.effective_from,
+                        effective_until = EXCLUDED.effective_until,
+                        source = EXCLUDED.source,
+                        updated_at = EXCLUDED.updated_at
+                    "#,
+                )
+                .bind(policy.tenant_id)
+                .bind(signal_kind(policy.signal))
+                .bind(operation(policy.operation))
+                .bind(limit_kind)
+                .bind(limit_json)
+                .bind(i16::from(policy.grace_pct))
+                .bind(i16::from(policy.hard_block_pct))
+                .bind(policy.effective_from)
+                .bind(policy.effective_until)
+                .bind(policy_source(policy.source))
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
+
+        self.refresh().await
+    }
+
     async fn delete(&self, id: PolicyId) -> Result<(), PolicyError> {
         sqlx::query("DELETE FROM policies WHERE id = $1")
             .bind(id.0)
