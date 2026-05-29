@@ -230,11 +230,15 @@ async fn test_get_log_by_id() -> Result<()> {
     env.otlp.export_logs(request).await?;
 
     // Poll until the log is stored, then grab its ID
-    let url = "/api/v1/logs".to_string();
+    let url = "/api/v1/logs?service_name=id-test-svc".to_string();
     let items = wait_for_items_default(&env.client, &url).await?;
     assert!(!items.is_empty(), "Need at least one log to test get-by-id");
 
-    let log_id = items[0]["id"].as_str().expect("log must have id");
+    let log_id = items
+        .iter()
+        .find(|item| item["message"].as_str() == Some("fetchable log message"))
+        .and_then(|item| item["id"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("expected fetchable log message to have an id"))?;
 
     // Fetch by ID
     let detail_url = format!("/api/v1/logs/{}", log_id);

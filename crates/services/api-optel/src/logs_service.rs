@@ -6,7 +6,7 @@
 
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
-use crate::ingestion_guard::enforce_project_settings;
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings};
 use crate::logs_converter::OtlpLogsConverter;
 use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::logs::v1::{
@@ -14,9 +14,11 @@ use opentelemetry_proto::tonic::collector::logs::v1::{
 };
 use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
+use serde_json::Value;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use zradar_models::{EvaluationScore, RequestContext};
+use zradar_policy::{PolicyEnforcer, SignalKind};
 use zradar_traits::{Authenticator, SettingsRepository, TelemetryWriter};
 
 const SCORE_ATTRIBUTE_PREFIX: &str = "score.";
@@ -28,6 +30,7 @@ pub struct OtlpLogsService {
     auth: Option<Arc<dyn Authenticator>>,
     settings_repo: Option<Arc<dyn SettingsRepository>>,
     rate_limiter: Option<Arc<ProjectRateLimiter>>,
+    policy_enforcer: Option<Arc<dyn PolicyEnforcer>>,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
@@ -38,6 +41,7 @@ impl OtlpLogsService {
             auth,
             settings_repo: None,
             rate_limiter: None,
+            policy_enforcer: None,
             circuit_breaker: None,
         }
     }
@@ -54,11 +58,46 @@ impl OtlpLogsService {
             auth,
             settings_repo: Some(settings_repo),
             rate_limiter: Some(rate_limiter),
+            policy_enforcer: None,
             circuit_breaker: Some(circuit_breaker),
         }
     }
 
-    fn parse_score(&self, log: &LogRecord, context: &RequestContext) -> Option<EvaluationScore> {
+    pub fn with_policy_enforcer(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        policy_enforcer: Arc<dyn PolicyEnforcer>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: None,
+            rate_limiter: None,
+            policy_enforcer: Some(policy_enforcer),
+            circuit_breaker: Some(circuit_breaker),
+        }
+    }
+
+    pub fn with_settings_and_policy(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        settings_repo: Arc<dyn SettingsRepository>,
+        rate_limiter: Arc<ProjectRateLimiter>,
+        policy_enforcer: Arc<dyn PolicyEnforcer>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: Some(settings_repo),
+            rate_limiter: Some(rate_limiter),
+            policy_enforcer: Some(policy_enforcer),
+            circuit_breaker: Some(circuit_breaker),
+        }
+    }
+
+    fn parse_score(log: &LogRecord, context: &RequestContext) -> Option<EvaluationScore> {
         let mut score = EvaluationScore {
             tenant_id: context.tenant_id.clone(),
             project_id: context.project_id.clone(),
@@ -67,9 +106,10 @@ impl OtlpLogsService {
 
         let mut has_score_attrs = false;
         let mut has_required_fields = false;
+        let mut skills = Vec::new();
 
         for attr in &log.attributes {
-            let key = &attr.key;
+            let key = attr.key.as_str();
             if !key.starts_with(SCORE_ATTRIBUTE_PREFIX) {
                 continue;
             }
@@ -103,10 +143,15 @@ impl OtlpLogsService {
                 "environment" => score.environment = get_string_value(value),
                 "service_name" => score.service_name = get_string_value(value),
                 "agent_name" => score.agent_name = get_string_value(value),
+                "skills" | "agent_skills" | "skill" => skills.extend(get_skill_values(value)),
                 "user_id" => score.user_id = get_string_value(value),
                 "metadata" => score.metadata = get_string_value(value),
                 _ => {}
             }
+        }
+
+        if !skills.is_empty() {
+            score.metadata = merge_skills_into_metadata(&score.metadata, &skills);
         }
 
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -146,6 +191,63 @@ fn get_double_value(value: &AnyValue) -> f64 {
     }
 }
 
+fn get_skill_values(value: &AnyValue) -> Vec<String> {
+    match value {
+        AnyValue::StringValue(s) => parse_skill_string(s),
+        AnyValue::ArrayValue(array) => array
+            .values
+            .iter()
+            .filter_map(|value| value.value.as_ref())
+            .flat_map(get_skill_values)
+            .collect(),
+        _ => {
+            let value = get_string_value(value);
+            if value.is_empty() {
+                Vec::new()
+            } else {
+                vec![value]
+            }
+        }
+    }
+}
+
+fn parse_skill_string(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return parsed
+            .into_iter()
+            .map(|skill| skill.trim().to_string())
+            .filter(|skill| !skill.is_empty())
+            .collect();
+    }
+
+    trimmed
+        .split(',')
+        .map(|skill| skill.trim().to_string())
+        .filter(|skill| !skill.is_empty())
+        .collect()
+}
+
+fn merge_skills_into_metadata(metadata: &str, skills: &[String]) -> String {
+    let mut metadata = serde_json::from_str::<Value>(metadata)
+        .ok()
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "skills".to_string(),
+            Value::Array(skills.iter().cloned().map(Value::String).collect()),
+        );
+    }
+
+    serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string())
+}
+
 #[tonic::async_trait]
 impl LogsService for OtlpLogsService {
     async fn export(
@@ -163,6 +265,16 @@ impl LogsService for OtlpLogsService {
             .flat_map(|resource_logs| &resource_logs.scope_logs)
             .map(|scope_logs| scope_logs.log_records.len() as u64)
             .sum();
+        if let Some(policy_enforcer) = &self.policy_enforcer {
+            enforce_policy_ingest(
+                policy_enforcer.as_ref(),
+                &context,
+                SignalKind::Logs,
+                raw_log_count,
+                None,
+            )
+            .await?;
+        }
         enforce_project_settings(
             &self.settings_repo,
             &self.rate_limiter,
@@ -184,7 +296,7 @@ impl LogsService for OtlpLogsService {
         for resource_logs in &req.resource_logs {
             for scope_logs in &resource_logs.scope_logs {
                 for log_record in &scope_logs.log_records {
-                    if let Some(_score) = self.parse_score(log_record, &context) {
+                    if let Some(_score) = Self::parse_score(log_record, &context) {
                         score_count += 1;
                         // Score persistence can be added back when needed
                     }
@@ -220,6 +332,23 @@ impl LogsService for OtlpLogsService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry_proto::tonic::common::v1::{AnyValue as OtlpAnyValue, ArrayValue, KeyValue};
+
+    fn score_attr(key: &str, value: AnyValue) -> KeyValue {
+        KeyValue {
+            key: format!("score.{key}"),
+            value: Some(OtlpAnyValue { value: Some(value) }),
+        }
+    }
+
+    fn parse_score_with_attrs(attrs: Vec<KeyValue>) -> EvaluationScore {
+        let log = LogRecord {
+            time_unix_nano: 123,
+            attributes: attrs,
+            ..Default::default()
+        };
+        OtlpLogsService::parse_score(&log, &RequestContext::default()).expect("score should parse")
+    }
 
     #[test]
     fn test_get_string_value() {
@@ -245,5 +374,55 @@ mod tests {
     #[test]
     fn test_score_attribute_prefix() {
         assert_eq!(SCORE_ATTRIBUTE_PREFIX, "score.");
+    }
+
+    #[test]
+    fn test_parse_score_merges_csv_skills_into_metadata() {
+        let score = parse_score_with_attrs(vec![
+            score_attr("trace_id", AnyValue::StringValue("trace-1".to_string())),
+            score_attr("name", AnyValue::StringValue("quality".to_string())),
+            score_attr(
+                "metadata",
+                AnyValue::StringValue(r#"{"source":"agent"}"#.to_string()),
+            ),
+            score_attr(
+                "agent_skills",
+                AnyValue::StringValue("search, summarize, classify".to_string()),
+            ),
+        ]);
+
+        let metadata: serde_json::Value = serde_json::from_str(&score.metadata).unwrap();
+        assert_eq!(metadata["source"], "agent");
+        assert_eq!(
+            metadata["skills"],
+            serde_json::json!(["search", "summarize", "classify"])
+        );
+    }
+
+    #[test]
+    fn test_parse_score_merges_array_skills_into_metadata() {
+        let score = parse_score_with_attrs(vec![
+            score_attr("trace_id", AnyValue::StringValue("trace-1".to_string())),
+            score_attr("name", AnyValue::StringValue("quality".to_string())),
+            score_attr(
+                "skills",
+                AnyValue::ArrayValue(ArrayValue {
+                    values: vec![
+                        OtlpAnyValue {
+                            value: Some(AnyValue::StringValue("search".to_string())),
+                        },
+                        OtlpAnyValue {
+                            value: Some(AnyValue::StringValue("summarize".to_string())),
+                        },
+                    ],
+                }),
+            ),
+        ]);
+
+        let metadata: serde_json::Value = serde_json::from_str(&score.metadata).unwrap();
+        assert_eq!(
+            metadata["skills"],
+            serde_json::json!(["search", "summarize"])
+        );
     }
 }

@@ -14,6 +14,9 @@ pub mod retention;
 /// Project settings API
 pub mod settings;
 
+/// Policy admin API
+pub mod policy;
+
 /// HTTP layer
 pub mod http;
 

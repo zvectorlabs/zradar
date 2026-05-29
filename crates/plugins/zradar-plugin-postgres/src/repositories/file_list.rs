@@ -104,6 +104,36 @@ impl FileListRepository for PostgresFileListRepository {
         Ok(entries)
     }
 
+    async fn sum_compressed_size(&self, filter: FileListFilter) -> anyhow::Result<i64> {
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(SUM(compressed_size), 0)::bigint AS compressed_size
+            FROM file_list
+            WHERE ($1::uuid   IS NULL OR tenant_id    = $1)
+              AND ($2::uuid   IS NULL OR project_id   = $2)
+              AND ($3::text   IS NULL OR signal_type  = $3)
+              AND ($4::text   IS NULL OR stream_name  = $4)
+              AND ($5::bigint IS NULL OR max_ts       >= $5)
+              AND ($6::bigint IS NULL OR min_ts       <= $6)
+              AND ($7::text   IS NULL OR location     = $7)
+              AND ($8::bool   IS NULL OR deleted      = $8)
+            "#,
+        )
+        .bind(filter.tenant_id)
+        .bind(filter.project_id)
+        .bind(filter.signal_type)
+        .bind(filter.stream_name)
+        .bind(filter.time_range_start)
+        .bind(filter.time_range_end)
+        .bind(filter.location)
+        .bind(filter.deleted)
+        .fetch_one(self.client.pool())
+        .await
+        .context("Failed to sum compressed_size from file_list")?;
+
+        Ok(row.get::<i64, _>("compressed_size"))
+    }
+
     async fn query_compactable_groups(
         &self,
         cutoff_us: i64,

@@ -16,6 +16,7 @@ use tracing::{error, info};
 use api::{
     audit::{AuditState, audit_router},
     http::{AuthMode, create_admin_router},
+    policy::{PolicyState, policy_router},
     retention::{handlers::RetentionState, retention_router},
     settings::{SettingsState, settings_router},
     telemetry::QueryService,
@@ -38,10 +39,16 @@ use zradar_parquet::{
     WriterConfig, recover_incomplete_writes,
 };
 use zradar_plugin_postgres::{
-    PostgresAuditLogRepository, PostgresClient, PostgresFileListRepository,
-    PostgresRetentionPolicyRepository, PostgresSettingsRepository, migrations::MIGRATIONS,
+    PostgresAuditLogRepository, PostgresClient, PostgresDecisionAuditSink,
+    PostgresFileListRepository, PostgresPolicyStore, PostgresRetentionPolicyRepository,
+    PostgresSettingsRepository, PostgresThresholdSink, PostgresUsageReader, PostgresUsageTracker,
+    UsageTrackerMetrics, migrations::MIGRATIONS,
 };
 use zradar_plugin_s3::S3BlockStorage;
+use zradar_policy::{
+    DecisionAuditSink, FanoutUsageTracker, InMemoryUsageTracker, PolicyEnforcer, PolicyEngine,
+    PolicyStore, ThresholdSink, UsageAnalyticsReader, UsageReader, UsageTracker,
+};
 use zradar_retention::{
     CleanupJob, EnforcementStrategy, OrgRetentionConfig, QueryEnforcer, RetentionConfigStore,
 };
@@ -113,6 +120,36 @@ impl ZradarRuntimeBuilder {
                 as Arc<dyn zradar_traits::RetentionPolicyRepository>;
         let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::AuditLogRepository>;
+        let policy_store_impl = Arc::new(PostgresPolicyStore::new(pg_client.clone()));
+        policy_store_impl.refresh().await?;
+        let policy_store = policy_store_impl.clone() as Arc<dyn PolicyStore>;
+        let hot_usage = Arc::new(InMemoryUsageTracker::new());
+        let usage_reader = hot_usage.clone() as Arc<dyn UsageReader>;
+        let reporting_usage_reader =
+            Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageReader>;
+        let usage_analytics_reader =
+            Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageAnalyticsReader>;
+        let usage_tracker_metrics = Arc::new(UsageTrackerMetrics::default());
+        let postgres_usage_tracker = Arc::new(PostgresUsageTracker::spawn_with_metrics(
+            pg_client.clone(),
+            usage_tracker_metrics.clone(),
+        )) as Arc<dyn UsageTracker>;
+        let usage_tracker = Arc::new(FanoutUsageTracker::new(vec![
+            hot_usage.clone() as Arc<dyn UsageTracker>,
+            postgres_usage_tracker,
+        ])) as Arc<dyn UsageTracker>;
+        let threshold_sink =
+            Arc::new(PostgresThresholdSink::new(pg_client.clone())) as Arc<dyn ThresholdSink>;
+        let decision_audit_sink = Arc::new(PostgresDecisionAuditSink::new(pg_client.clone()))
+            as Arc<dyn DecisionAuditSink>;
+        let policy_engine = Arc::new(PolicyEngine::new_with_decision_audit(
+            policy_store.clone(),
+            usage_reader,
+            usage_tracker.clone(),
+            threshold_sink,
+            decision_audit_sink,
+        ));
+        let policy_enforcer = policy_engine.enforcer.clone() as Arc<dyn PolicyEnforcer>;
 
         // =====================================================================
         // Parquet storage layer
@@ -138,13 +175,31 @@ impl ZradarRuntimeBuilder {
             parquet_lifecycle_config.bloom_filter_columns.clone(),
             parquet_lifecycle_config.fsync_before_rename,
         );
-        let parquet_file_writer = Arc::new(ParquetFileWriter::with_config(
+        let parquet_file_writer = Arc::new(ParquetFileWriter::with_config_and_usage_tracker(
             parquet_data_dir.clone(),
             file_list_repo.clone(),
             writer_config,
+            usage_tracker.clone(),
         ));
 
         let cancel_token = CancellationToken::new();
+        {
+            let policy_store_refresh = policy_store_impl.clone();
+            let cancel = cancel_token.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    tokio::select! {
+                        _ = tick.tick() => {
+                            if let Err(e) = policy_store_refresh.refresh().await {
+                                error!("Policy store refresh failed: {}", e);
+                            }
+                        }
+                        _ = cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
 
         let write_buffer: Option<Arc<WriteBuffer>> =
             if parquet_lifecycle_config.write_buffer_enabled {
@@ -322,7 +377,14 @@ impl ZradarRuntimeBuilder {
                 parquet_telemetry_reader as Arc<dyn zradar_traits::TelemetryReader>,
                 query_enforcer,
             )
-            .with_file_list_repo(file_list_repo.clone()),
+            .with_file_list_repo(file_list_repo.clone())
+            .with_policy_enforcer(policy_enforcer.clone())
+            .with_usage_tracker(usage_tracker.clone())
+            .with_policy_context(
+                policy_store.clone(),
+                reporting_usage_reader.clone(),
+                usage_analytics_reader,
+            ),
         );
 
         info!("Storage layer initialized");
@@ -605,25 +667,28 @@ impl ZradarRuntimeBuilder {
             });
         }
 
-        let trace_service = OtlpTraceService::with_settings_repository(
+        let trace_service = OtlpTraceService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
             settings_repo.clone(),
             rate_limiter.clone(),
+            policy_enforcer.clone(),
             circuit_breaker.clone(),
         );
-        let metrics_service = OtlpMetricsService::with_settings_repository(
+        let metrics_service = OtlpMetricsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
             settings_repo.clone(),
             rate_limiter.clone(),
+            policy_enforcer.clone(),
             circuit_breaker.clone(),
         );
-        let logs_service = OtlpLogsService::with_settings_repository(
+        let logs_service = OtlpLogsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
             settings_repo.clone(),
             rate_limiter,
+            policy_enforcer,
             circuit_breaker.clone(),
         );
 
@@ -660,6 +725,13 @@ impl ZradarRuntimeBuilder {
             admin_authorizer.clone(),
             auth_mode,
         );
+        let policy_api = policy_router(
+            Arc::new(PolicyState {
+                store: policy_store,
+            }),
+            admin_authorizer.clone(),
+            auth_mode,
+        );
         let audit_api = audit_router(
             Arc::new(AuditState {
                 repository: audit_log_repo,
@@ -669,9 +741,15 @@ impl ZradarRuntimeBuilder {
         );
 
         let metrics_state = wal_metrics.clone();
+        let usage_metrics_state = usage_tracker_metrics.clone();
         let metrics_route = axum::routing::get(move || {
             let m = metrics_state.clone();
-            async move { m.render_prometheus() }
+            let usage_m = usage_metrics_state.clone();
+            async move {
+                let mut output = m.render_prometheus();
+                output.push_str(&usage_m.render_prometheus());
+                output
+            }
         });
 
         let app = Router::new()
@@ -680,6 +758,7 @@ impl ZradarRuntimeBuilder {
             .merge(admin_api)
             .merge(retention_api)
             .merge(settings_api)
+            .merge(policy_api)
             .merge(audit_api)
             .layer(CompressionLayer::new());
 

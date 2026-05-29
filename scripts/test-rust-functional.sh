@@ -37,6 +37,7 @@ usage() {
 TEST_FILTER=""
 LIST_TESTS=false
 DOCKER_REUSE=false
+FUNCTIONAL_TEST_THREADS="${FUNCTIONAL_TEST_THREADS:-4}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -308,13 +309,13 @@ else
         TEST_API_KEY=zk_test_default \
         cargo test --package zradar-functional-tests --test functional_tests "$TEST_FILTER" -- --include-ignored --nocapture --test-threads=1
     else
-        echo -e "${YELLOW}Running all tests...${NC}"
+        echo -e "${YELLOW}Running all tests with ${FUNCTIONAL_TEST_THREADS} test threads...${NC}"
         echo ""
         TEST_DATABASE_URL=$TEST_DATABASE_URL \
         TEST_API_URL=$TEST_API_URL \
         TEST_GRPC_URL=$TEST_GRPC_URL \
         TEST_API_KEY=zk_test_default \
-        cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --nocapture --test-threads=8
+        cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --nocapture --test-threads="$FUNCTIONAL_TEST_THREADS"
     fi
     TEST_RESULT=$?
 fi

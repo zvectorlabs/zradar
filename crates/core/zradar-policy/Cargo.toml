@@ -1,0 +1,17 @@
+[package]
+name = "zradar-policy"
+version.workspace = true
+edition.workspace = true
+description = "Policy enforcement and usage tracking primitives for zradar"
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

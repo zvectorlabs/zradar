@@ -25,9 +25,12 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
 
 # Internal dependencies
 zradar-models = { workspace = true }
+zradar-policy = { workspace = true }
 zradar-traits = { workspace = true }
 
 [build-dependencies]

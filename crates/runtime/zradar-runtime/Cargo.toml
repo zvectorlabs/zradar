@@ -15,6 +15,7 @@ zradar-traits = { path = "../../core/zradar-traits" }
 zradar-parquet = { path = "../../core/zradar-parquet" }
 zradar-wal = { path = "../../core/zradar-wal" }
 zradar-retention = { path = "../../core/zradar-retention" }
+zradar-policy = { path = "../../core/zradar-policy" }
 
 # Services
 api-optel = { path = "../../services/api-optel" }

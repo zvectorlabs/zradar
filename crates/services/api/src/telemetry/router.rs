@@ -34,6 +34,22 @@ pub fn router(service: Arc<QueryService>) -> Router {
             "/api/v1/analytics/storage-usage",
             get(handlers::get_storage_usage),
         )
+        .route(
+            "/api/v1/analytics/quota-status",
+            get(handlers::get_quota_status),
+        )
+        .route(
+            "/api/v1/analytics/usage-daily",
+            get(handlers::get_usage_daily),
+        )
+        .route(
+            "/api/v1/analytics/ingest-rate",
+            get(handlers::get_ingest_rate),
+        )
+        .route(
+            "/api/v1/analytics/query-usage",
+            get(handlers::get_query_usage),
+        )
         .route("/api/v1/logs", get(handlers::query_logs))
         .route("/api/v1/logs/:log_id", get(handlers::get_log))
         .route("/api/v1/metrics", get(handlers::query_metrics))

@@ -7,6 +7,7 @@ description = "OpenTelemetry Protocol (OTLP) gRPC services for zradar"
 
 [dependencies]
 zradar-models = { path = "../../core/zradar-models" }
+zradar-policy = { path = "../../core/zradar-policy" }
 zradar-traits = { path = "../../core/zradar-traits" }
 
 # ✅ OpenTelemetry Protocol - THE CONTRACT
