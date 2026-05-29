@@ -11,6 +11,8 @@ use crate::types::{
     QueryCtx, ThresholdEvent, UsageBasis,
 };
 
+const DAY_MICROS: i64 = 86_400 * 1_000_000;
+
 pub struct DefaultPolicyEnforcer {
     store: Arc<dyn PolicyStore>,
     usage: Arc<dyn UsageReader>,
@@ -214,8 +216,8 @@ async fn check_rate(
         emit_thresholds(
             threshold_sink,
             ThresholdContext::from_ingest(ctx, operation, "rate_records"),
-            i64::try_from(observed).ok()?,
-            i64::try_from(limit).ok()?,
+            u64_to_i64_saturating(observed),
+            u64_to_i64_saturating(limit),
             None,
             hard_block_pct,
         )
@@ -237,8 +239,8 @@ async fn check_rate(
         emit_thresholds(
             threshold_sink,
             ThresholdContext::from_ingest(ctx, operation, "rate_bytes"),
-            i64::try_from(observed).ok()?,
-            i64::try_from(limit).ok()?,
+            u64_to_i64_saturating(observed),
+            u64_to_i64_saturating(limit),
             None,
             hard_block_pct,
         )
@@ -292,7 +294,7 @@ async fn check_quota(
         )
         .await
         .ok()?;
-    let observed = used.saturating_add(i64::try_from(ctx.estimated_bytes.unwrap_or(0)).ok()?);
+    let observed = used.saturating_add(u64_to_i64_saturating(ctx.estimated_bytes.unwrap_or(0)));
     emit_thresholds(
         threshold_sink,
         ThresholdContext::from_ingest(ctx, operation, "quota"),
@@ -363,7 +365,7 @@ fn check_query_range(
     {
         let cutoff = ctx
             .now_micros
-            .saturating_sub(i64::from(*max_days) * 86_400 * 1_000_000);
+            .saturating_sub(i64::from(*max_days).saturating_mul(DAY_MICROS));
         if start_micros < cutoff {
             return Some(Decision::Block {
                 reason: "retention_violation",
@@ -375,7 +377,7 @@ fn check_query_range(
     if let Some(PolicyLimit::Window { max_query_days }) = query_window
         && let (Some(start_micros), Some(end_micros)) = (ctx.start_micros, ctx.end_micros)
     {
-        let max_window_micros = i64::from(*max_query_days) * 86_400 * 1_000_000;
+        let max_window_micros = i64::from(*max_query_days).saturating_mul(DAY_MICROS);
         if end_micros.saturating_sub(start_micros) > max_window_micros {
             return Some(Decision::Block {
                 reason: "query_window_violation",
@@ -411,8 +413,8 @@ async fn check_query_rate(
     emit_thresholds(
         threshold_sink,
         ThresholdContext::from_query(ctx, Operation::Query, "query_rate_bytes"),
-        i64::try_from(observed).ok()?,
-        i64::try_from(limit).ok()?,
+        u64_to_i64_saturating(observed),
+        u64_to_i64_saturating(limit),
         None,
         hard_block_pct,
     )
@@ -461,8 +463,9 @@ async fn check_query_quota(
         )
         .await
         .ok()?;
-    let observed =
-        used.saturating_add(i64::try_from(ctx.estimated_scanned_bytes.unwrap_or(0)).ok()?);
+    let observed = used.saturating_add(u64_to_i64_saturating(
+        ctx.estimated_scanned_bytes.unwrap_or(0),
+    ));
     emit_thresholds(
         threshold_sink,
         ThresholdContext::from_query(ctx, Operation::Query, "quota"),
@@ -492,13 +495,17 @@ fn compare_limit(
     reason: &'static str,
 ) -> Option<Decision> {
     compare_limit_i64(
-        i64::try_from(observed).ok()?,
-        i64::try_from(limit).ok()?,
+        u64_to_i64_saturating(observed),
+        u64_to_i64_saturating(limit),
         grace_pct,
         hard_block_pct,
         code,
         reason,
     )
+}
+
+fn u64_to_i64_saturating(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 fn compare_limit_i64(
@@ -749,6 +756,51 @@ mod tests {
             ),
             Some(Decision::AllowWithGrace {
                 reason: "quota_exceeded"
+            })
+        );
+    }
+
+    #[test]
+    fn oversized_u64_limits_fail_closed_instead_of_bypassing() {
+        assert_eq!(
+            compare_limit(
+                u64::MAX,
+                1,
+                101,
+                103,
+                BlockCode::RateLimitExceeded,
+                "rate_exceeded"
+            ),
+            Some(Decision::Block {
+                reason: "rate_exceeded",
+                code: BlockCode::RateLimitExceeded,
+            })
+        );
+    }
+
+    #[test]
+    fn huge_day_limits_do_not_overflow_query_range_math() {
+        let ctx = QueryCtx {
+            tenant_id: uuid::Uuid::new_v4(),
+            project_id: uuid::Uuid::new_v4(),
+            signal: SignalKind::Traces,
+            start_micros: Some(i64::MIN),
+            end_micros: Some(i64::MAX),
+            estimated_scanned_bytes: None,
+            now_micros: i64::MAX,
+        };
+
+        assert_eq!(
+            check_query_range(
+                &ctx,
+                &Some(PolicyLimit::Retention { max_days: u32::MAX }),
+                &Some(PolicyLimit::Window {
+                    max_query_days: u32::MAX,
+                }),
+            ),
+            Some(Decision::Block {
+                reason: "retention_violation",
+                code: BlockCode::RetentionViolation,
             })
         );
     }

@@ -20,6 +20,7 @@ const DEFAULT_USAGE_CHANNEL_CAPACITY: usize = 16_384;
 const DEFAULT_USAGE_FLUSH_INTERVAL_MS: u64 = 1_000;
 const DEFAULT_USAGE_BATCH_SIZE: usize = 512;
 const DEFAULT_USAGE_RETRY_BUFFER_MAX_SAMPLES: usize = 16_384;
+const DEFAULT_USAGE_MAX_FLUSH_RETRIES: usize = 3;
 
 #[derive(Debug, Default)]
 pub struct UsageTrackerMetrics {
@@ -174,6 +175,8 @@ impl PostgresUsageFlushWorker {
         let mut tick = interval(Duration::from_millis(self.flush_interval_ms));
         let mut writes = Vec::with_capacity(self.batch_size);
         let mut queries = Vec::with_capacity(self.batch_size);
+        let mut write_flush_failures = 0_usize;
+        let mut query_flush_failures = 0_usize;
 
         loop {
             tokio::select! {
@@ -182,7 +185,13 @@ impl PostgresUsageFlushWorker {
                         Some(UsageEvent::Write(sample)) => writes.push(sample),
                         Some(UsageEvent::Query(sample)) => queries.push(sample),
                         None => {
-                            self.flush(&mut writes, &mut queries).await;
+                            self.flush(
+                                &mut writes,
+                                &mut queries,
+                                &mut write_flush_failures,
+                                &mut query_flush_failures,
+                            )
+                            .await;
                             return;
                         }
                     }
@@ -190,17 +199,35 @@ impl PostgresUsageFlushWorker {
                     self.enforce_retry_buffer_limit(&mut writes, &mut queries);
 
                     if writes.len() + queries.len() >= self.batch_size {
-                        self.flush(&mut writes, &mut queries).await;
+                        self.flush(
+                            &mut writes,
+                            &mut queries,
+                            &mut write_flush_failures,
+                            &mut query_flush_failures,
+                        )
+                        .await;
                     }
                 }
                 _ = tick.tick() => {
-                    self.flush(&mut writes, &mut queries).await;
+                    self.flush(
+                        &mut writes,
+                        &mut queries,
+                        &mut write_flush_failures,
+                        &mut query_flush_failures,
+                    )
+                    .await;
                 }
             }
         }
     }
 
-    async fn flush(&self, writes: &mut Vec<WriteSample>, queries: &mut Vec<QuerySample>) {
+    async fn flush(
+        &self,
+        writes: &mut Vec<WriteSample>,
+        queries: &mut Vec<QuerySample>,
+        write_flush_failures: &mut usize,
+        query_flush_failures: &mut usize,
+    ) {
         if writes.is_empty() && queries.is_empty() {
             return;
         }
@@ -212,7 +239,26 @@ impl PostgresUsageFlushWorker {
                 self.metrics
                     .flush_failures_total
                     .fetch_add(1, Ordering::Relaxed);
-                warn!(error = %e, count, "failed to flush usage write samples");
+                *write_flush_failures = write_flush_failures.saturating_add(1);
+                warn!(
+                    error = %e,
+                    count,
+                    attempt = *write_flush_failures,
+                    max_attempts = DEFAULT_USAGE_MAX_FLUSH_RETRIES,
+                    "failed to flush usage write samples"
+                );
+                if *write_flush_failures >= DEFAULT_USAGE_MAX_FLUSH_RETRIES {
+                    self.metrics
+                        .write_samples_dropped_total
+                        .fetch_add(count as u64, Ordering::Relaxed);
+                    warn!(
+                        count,
+                        max_attempts = DEFAULT_USAGE_MAX_FLUSH_RETRIES,
+                        "dropping usage write samples after repeated flush failures"
+                    );
+                    writes.clear();
+                    *write_flush_failures = 0;
+                }
             } else {
                 self.metrics
                     .flush_batches_total
@@ -226,6 +272,7 @@ impl PostgresUsageFlushWorker {
                 );
                 debug!(count, "flushed usage write samples");
                 writes.clear();
+                *write_flush_failures = 0;
             }
         }
 
@@ -236,7 +283,26 @@ impl PostgresUsageFlushWorker {
                 self.metrics
                     .flush_failures_total
                     .fetch_add(1, Ordering::Relaxed);
-                warn!(error = %e, count, "failed to flush usage query samples");
+                *query_flush_failures = query_flush_failures.saturating_add(1);
+                warn!(
+                    error = %e,
+                    count,
+                    attempt = *query_flush_failures,
+                    max_attempts = DEFAULT_USAGE_MAX_FLUSH_RETRIES,
+                    "failed to flush usage query samples"
+                );
+                if *query_flush_failures >= DEFAULT_USAGE_MAX_FLUSH_RETRIES {
+                    self.metrics
+                        .query_samples_dropped_total
+                        .fetch_add(count as u64, Ordering::Relaxed);
+                    warn!(
+                        count,
+                        max_attempts = DEFAULT_USAGE_MAX_FLUSH_RETRIES,
+                        "dropping usage query samples after repeated flush failures"
+                    );
+                    queries.clear();
+                    *query_flush_failures = 0;
+                }
             } else {
                 self.metrics
                     .flush_batches_total
@@ -250,6 +316,7 @@ impl PostgresUsageFlushWorker {
                 );
                 debug!(count, "flushed usage query samples");
                 queries.clear();
+                *query_flush_failures = 0;
             }
         }
 
@@ -1122,19 +1189,7 @@ async fn upsert_ingestion_daily(
         "#,
     );
 
-    builder.push_values(aggregates.iter(), |mut b, aggregate| {
-        b.push_bind(aggregate.tenant_id)
-            .push_bind(aggregate.project_id)
-            .push_bind(aggregate.signal_kind)
-            .push("(to_timestamp(")
-            .push_bind(aggregate.day_micros)
-            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
-            .push_bind(aggregate.compressed_bytes)
-            .push_bind(aggregate.original_bytes)
-            .push_bind(aggregate.records)
-            .push_bind(aggregate.file_count)
-            .push_bind(aggregate.updated_at);
-    });
+    push_ingestion_daily_values(&mut builder, &aggregates);
 
     builder.push(
         r#"
@@ -1187,6 +1242,38 @@ fn aggregate_ingestion_daily(samples: &[WriteSample]) -> Vec<IngestionDailyAggre
     aggregates.into_values().collect()
 }
 
+fn push_ingestion_daily_values(
+    builder: &mut QueryBuilder<Postgres>,
+    aggregates: &[IngestionDailyAggregate],
+) {
+    builder.push(" VALUES ");
+
+    for (idx, aggregate) in aggregates.iter().enumerate() {
+        if idx > 0 {
+            builder.push(", ");
+        }
+        builder.push("(");
+        builder.push_bind(aggregate.tenant_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.project_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.signal_kind);
+        builder.push(", (to_timestamp(");
+        builder.push_bind(aggregate.day_micros);
+        builder.push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date, ");
+        builder.push_bind(aggregate.compressed_bytes);
+        builder.push(", ");
+        builder.push_bind(aggregate.original_bytes);
+        builder.push(", ");
+        builder.push_bind(aggregate.records);
+        builder.push(", ");
+        builder.push_bind(aggregate.file_count);
+        builder.push(", ");
+        builder.push_bind(aggregate.updated_at);
+        builder.push(")");
+    }
+}
+
 async fn upsert_query_usage_daily(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     samples: &[QuerySample],
@@ -1211,18 +1298,7 @@ async fn upsert_query_usage_daily(
         "#,
     );
 
-    builder.push_values(aggregates.iter(), |mut b, aggregate| {
-        b.push_bind(aggregate.tenant_id)
-            .push_bind(aggregate.project_id)
-            .push_bind(aggregate.signal_kind)
-            .push("(to_timestamp(")
-            .push_bind(aggregate.day_micros)
-            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
-            .push_bind(aggregate.bytes_scanned)
-            .push_bind(aggregate.rows_scanned)
-            .push_bind(aggregate.query_count)
-            .push_bind(aggregate.updated_at);
-    });
+    push_query_daily_values(&mut builder, &aggregates);
 
     builder.push(
         r#"
@@ -1268,6 +1344,36 @@ fn aggregate_query_daily(samples: &[QuerySample]) -> Vec<QueryDailyAggregate> {
     }
 
     aggregates.into_values().collect()
+}
+
+fn push_query_daily_values(
+    builder: &mut QueryBuilder<Postgres>,
+    aggregates: &[QueryDailyAggregate],
+) {
+    builder.push(" VALUES ");
+
+    for (idx, aggregate) in aggregates.iter().enumerate() {
+        if idx > 0 {
+            builder.push(", ");
+        }
+        builder.push("(");
+        builder.push_bind(aggregate.tenant_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.project_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.signal_kind);
+        builder.push(", (to_timestamp(");
+        builder.push_bind(aggregate.day_micros);
+        builder.push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date, ");
+        builder.push_bind(aggregate.bytes_scanned);
+        builder.push(", ");
+        builder.push_bind(aggregate.rows_scanned);
+        builder.push(", ");
+        builder.push_bind(aggregate.query_count);
+        builder.push(", ");
+        builder.push_bind(aggregate.updated_at);
+        builder.push(")");
+    }
 }
 
 async fn upsert_ingest_query_monthly_for_writes(
@@ -1380,19 +1486,7 @@ async fn upsert_monthly_usage_aggregates(
         "#,
     );
 
-    builder.push_values(aggregates.iter(), |mut b, aggregate| {
-        b.push_bind(aggregate.tenant_id)
-            .push_bind(aggregate.project_id)
-            .push_bind(aggregate.signal_kind)
-            .push_bind(aggregate.operation)
-            .push("date_trunc('month', to_timestamp(")
-            .push_bind(aggregate.period_start_micros)
-            .push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date")
-            .push_bind(aggregate.used_bytes)
-            .push_bind(0_i64)
-            .push_bind(None::<i64>)
-            .push_bind(aggregate.updated_at);
-    });
+    push_monthly_usage_values(&mut builder, &aggregates);
 
     builder.push(
         r#"
@@ -1406,6 +1500,38 @@ async fn upsert_monthly_usage_aggregates(
     builder.build().execute(&mut **tx).await?;
 
     Ok(())
+}
+
+fn push_monthly_usage_values(
+    builder: &mut QueryBuilder<Postgres>,
+    aggregates: &[MonthlyUsageAggregate],
+) {
+    builder.push(" VALUES ");
+
+    for (idx, aggregate) in aggregates.iter().enumerate() {
+        if idx > 0 {
+            builder.push(", ");
+        }
+        builder.push("(");
+        builder.push_bind(aggregate.tenant_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.project_id);
+        builder.push(", ");
+        builder.push_bind(aggregate.signal_kind);
+        builder.push(", ");
+        builder.push_bind(aggregate.operation);
+        builder.push(", date_trunc('month', to_timestamp(");
+        builder.push_bind(aggregate.period_start_micros);
+        builder.push("::double precision / 1000000.0) AT TIME ZONE 'UTC')::date, ");
+        builder.push_bind(aggregate.used_bytes);
+        builder.push(", ");
+        builder.push_bind(0_i64);
+        builder.push(", ");
+        builder.push_bind(None::<i64>);
+        builder.push(", ");
+        builder.push_bind(aggregate.updated_at);
+        builder.push(")");
+    }
 }
 
 fn operation_kind(operation: Operation) -> &'static str {
@@ -1646,6 +1772,70 @@ mod tests {
         assert_eq!(metrics.query_count, 2);
         assert_eq!(metrics.day_micros, day);
         assert_eq!(metrics.updated_at, day + 2);
+    }
+
+    #[test]
+    fn rollup_value_builders_do_not_insert_separators_inside_timestamp_expression() {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let day = 86_400 * 1_000_000;
+        let mut ingestion_builder: QueryBuilder<Postgres> =
+            QueryBuilder::new("INSERT INTO ingestion_daily");
+        let mut query_builder: QueryBuilder<Postgres> =
+            QueryBuilder::new("INSERT INTO query_usage_daily");
+        let mut monthly_builder: QueryBuilder<Postgres> =
+            QueryBuilder::new("INSERT INTO ingest_query_monthly");
+
+        push_ingestion_daily_values(
+            &mut ingestion_builder,
+            &[IngestionDailyAggregate {
+                tenant_id,
+                project_id,
+                signal_kind: "traces",
+                day_micros: day,
+                compressed_bytes: 1,
+                original_bytes: 2,
+                records: 3,
+                file_count: 1,
+                updated_at: day + 1,
+            }],
+        );
+        push_query_daily_values(
+            &mut query_builder,
+            &[QueryDailyAggregate {
+                tenant_id,
+                project_id,
+                signal_kind: "traces",
+                day_micros: day,
+                bytes_scanned: 1,
+                rows_scanned: 2,
+                query_count: 1,
+                updated_at: day + 1,
+            }],
+        );
+        push_monthly_usage_values(
+            &mut monthly_builder,
+            &[MonthlyUsageAggregate {
+                tenant_id,
+                project_id,
+                signal_kind: "traces",
+                operation: "ingest",
+                period_start_micros: day,
+                used_bytes: 1,
+                updated_at: day + 1,
+            }],
+        );
+
+        let ingestion_sql = ingestion_builder.sql();
+        let query_sql = query_builder.sql();
+        let monthly_sql = monthly_builder.sql();
+
+        assert!(ingestion_sql.contains("VALUES ("));
+        assert!(query_sql.contains("VALUES ("));
+        assert!(monthly_sql.contains("VALUES ("));
+        assert!(!ingestion_sql.contains("to_timestamp(,"));
+        assert!(!query_sql.contains("to_timestamp(,"));
+        assert!(!monthly_sql.contains("to_timestamp(,"));
     }
 
     #[test]

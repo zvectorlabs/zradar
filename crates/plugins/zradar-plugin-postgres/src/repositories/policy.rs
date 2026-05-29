@@ -4,6 +4,7 @@ use parking_lot::RwLock;
 use serde_json::Value;
 use sqlx::FromRow;
 use std::{collections::HashMap, sync::Arc};
+use tracing::warn;
 use uuid::Uuid;
 use zradar_policy::{
     Operation, Policy, PolicyError, PolicyId, PolicyLimit, PolicySource, PolicyStore,
@@ -81,7 +82,7 @@ impl PostgresPolicyStore {
         .await
         .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
 
-        self.cache.replace(rows_to_cache(rows)?);
+        self.cache.replace(rows_to_cache(rows));
 
         Ok(())
     }
@@ -316,13 +317,19 @@ impl PolicyStore for PostgresPolicyStore {
     }
 }
 
-fn rows_to_cache(rows: Vec<PolicyRow>) -> Result<PolicyCacheMap, PolicyError> {
+fn rows_to_cache(rows: Vec<PolicyRow>) -> PolicyCacheMap {
     let mut cache = HashMap::with_capacity(rows.len());
     for row in rows {
-        let policy = row_to_policy(row)?;
-        cache.entry(policy_key(&policy)).or_insert(policy);
+        match row_to_policy(row) {
+            Ok(policy) => {
+                cache.entry(policy_key(&policy)).or_insert(policy);
+            }
+            Err(e) => {
+                warn!(error = %e, "skipping invalid policy row during refresh");
+            }
+        }
     }
-    Ok(cache)
+    cache
 }
 
 fn resolve_cached_policy(
@@ -635,12 +642,11 @@ mod tests {
     }
 
     #[test]
-    fn rows_to_cache_fails_before_replacing_active_snapshot() {
+    fn rows_to_cache_skips_invalid_rows_and_keeps_valid_rows() {
         let tenant_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        let cache = PolicyCache::default();
-        cache.replace(
-            rows_to_cache(vec![policy_row(
+        let cache = rows_to_cache(vec![
+            policy_row(
                 tenant_id,
                 Some(project_id),
                 "traces",
@@ -650,12 +656,8 @@ mod tests {
                     "records_per_sec": 10,
                     "bytes_per_sec": null
                 }),
-            )])
-            .unwrap(),
-        );
-
-        assert!(
-            rows_to_cache(vec![policy_row(
+            ),
+            policy_row(
                 tenant_id,
                 Some(project_id),
                 "not_a_signal",
@@ -665,12 +667,11 @@ mod tests {
                     "records_per_sec": 1,
                     "bytes_per_sec": null
                 }),
-            )])
-            .is_err()
-        );
+            ),
+        ]);
 
         let resolved = resolve_cached_policy(
-            &cache.snapshot(),
+            &cache,
             tenant_id,
             project_id,
             SignalKind::Traces,
@@ -725,8 +726,7 @@ mod tests {
                     "basis": "compressed_bytes"
                 }),
             ),
-        ])
-        .unwrap();
+        ]);
 
         let resolved = resolve_cached_policy(
             &cache,
