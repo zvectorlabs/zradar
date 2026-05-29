@@ -135,7 +135,7 @@ impl PostgresUsageTracker {
 #[async_trait]
 impl UsageTracker for PostgresUsageTracker {
     async fn record_write(&self, sample: WriteSample) {
-        if let Err(e) = self.sender.send(UsageEvent::Write(sample)).await {
+        if let Err(e) = self.sender.try_send(UsageEvent::Write(sample)) {
             self.metrics
                 .write_samples_dropped_total
                 .fetch_add(1, Ordering::Relaxed);
@@ -144,7 +144,7 @@ impl UsageTracker for PostgresUsageTracker {
     }
 
     async fn record_query(&self, sample: QuerySample) {
-        if let Err(e) = self.sender.send(UsageEvent::Query(sample)).await {
+        if let Err(e) = self.sender.try_send(UsageEvent::Query(sample)) {
             self.metrics
                 .query_samples_dropped_total
                 .fetch_add(1, Ordering::Relaxed);

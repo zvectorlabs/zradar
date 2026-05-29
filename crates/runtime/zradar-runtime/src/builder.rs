@@ -183,6 +183,23 @@ impl ZradarRuntimeBuilder {
         ));
 
         let cancel_token = CancellationToken::new();
+        {
+            let policy_store_refresh = policy_store_impl.clone();
+            let cancel = cancel_token.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    tokio::select! {
+                        _ = tick.tick() => {
+                            if let Err(e) = policy_store_refresh.refresh().await {
+                                error!("Policy store refresh failed: {}", e);
+                            }
+                        }
+                        _ = cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
 
         let write_buffer: Option<Arc<WriteBuffer>> =
             if parquet_lifecycle_config.write_buffer_enabled {

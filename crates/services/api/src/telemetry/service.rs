@@ -64,16 +64,21 @@ fn quota_status(
     limit_kind: &str,
     limit_value: i64,
     observed_value: i64,
-    period_start: Option<i64>,
-    period_end: Option<i64>,
+    hard_block_pct: u8,
+    period: (Option<i64>, Option<i64>),
 ) -> QuotaStatus {
     let pct_consumed = if limit_value > 0 {
         observed_value as f64 * 100.0 / limit_value as f64
     } else {
         100.0
     };
-    let status = if limit_value <= 0 || observed_value >= limit_value {
+    let status = if limit_value <= 0
+        || observed_value.saturating_mul(100)
+            >= limit_value.saturating_mul(i64::from(hard_block_pct))
+    {
         ThresholdStatus::Blocked
+    } else if pct_consumed > 100.0 {
+        ThresholdStatus::Grace
     } else if pct_consumed >= 90.0 {
         ThresholdStatus::Critical
     } else if pct_consumed >= 70.0 {
@@ -90,8 +95,8 @@ fn quota_status(
         observed_value,
         pct_consumed,
         status,
-        period_start,
-        period_end,
+        period_start: period.0,
+        period_end: period.1,
         projected_exhaustion_at: None,
     }
 }
@@ -264,21 +269,24 @@ impl QueryService {
             return;
         };
 
-        usage_tracker
-            .record_query(QuerySample {
-                tenant_id,
-                project_id,
-                signal,
-                bytes_scanned: i64::try_from(estimated_scanned_bytes.unwrap_or(0))
-                    .unwrap_or(i64::MAX),
-                rows_scanned: Some(rows_scanned),
-                query_time_ms: Some(
-                    i32::try_from(query_started_at.elapsed().as_millis()).unwrap_or(i32::MAX),
-                ),
-                decision: DecisionSummary::Allow,
-                submitted_at: chrono::Utc::now().timestamp_micros(),
-            })
-            .await;
+        let usage_tracker = usage_tracker.clone();
+        tokio::spawn(async move {
+            usage_tracker
+                .record_query(QuerySample {
+                    tenant_id,
+                    project_id,
+                    signal,
+                    bytes_scanned: i64::try_from(estimated_scanned_bytes.unwrap_or(0))
+                        .unwrap_or(i64::MAX),
+                    rows_scanned: Some(rows_scanned),
+                    query_time_ms: Some(
+                        i32::try_from(query_started_at.elapsed().as_millis()).unwrap_or(i32::MAX),
+                    ),
+                    decision: DecisionSummary::Allow,
+                    submitted_at: chrono::Utc::now().timestamp_micros(),
+                })
+                .await;
+        });
     }
 
     /// Query traces
@@ -1143,8 +1151,8 @@ impl QueryService {
                             "quota",
                             max_bytes,
                             observed_value,
-                            Some(period_start),
-                            period_end,
+                            resolved.hard_block_pct,
+                            (Some(period_start), period_end),
                         ));
                     }
                 }
@@ -1162,8 +1170,8 @@ impl QueryService {
                     "size",
                     max_bytes,
                     observed_value,
-                    None,
-                    None,
+                    resolved.hard_block_pct,
+                    (None, None),
                 ));
             }
         }

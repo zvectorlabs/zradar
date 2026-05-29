@@ -407,20 +407,25 @@ impl ParquetFileWriter {
             .context("Failed to register file in file_list")?;
 
         if let Some(usage_tracker) = &self.usage_tracker {
-            usage_tracker
-                .record_write(WriteSample {
-                    tenant_id: tenant_uuid,
-                    project_id: project_uuid,
-                    signal: signal_kind(signal_type),
-                    stream_name: Some(stream_name.to_string()),
-                    compressed_bytes: compressed_size,
-                    original_bytes: Some(original_size),
-                    records: record_count,
-                    file_id: Some(registered_file_id),
-                    decision: DecisionSummary::Allow,
-                    flushed_at: now_us,
-                })
-                .await;
+            let usage_tracker = usage_tracker.clone();
+            let stream_name = stream_name.to_string();
+            let signal = signal_kind(signal_type);
+            tokio::spawn(async move {
+                usage_tracker
+                    .record_write(WriteSample {
+                        tenant_id: tenant_uuid,
+                        project_id: project_uuid,
+                        signal,
+                        stream_name: Some(stream_name),
+                        compressed_bytes: compressed_size,
+                        original_bytes: Some(original_size),
+                        records: record_count,
+                        file_id: Some(registered_file_id),
+                        decision: DecisionSummary::Allow,
+                        flushed_at: now_us,
+                    })
+                    .await;
+            });
         }
 
         self.file_list_repo
