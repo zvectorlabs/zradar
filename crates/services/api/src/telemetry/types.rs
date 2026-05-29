@@ -297,6 +297,40 @@ pub struct StorageUsage {
     pub compressed_size: i64,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct QuotaStatusQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub signal: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UsageDailyQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub signal: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct IngestRateQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub signal: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct QueryUsageQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub signal: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
 /// Paginated response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PaginatedResponse<T> {

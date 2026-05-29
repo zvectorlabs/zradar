@@ -292,6 +292,54 @@ pub async fn get_storage_usage(
     Ok(Json(results))
 }
 
+pub async fn get_quota_status(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<QuotaStatusQuery>,
+) -> Result<Json<Vec<zradar_policy::QuotaStatus>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let status = service.get_quota_status(tenant_id, query).await?;
+    Ok(Json(status))
+}
+
+pub async fn get_usage_daily(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<UsageDailyQuery>,
+) -> Result<Json<Vec<zradar_policy::UsageDailyRecord>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let results = service.get_usage_daily(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
+pub async fn get_ingest_rate(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<IngestRateQuery>,
+) -> Result<Json<Vec<zradar_policy::IngestRateRecord>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let results = service.get_ingest_rate(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
+pub async fn get_query_usage(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<QueryUsageQuery>,
+) -> Result<Json<Vec<zradar_policy::QueryUsageRecord>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let results = service.get_query_usage(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
 /// Query log records
 #[utoipa::path(
     get,

@@ -3,13 +3,14 @@
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
 use crate::converter::OtlpConverter;
-use crate::ingestion_guard::enforce_project_settings;
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings};
 use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse, trace_service_server::TraceService,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use zradar_policy::{PolicyEnforcer, SignalKind};
 use zradar_traits::{Authenticator, SettingsRepository, TelemetryWriter};
 
 /// OTLP Trace Service — converts OTLP protobuf to spans and writes them.
@@ -19,6 +20,7 @@ pub struct OtlpTraceService {
     auth: Option<Arc<dyn Authenticator>>,
     settings_repo: Option<Arc<dyn SettingsRepository>>,
     rate_limiter: Option<Arc<ProjectRateLimiter>>,
+    policy_enforcer: Option<Arc<dyn PolicyEnforcer>>,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
@@ -29,6 +31,7 @@ impl OtlpTraceService {
             auth,
             settings_repo: None,
             rate_limiter: None,
+            policy_enforcer: None,
             circuit_breaker: None,
         }
     }
@@ -45,6 +48,41 @@ impl OtlpTraceService {
             auth,
             settings_repo: Some(settings_repo),
             rate_limiter: Some(rate_limiter),
+            policy_enforcer: None,
+            circuit_breaker: Some(circuit_breaker),
+        }
+    }
+
+    pub fn with_policy_enforcer(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        policy_enforcer: Arc<dyn PolicyEnforcer>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: None,
+            rate_limiter: None,
+            policy_enforcer: Some(policy_enforcer),
+            circuit_breaker: Some(circuit_breaker),
+        }
+    }
+
+    pub fn with_settings_and_policy(
+        writer: Arc<dyn TelemetryWriter>,
+        auth: Option<Arc<dyn Authenticator>>,
+        settings_repo: Arc<dyn SettingsRepository>,
+        rate_limiter: Arc<ProjectRateLimiter>,
+        policy_enforcer: Arc<dyn PolicyEnforcer>,
+        circuit_breaker: Arc<CircuitBreaker>,
+    ) -> Self {
+        Self {
+            writer,
+            auth,
+            settings_repo: Some(settings_repo),
+            rate_limiter: Some(rate_limiter),
+            policy_enforcer: Some(policy_enforcer),
             circuit_breaker: Some(circuit_breaker),
         }
     }
@@ -67,6 +105,16 @@ impl TraceService for OtlpTraceService {
             .flat_map(|resource_spans| &resource_spans.scope_spans)
             .map(|scope_spans| scope_spans.spans.len() as u64)
             .sum();
+        if let Some(policy_enforcer) = &self.policy_enforcer {
+            enforce_policy_ingest(
+                policy_enforcer.as_ref(),
+                &context,
+                SignalKind::Traces,
+                span_count,
+                None,
+            )
+            .await?;
+        }
         enforce_project_settings(
             &self.settings_repo,
             &self.rate_limiter,

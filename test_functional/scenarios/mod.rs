@@ -8,6 +8,7 @@ pub mod test_health;
 pub mod test_logs;
 pub mod test_metrics;
 pub mod test_parquet_metadata;
+pub mod test_policy_enforcement;
 pub mod test_query_api;
 pub mod test_retention;
 pub mod test_span_types;

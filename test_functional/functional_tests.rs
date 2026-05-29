@@ -46,6 +46,9 @@ mod test_logs;
 #[path = "scenarios/test_retention.rs"]
 mod test_retention;
 
+#[path = "scenarios/test_policy_enforcement.rs"]
+mod test_policy_enforcement;
+
 #[path = "scenarios/test_agent_load.rs"]
 mod test_agent_load;
 

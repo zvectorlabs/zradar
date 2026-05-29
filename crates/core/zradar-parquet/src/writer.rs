@@ -30,6 +30,7 @@ use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use tracing::debug;
 use uuid::Uuid;
 use zradar_models::{FileListFilter, LogRecord, Metric, NewFileListEntry, Span, StreamStatsUpdate};
+use zradar_policy::{DecisionSummary, SignalKind, UsageTracker, WriteSample};
 use zradar_traits::FileListRepository;
 
 use crate::schema::logs::logs_to_record_batch;
@@ -83,6 +84,7 @@ pub struct ParquetFileWriter {
     /// Root directory for all Parquet files (e.g. `./data/parquet-files`).
     data_dir: PathBuf,
     file_list_repo: Arc<dyn FileListRepository>,
+    usage_tracker: Option<Arc<dyn UsageTracker>>,
     config: WriterConfig,
 }
 
@@ -92,6 +94,7 @@ impl ParquetFileWriter {
         Self {
             data_dir: make_absolute(data_dir),
             file_list_repo,
+            usage_tracker: None,
             config: WriterConfig::default(),
         }
     }
@@ -105,6 +108,21 @@ impl ParquetFileWriter {
         Self {
             data_dir: make_absolute(data_dir),
             file_list_repo,
+            usage_tracker: None,
+            config,
+        }
+    }
+
+    pub fn with_config_and_usage_tracker(
+        data_dir: PathBuf,
+        file_list_repo: Arc<dyn FileListRepository>,
+        config: WriterConfig,
+        usage_tracker: Arc<dyn UsageTracker>,
+    ) -> Self {
+        Self {
+            data_dir: make_absolute(data_dir),
+            file_list_repo,
+            usage_tracker: Some(usage_tracker),
             config,
         }
     }
@@ -366,7 +384,8 @@ impl ParquetFileWriter {
         let tenant_uuid = parse_uuid_or_nil(tenant_id);
         let project_uuid = parse_uuid_or_nil(project_id);
 
-        self.file_list_repo
+        let registered_file_id = self
+            .file_list_repo
             .register_file(NewFileListEntry {
                 tenant_id: tenant_uuid,
                 project_id: project_uuid,
@@ -386,6 +405,23 @@ impl ParquetFileWriter {
             })
             .await
             .context("Failed to register file in file_list")?;
+
+        if let Some(usage_tracker) = &self.usage_tracker {
+            usage_tracker
+                .record_write(WriteSample {
+                    tenant_id: tenant_uuid,
+                    project_id: project_uuid,
+                    signal: signal_kind(signal_type),
+                    stream_name: Some(stream_name.to_string()),
+                    compressed_bytes: compressed_size,
+                    original_bytes: Some(original_size),
+                    records: record_count,
+                    file_id: Some(registered_file_id),
+                    decision: DecisionSummary::Allow,
+                    flushed_at: now_us,
+                })
+                .await;
+        }
 
         self.file_list_repo
             .upsert_stream_stats(StreamStatsUpdate {
@@ -430,6 +466,18 @@ pub(crate) fn ts_ns_to_date_path(ts_ns: i64) -> String {
 /// Parse a UUID string, returning `Uuid::nil()` on failure.
 pub(crate) fn parse_uuid_or_nil(s: &str) -> Uuid {
     Uuid::parse_str(s).unwrap_or(Uuid::nil())
+}
+
+fn signal_kind(signal_type: &str) -> SignalKind {
+    match signal_type {
+        "traces" => SignalKind::Traces,
+        "logs" => SignalKind::Logs,
+        "metrics" => SignalKind::Metrics,
+        "rum" => SignalKind::Rum,
+        "session_replay" => SignalKind::SessionReplay,
+        "error_tracking" => SignalKind::ErrorTracking,
+        _ => SignalKind::All,
+    }
 }
 
 /// Convert a potentially-relative path to an absolute path by joining with

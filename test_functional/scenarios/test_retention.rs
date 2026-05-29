@@ -174,13 +174,14 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
 #[ignore]
 async fn test_set_retention_config() -> Result<()> {
     let env = TestEnv::setup().await?;
+    let org_id = env.tenant_id;
 
     let set_resp = env
         .client
         .put(
             "/api/v1/admin/retention/config",
             &serde_json::json!({
-                "org_id": Uuid::nil(),
+                "org_id": org_id,
                 "default_days": 14,
                 "project_overrides": {}
             }),
@@ -192,12 +193,12 @@ async fn test_set_retention_config() -> Result<()> {
         "Retention config update should return 200"
     );
     let set_config: RetentionConfigResponse = set_resp.json().await?;
-    assert_eq!(set_config.org_id, Uuid::nil());
+    assert_eq!(set_config.org_id, org_id);
     assert_eq!(set_config.default_days, 14);
 
     let get_resp = env
         .client
-        .get(&format!("/api/v1/admin/retention/config/{}", Uuid::nil()))
+        .get(&format!("/api/v1/admin/retention/config/{}", org_id))
         .await?;
     assert_eq!(
         get_resp.status(),
@@ -205,7 +206,7 @@ async fn test_set_retention_config() -> Result<()> {
         "Retention config get should return 200"
     );
     let get_config: RetentionConfigResponse = get_resp.json().await?;
-    assert_eq!(get_config.org_id, Uuid::nil());
+    assert_eq!(get_config.org_id, org_id);
     assert_eq!(get_config.default_days, 14);
 
     println!("Retention config set via API");

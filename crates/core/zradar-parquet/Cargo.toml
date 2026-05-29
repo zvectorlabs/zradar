@@ -32,4 +32,5 @@ bytes = { workspace = true }
 
 # Internal workspace crates
 zradar-models = { workspace = true }
+zradar-policy = { workspace = true }
 zradar-traits = { workspace = true }

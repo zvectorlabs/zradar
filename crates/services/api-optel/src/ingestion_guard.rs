@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tonic::Status;
 use uuid::Uuid;
 use zradar_models::{ProjectSettings, RequestContext};
+use zradar_policy::{BlockCode, Decision, IngestCtx, PolicyEnforcer, SignalKind};
 use zradar_traits::SettingsRepository;
 
 pub async fn load_project_settings(
@@ -58,4 +59,45 @@ pub async fn enforce_project_settings(
     }
 
     Ok(())
+}
+
+pub async fn enforce_policy_ingest(
+    enforcer: &dyn PolicyEnforcer,
+    context: &RequestContext,
+    signal: SignalKind,
+    records: u64,
+    estimated_bytes: Option<u64>,
+) -> Result<(), Status> {
+    let tenant_id = Uuid::parse_str(&context.tenant_id)
+        .map_err(|_| Status::invalid_argument("Invalid tenant_id in request context"))?;
+    let project_id = Uuid::parse_str(&context.project_id)
+        .map_err(|_| Status::invalid_argument("Invalid project_id in request context"))?;
+
+    let decision = enforcer
+        .check_ingest(IngestCtx {
+            tenant_id,
+            project_id,
+            signal,
+            records,
+            estimated_bytes,
+            now_micros: chrono::Utc::now().timestamp_micros(),
+        })
+        .await;
+
+    match decision {
+        Decision::Allow | Decision::AllowWithGrace { .. } => Ok(()),
+        Decision::Throttle {
+            retry_after_ms: _,
+            reason,
+        } => Err(Status::resource_exhausted(reason)),
+        Decision::Block { reason, code } => match code {
+            BlockCode::ProjectBlocked => Err(Status::permission_denied(reason)),
+            BlockCode::RateLimitExceeded | BlockCode::QuotaExceeded | BlockCode::SizeExceeded => {
+                Err(Status::resource_exhausted(reason))
+            }
+            BlockCode::RetentionViolation | BlockCode::QueryWindowViolation => {
+                Err(Status::invalid_argument(reason))
+            }
+        },
+    }
 }

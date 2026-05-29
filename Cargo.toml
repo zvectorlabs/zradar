@@ -6,6 +6,7 @@ members = [
     "crates/core/zradar-traits",
     "crates/core/zradar-parquet",
     "crates/core/zradar-retention",
+    "crates/core/zradar-policy",
     "crates/core/zradar-wal",
 
     # Storage backends
@@ -105,6 +106,7 @@ zradar-models = { path = "crates/core/zradar-models" }
 zradar-traits = { path = "crates/core/zradar-traits" }
 zradar-parquet = { path = "crates/core/zradar-parquet" }
 zradar-retention = { path = "crates/core/zradar-retention" }
+zradar-policy = { path = "crates/core/zradar-policy" }
 zradar-wal = { path = "crates/core/zradar-wal" }
 
 # Internal workspace crates (Services)
