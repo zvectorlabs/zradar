@@ -77,14 +77,6 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                        ($1::date - INTERVAL '1 day')::date AS previous_day,
                        $2::bigint AS captured_at
             ),
-            has_previous AS (
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM retention_storage_daily r, params p
-                    WHERE r.bucket_index = 0
-                      AND r.day = p.previous_day
-                ) AS value
-            ),
             previous AS (
                 SELECT r.tenant_id,
                        r.project_id,
@@ -137,21 +129,23 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                            0
                        )::bigint AS file_count
                 FROM keys k
-                LEFT JOIN previous p USING (tenant_id, project_id, signal_kind)
+                JOIN previous p USING (tenant_id, project_id, signal_kind)
                 LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
                 LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
-                WHERE (SELECT value FROM has_previous)
             ),
             bootstrap AS (
-                SELECT tenant_id,
-                       project_id,
-                       signal_type AS signal_kind,
-                       COALESCE(SUM(compressed_size), 0)::bigint AS compressed_bytes,
+                SELECT f.tenant_id,
+                       f.project_id,
+                       f.signal_type AS signal_kind,
+                       COALESCE(SUM(f.compressed_size), 0)::bigint AS compressed_bytes,
                        COUNT(*)::bigint AS file_count
-                FROM file_list
-                WHERE deleted = false
-                GROUP BY tenant_id, project_id, signal_type
-                HAVING NOT (SELECT value FROM has_previous)
+                FROM file_list f
+                LEFT JOIN previous p ON f.tenant_id = p.tenant_id 
+                                    AND f.project_id = p.project_id 
+                                    AND f.signal_type = p.signal_kind
+                WHERE f.deleted = false
+                  AND p.tenant_id IS NULL
+                GROUP BY f.tenant_id, f.project_id, f.signal_type
             ),
             source AS (
                 SELECT * FROM incremental
@@ -308,17 +302,6 @@ pub async fn derive_storage_usage_daily_rows(
                    ($4::date - INTERVAL '1 day')::date AS previous_day,
                    $5::bigint AS captured_at
         ),
-        has_previous AS (
-            SELECT EXISTS (
-                SELECT 1
-                FROM retention_storage_daily r, params p
-                WHERE r.tenant_id = $1
-                  AND r.project_id = $2
-                  AND r.bucket_index = 0
-                  AND r.day = p.previous_day
-                  AND ($3::text IS NULL OR r.signal_kind = $3)
-            ) AS value
-        ),
         previous AS (
             SELECT r.tenant_id,
                    r.project_id,
@@ -380,24 +363,26 @@ pub async fn derive_storage_usage_daily_rows(
                        0
                    )::bigint AS file_count
             FROM keys k
-            LEFT JOIN previous p USING (tenant_id, project_id, signal_kind)
+            JOIN previous p USING (tenant_id, project_id, signal_kind)
             LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
             LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
-            WHERE (SELECT value FROM has_previous)
         ),
         bootstrap AS (
-            SELECT tenant_id,
-                   project_id,
-                   signal_type AS signal_kind,
-                   COALESCE(SUM(compressed_size), 0)::bigint AS compressed_bytes,
+            SELECT f.tenant_id,
+                   f.project_id,
+                   f.signal_type AS signal_kind,
+                   COALESCE(SUM(f.compressed_size), 0)::bigint AS compressed_bytes,
                    COUNT(*)::bigint AS file_count
-            FROM file_list
-            WHERE tenant_id = $1
-              AND project_id = $2
-              AND deleted = false
-              AND ($3::text IS NULL OR signal_type = $3)
-            GROUP BY tenant_id, project_id, signal_type
-            HAVING NOT (SELECT value FROM has_previous)
+            FROM file_list f
+            LEFT JOIN previous p ON f.tenant_id = p.tenant_id 
+                                AND f.project_id = p.project_id 
+                                AND f.signal_type = p.signal_kind
+            WHERE f.tenant_id = $1
+              AND f.project_id = $2
+              AND f.deleted = false
+              AND ($3::text IS NULL OR f.signal_type = $3)
+              AND p.tenant_id IS NULL
+            GROUP BY f.tenant_id, f.project_id, f.signal_type
         ),
         source AS (
             SELECT * FROM incremental

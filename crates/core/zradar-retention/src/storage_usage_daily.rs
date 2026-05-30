@@ -29,7 +29,8 @@ impl StorageUsageDailyJob {
             "StorageUsageDailyJob started"
         );
 
-        let interval = Duration::from_secs(self.interval_secs);
+        let mut interval = tokio::time::interval(Duration::from_secs(self.interval_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -37,7 +38,7 @@ impl StorageUsageDailyJob {
                     info!("StorageUsageDailyJob shutting down");
                     return;
                 }
-                _ = tokio::time::sleep(interval) => {
+                _ = interval.tick() => {
                     let day = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
                     if let Err(e) = self.run_now(day).await {
                         error!(error = %e, "StorageUsageDailyJob cycle failed");
