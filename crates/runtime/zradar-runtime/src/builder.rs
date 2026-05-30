@@ -72,17 +72,164 @@ pub struct RuntimeAuth {
 pub struct ZradarRuntimeBuilder {
     config: Config,
     auth: RuntimeAuth,
+    policy_overrides: RuntimePolicyOverrides,
+}
+
+#[derive(Default)]
+struct RuntimePolicyOverrides {
+    policy_store: Option<Arc<dyn PolicyStore>>,
+    usage_reader: Option<Arc<dyn UsageReader>>,
+    reporting_usage_reader: Option<Arc<dyn UsageReader>>,
+    usage_analytics_reader: Option<Arc<dyn UsageAnalyticsReader>>,
+    usage_tracker: Option<Arc<dyn UsageTracker>>,
+    policy_enforcer: Option<Arc<dyn PolicyEnforcer>>,
+    threshold_sink: Option<Arc<dyn ThresholdSink>>,
+    decision_audit_sink: Option<Arc<dyn DecisionAuditSink>>,
+}
+
+struct PolicyRuntimeComponents {
+    policy_store: Arc<dyn PolicyStore>,
+    reporting_usage_reader: Arc<dyn UsageReader>,
+    usage_analytics_reader: Arc<dyn UsageAnalyticsReader>,
+    usage_tracker: Arc<dyn UsageTracker>,
+    policy_enforcer: Arc<dyn PolicyEnforcer>,
+    usage_tracker_metrics: Arc<UsageTrackerMetrics>,
+    policy_store_refresh: Option<Arc<PostgresPolicyStore>>,
+}
+
+async fn build_policy_runtime_components(
+    pg_client: Arc<PostgresClient>,
+    overrides: RuntimePolicyOverrides,
+) -> Result<PolicyRuntimeComponents> {
+    let RuntimePolicyOverrides {
+        policy_store,
+        usage_reader,
+        reporting_usage_reader,
+        usage_analytics_reader,
+        usage_tracker,
+        policy_enforcer,
+        threshold_sink,
+        decision_audit_sink,
+    } = overrides;
+
+    let (policy_store, policy_store_refresh) = if let Some(policy_store) = policy_store {
+        (policy_store, None)
+    } else {
+        let policy_store_impl = Arc::new(PostgresPolicyStore::new(pg_client.clone()));
+        policy_store_impl.refresh().await?;
+        (
+            policy_store_impl.clone() as Arc<dyn PolicyStore>,
+            Some(policy_store_impl),
+        )
+    };
+
+    let hot_usage = Arc::new(InMemoryUsageTracker::new());
+    let usage_reader = usage_reader.unwrap_or_else(|| hot_usage.clone() as Arc<dyn UsageReader>);
+    let reporting_usage_reader = reporting_usage_reader.unwrap_or_else(|| {
+        Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageReader>
+    });
+    let usage_analytics_reader = usage_analytics_reader.unwrap_or_else(|| {
+        Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageAnalyticsReader>
+    });
+    let usage_tracker_metrics = Arc::new(UsageTrackerMetrics::default());
+    let usage_tracker = usage_tracker.unwrap_or_else(|| {
+        let postgres_usage_tracker = Arc::new(PostgresUsageTracker::spawn_with_metrics(
+            pg_client.clone(),
+            usage_tracker_metrics.clone(),
+        )) as Arc<dyn UsageTracker>;
+        Arc::new(FanoutUsageTracker::new(vec![
+            hot_usage.clone() as Arc<dyn UsageTracker>,
+            postgres_usage_tracker,
+        ])) as Arc<dyn UsageTracker>
+    });
+    let threshold_sink = threshold_sink.unwrap_or_else(|| {
+        Arc::new(PostgresThresholdSink::new(pg_client.clone())) as Arc<dyn ThresholdSink>
+    });
+    let decision_audit_sink = decision_audit_sink.unwrap_or_else(|| {
+        Arc::new(PostgresDecisionAuditSink::new(pg_client.clone())) as Arc<dyn DecisionAuditSink>
+    });
+    let policy_enforcer = policy_enforcer.unwrap_or_else(|| {
+        let policy_engine = PolicyEngine::new_with_decision_audit(
+            policy_store.clone(),
+            usage_reader,
+            usage_tracker.clone(),
+            threshold_sink,
+            decision_audit_sink,
+        );
+        policy_engine.enforcer.clone() as Arc<dyn PolicyEnforcer>
+    });
+
+    Ok(PolicyRuntimeComponents {
+        policy_store,
+        reporting_usage_reader,
+        usage_analytics_reader,
+        usage_tracker,
+        policy_enforcer,
+        usage_tracker_metrics,
+        policy_store_refresh,
+    })
 }
 
 impl ZradarRuntimeBuilder {
     /// Create a new builder from a loaded config and caller-provided auth.
     pub fn new(config: Config, auth: RuntimeAuth) -> Self {
-        Self { config, auth }
+        Self {
+            config,
+            auth,
+            policy_overrides: RuntimePolicyOverrides::default(),
+        }
+    }
+
+    pub fn with_policy_store(mut self, policy_store: Arc<dyn PolicyStore>) -> Self {
+        self.policy_overrides.policy_store = Some(policy_store);
+        self
+    }
+
+    pub fn with_usage_reader(mut self, usage_reader: Arc<dyn UsageReader>) -> Self {
+        self.policy_overrides.usage_reader = Some(usage_reader);
+        self
+    }
+
+    pub fn with_reporting_usage_reader(mut self, usage_reader: Arc<dyn UsageReader>) -> Self {
+        self.policy_overrides.reporting_usage_reader = Some(usage_reader);
+        self
+    }
+
+    pub fn with_usage_analytics_reader(
+        mut self,
+        usage_analytics_reader: Arc<dyn UsageAnalyticsReader>,
+    ) -> Self {
+        self.policy_overrides.usage_analytics_reader = Some(usage_analytics_reader);
+        self
+    }
+
+    pub fn with_usage_tracker(mut self, usage_tracker: Arc<dyn UsageTracker>) -> Self {
+        self.policy_overrides.usage_tracker = Some(usage_tracker);
+        self
+    }
+
+    pub fn with_policy_enforcer(mut self, policy_enforcer: Arc<dyn PolicyEnforcer>) -> Self {
+        self.policy_overrides.policy_enforcer = Some(policy_enforcer);
+        self
+    }
+
+    pub fn with_threshold_sink(mut self, threshold_sink: Arc<dyn ThresholdSink>) -> Self {
+        self.policy_overrides.threshold_sink = Some(threshold_sink);
+        self
+    }
+
+    pub fn with_decision_audit_sink(
+        mut self,
+        decision_audit_sink: Arc<dyn DecisionAuditSink>,
+    ) -> Self {
+        self.policy_overrides.decision_audit_sink = Some(decision_audit_sink);
+        self
     }
 
     /// Run the OTLP gRPC and Admin HTTP servers. Blocks until either exits.
     pub async fn run(self) -> Result<()> {
         let config = self.config;
+        let policy_overrides = self.policy_overrides;
         let RuntimeAuth {
             otlp: otlp_auth,
             admin: admin_authorizer,
@@ -120,36 +267,17 @@ impl ZradarRuntimeBuilder {
                 as Arc<dyn zradar_traits::RetentionPolicyRepository>;
         let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::AuditLogRepository>;
-        let policy_store_impl = Arc::new(PostgresPolicyStore::new(pg_client.clone()));
-        policy_store_impl.refresh().await?;
-        let policy_store = policy_store_impl.clone() as Arc<dyn PolicyStore>;
-        let hot_usage = Arc::new(InMemoryUsageTracker::new());
-        let usage_reader = hot_usage.clone() as Arc<dyn UsageReader>;
-        let reporting_usage_reader =
-            Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageReader>;
-        let usage_analytics_reader =
-            Arc::new(PostgresUsageReader::new(pg_client.clone())) as Arc<dyn UsageAnalyticsReader>;
-        let usage_tracker_metrics = Arc::new(UsageTrackerMetrics::default());
-        let postgres_usage_tracker = Arc::new(PostgresUsageTracker::spawn_with_metrics(
-            pg_client.clone(),
-            usage_tracker_metrics.clone(),
-        )) as Arc<dyn UsageTracker>;
-        let usage_tracker = Arc::new(FanoutUsageTracker::new(vec![
-            hot_usage.clone() as Arc<dyn UsageTracker>,
-            postgres_usage_tracker,
-        ])) as Arc<dyn UsageTracker>;
-        let threshold_sink =
-            Arc::new(PostgresThresholdSink::new(pg_client.clone())) as Arc<dyn ThresholdSink>;
-        let decision_audit_sink = Arc::new(PostgresDecisionAuditSink::new(pg_client.clone()))
-            as Arc<dyn DecisionAuditSink>;
-        let policy_engine = Arc::new(PolicyEngine::new_with_decision_audit(
-            policy_store.clone(),
-            usage_reader,
-            usage_tracker.clone(),
-            threshold_sink,
-            decision_audit_sink,
-        ));
-        let policy_enforcer = policy_engine.enforcer.clone() as Arc<dyn PolicyEnforcer>;
+        let policy_components =
+            build_policy_runtime_components(pg_client.clone(), policy_overrides).await?;
+        let PolicyRuntimeComponents {
+            policy_store,
+            reporting_usage_reader,
+            usage_analytics_reader,
+            usage_tracker,
+            policy_enforcer,
+            usage_tracker_metrics,
+            policy_store_refresh,
+        } = policy_components;
 
         // =====================================================================
         // Parquet storage layer
@@ -183,8 +311,7 @@ impl ZradarRuntimeBuilder {
         ));
 
         let cancel_token = CancellationToken::new();
-        {
-            let policy_store_refresh = policy_store_impl.clone();
+        if let Some(policy_store_refresh) = policy_store_refresh {
             let cancel = cancel_token.clone();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_secs(30));
