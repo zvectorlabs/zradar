@@ -35,14 +35,14 @@ use sqlx::postgres::PgPoolOptions;
 use zradar_models::Config;
 use zradar_parquet::{
     Compactor, DiskCache, FileMover, FlushWorker, MemoryCache, ParquetFileReader,
-    ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter, RetentionJob, WriteBuffer,
-    WriterConfig, recover_incomplete_writes,
+    ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter, WriteBuffer, WriterConfig,
+    recover_incomplete_writes,
 };
 use zradar_plugin_postgres::{
     PostgresAuditLogRepository, PostgresClient, PostgresDecisionAuditSink,
     PostgresFileListRepository, PostgresPolicyStore, PostgresRetentionPolicyRepository,
-    PostgresSettingsRepository, PostgresThresholdSink, PostgresUsageReader, PostgresUsageTracker,
-    UsageTrackerMetrics, migrations::MIGRATIONS,
+    PostgresSettingsRepository, PostgresStorageUsageRepository, PostgresThresholdSink,
+    PostgresUsageReader, PostgresUsageTracker, UsageTrackerMetrics, migrations::MIGRATIONS,
 };
 use zradar_plugin_s3::S3BlockStorage;
 use zradar_policy::{
@@ -51,6 +51,7 @@ use zradar_policy::{
 };
 use zradar_retention::{
     CleanupJob, EnforcementStrategy, OrgRetentionConfig, QueryEnforcer, RetentionConfigStore,
+    StorageUsageDailyJob,
 };
 use zradar_traits::{AdminAuthorizer, Authenticator};
 
@@ -265,6 +266,8 @@ impl ZradarRuntimeBuilder {
         let retention_policy_repo =
             Arc::new(PostgresRetentionPolicyRepository::new(pg_client.clone()))
                 as Arc<dyn zradar_traits::RetentionPolicyRepository>;
+        let storage_usage_repo = Arc::new(PostgresStorageUsageRepository::new(pg_client.clone()))
+            as Arc<dyn zradar_traits::StorageUsageRepository>;
         let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::AuditLogRepository>;
         let policy_components =
@@ -402,14 +405,6 @@ impl ZradarRuntimeBuilder {
                         tokio::spawn(mover.run(cancel_token.clone()));
                         info!("FileMover background task started");
 
-                        let retention = RetentionJob::with_storage(
-                            file_list_repo.clone(),
-                            s3.clone(),
-                            parquet_lifecycle_config.clone(),
-                        );
-                        tokio::spawn(retention.run(cancel_token.clone()));
-                        info!("RetentionJob background task started");
-
                         Some(s3)
                     }
                     Err(e) => {
@@ -418,41 +413,37 @@ impl ZradarRuntimeBuilder {
                     }
                 }
             } else {
-                let retention =
-                    RetentionJob::new(file_list_repo.clone(), parquet_lifecycle_config.clone());
-                tokio::spawn(retention.run(cancel_token.clone()));
-                info!("RetentionJob (local-only) background task started");
                 None
             };
 
-        let parquet_file_reader: Arc<ParquetFileReader> = if let Some(s3_storage) = s3_block_storage
-        {
-            let disk_cache = Arc::new(DiskCache::new(s3_storage, &parquet_lifecycle_config));
-            Arc::new(if let Some(mc) = memory_cache.clone() {
-                ParquetFileReader::with_cache_and_memory_cache(
-                    parquet_data_dir.clone(),
-                    file_list_repo.clone(),
-                    disk_cache,
-                    mc,
-                )
+        let parquet_file_reader: Arc<ParquetFileReader> =
+            if let Some(s3_storage) = s3_block_storage.clone() {
+                let disk_cache = Arc::new(DiskCache::new(s3_storage, &parquet_lifecycle_config));
+                Arc::new(if let Some(mc) = memory_cache.clone() {
+                    ParquetFileReader::with_cache_and_memory_cache(
+                        parquet_data_dir.clone(),
+                        file_list_repo.clone(),
+                        disk_cache,
+                        mc,
+                    )
+                } else {
+                    ParquetFileReader::with_cache(
+                        parquet_data_dir.clone(),
+                        file_list_repo.clone(),
+                        disk_cache,
+                    )
+                })
             } else {
-                ParquetFileReader::with_cache(
-                    parquet_data_dir.clone(),
-                    file_list_repo.clone(),
-                    disk_cache,
-                )
-            })
-        } else {
-            Arc::new(if let Some(mc) = memory_cache.clone() {
-                ParquetFileReader::with_memory_cache(
-                    parquet_data_dir.clone(),
-                    file_list_repo.clone(),
-                    mc,
-                )
-            } else {
-                ParquetFileReader::new(parquet_data_dir.clone(), file_list_repo.clone())
-            })
-        };
+                Arc::new(if let Some(mc) = memory_cache.clone() {
+                    ParquetFileReader::with_memory_cache(
+                        parquet_data_dir.clone(),
+                        file_list_repo.clone(),
+                        mc,
+                    )
+                } else {
+                    ParquetFileReader::new(parquet_data_dir.clone(), file_list_repo.clone())
+                })
+            };
 
         let parquet_telemetry_reader =
             Arc::new(ParquetTelemetryReader::new(parquet_file_reader.clone()));
@@ -475,17 +466,41 @@ impl ZradarRuntimeBuilder {
             "RetentionConfigStore initialized"
         );
 
-        let cleanup_job = Arc::new(CleanupJob::new(
-            file_list_repo.clone(),
-            retention_config_store.clone(),
-            parquet_lifecycle_config.retention_check_interval_secs,
-        ));
+        let cleanup_job = Arc::new(
+            if let Some(s3_storage) = s3_block_storage.clone() {
+                CleanupJob::with_storage(
+                    file_list_repo.clone(),
+                    s3_storage,
+                    retention_config_store.clone(),
+                    parquet_lifecycle_config.retention_check_interval_secs,
+                )
+            } else {
+                CleanupJob::new(
+                    file_list_repo.clone(),
+                    retention_config_store.clone(),
+                    parquet_lifecycle_config.retention_check_interval_secs,
+                )
+            }
+            .with_storage_usage_repository(storage_usage_repo.clone()),
+        );
         {
             let job = cleanup_job.clone();
             let cancel = cancel_token.clone();
             tokio::spawn(async move { job.run(cancel).await });
         }
         info!("CleanupJob background task started");
+
+        let storage_usage_daily_job = Arc::new(StorageUsageDailyJob::new(
+            file_list_repo.clone(),
+            storage_usage_repo.clone(),
+            parquet_lifecycle_config.storage_snapshot_interval_secs,
+        ));
+        {
+            let job = storage_usage_daily_job.clone();
+            let cancel = cancel_token.clone();
+            tokio::spawn(async move { job.run(cancel).await });
+        }
+        info!("StorageUsageDailyJob background task started");
 
         let retention_state = Arc::new(RetentionState {
             cleanup_job: cleanup_job.clone(),
@@ -505,6 +520,7 @@ impl ZradarRuntimeBuilder {
                 query_enforcer,
             )
             .with_file_list_repo(file_list_repo.clone())
+            .with_storage_usage_repo(storage_usage_repo.clone())
             .with_policy_enforcer(policy_enforcer.clone())
             .with_usage_tracker(usage_tracker.clone())
             .with_policy_context(

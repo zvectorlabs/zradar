@@ -80,6 +80,35 @@ pub trait FileListRepository: Send + Sync {
     /// Upsert stream stats for a single stream (insert or accumulate deltas).
     async fn upsert_stream_stats(&self, stats: StreamStatsUpdate) -> anyhow::Result<()>;
 
+    /// Return the distinct (tenant_id, project_id, signal_type) combinations for
+    /// all non-deleted files whose `created_at` is before `before_micros`.
+    ///
+    /// Used by the storage-usage snapshot job to discover which keys need a
+    /// snapshot without loading every file row.
+    async fn list_active_keys(
+        &self,
+        before_micros: i64,
+    ) -> anyhow::Result<Vec<(Uuid, Uuid, String)>> {
+        // Default implementation falls back to query_files — works for tests /
+        // in-memory repos without needing a separate SQL method.
+        let files = self
+            .query_files(FileListFilter {
+                deleted: Some(false),
+                ..Default::default()
+            })
+            .await?;
+        let mut seen = std::collections::HashSet::new();
+        let mut keys = Vec::new();
+        for f in files {
+            if f.created_at < before_micros
+                && seen.insert((f.tenant_id, f.project_id, f.signal_type.clone()))
+            {
+                keys.push((f.tenant_id, f.project_id, f.signal_type));
+            }
+        }
+        Ok(keys)
+    }
+
     /// Check whether a file produced from a WAL flush at the given offset already
     /// exists in the file_list. Used by WAL replay to skip duplicate flushes.
     async fn already_flushed(

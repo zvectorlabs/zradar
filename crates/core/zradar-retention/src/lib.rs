@@ -11,7 +11,9 @@
 pub mod cleanup;
 pub mod config;
 pub mod enforcer;
+pub mod storage_usage_daily;
 
 pub use cleanup::{CleanupJob, CleanupStats};
 pub use config::{OrgRetentionConfig, RetentionConfigStore};
 pub use enforcer::{EnforcementResult, EnforcementStrategy, QueryEnforcer};
+pub use storage_usage_daily::StorageUsageDailyJob;

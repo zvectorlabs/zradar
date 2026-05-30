@@ -269,6 +269,36 @@ impl FileListRepository for PostgresFileListRepository {
         Ok(stats)
     }
 
+    async fn list_active_keys(
+        &self,
+        before_micros: i64,
+    ) -> anyhow::Result<Vec<(Uuid, Uuid, String)>> {
+        // Uses idx_file_list_active_size (tenant_id, project_id, signal_type WHERE deleted=false)
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT tenant_id, project_id, signal_type
+            FROM file_list
+            WHERE deleted    = false
+              AND created_at < $1
+            "#,
+        )
+        .bind(before_micros)
+        .fetch_all(self.client.pool())
+        .await
+        .context("Failed to list active file_list keys")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.get::<Uuid, _>("tenant_id"),
+                    r.get::<Uuid, _>("project_id"),
+                    r.get::<String, _>("signal_type"),
+                )
+            })
+            .collect())
+    }
+
     async fn already_flushed(
         &self,
         tenant_id: Uuid,

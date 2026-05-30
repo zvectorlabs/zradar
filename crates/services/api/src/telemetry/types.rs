@@ -298,6 +298,27 @@ pub struct StorageUsage {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct StorageUsageDailyQuery {
+    #[serde(default)]
+    pub project_id: String,
+    pub signal: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StorageUsageDaily {
+    pub tenant_id: String,
+    pub project_id: String,
+    pub signal: String,
+    pub day: String,
+    pub compressed_bytes: i64,
+    pub file_count: i64,
+    pub captured_at: i64,
+    pub estimated_today: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct QuotaStatusQuery {
     #[serde(default)]
     pub project_id: String,
