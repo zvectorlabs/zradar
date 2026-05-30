@@ -179,20 +179,31 @@ impl CleanupJob {
                 delta.file_count += 1;
             }
 
-            if !ids_to_delete.is_empty()
-                && let Some(storage_usage_repo) = &self.storage_usage_repo
-            {
-                let deltas = cleanup_deltas.values().cloned().collect::<Vec<_>>();
-                if let Err(e) = storage_usage_repo.record_cleanup_daily(&deltas).await {
-                    let msg = format!("storage cleanup daily accounting failed: {}", e);
-                    error!("{}", msg);
-                    stats.errors.push(msg);
-                }
+            if ids_to_delete.is_empty() {
+                continue;
             }
 
-            if !ids_to_delete.is_empty()
-                && let Err(e) = self.file_list_repo.delete_entries(&ids_to_delete).await
-            {
+            // Atomically write accounting deltas + remove file_list rows in one
+            // transaction.  If this fails the next cleanup cycle will safely retry:
+            // physical deletion is already done and is idempotent (S3 returns
+            // NoSuchKey, local returns NotFound — both are ignored above).
+            let deltas = cleanup_deltas.values().cloned().collect::<Vec<_>>();
+            if let Some(storage_usage_repo) = &self.storage_usage_repo {
+                if let Err(e) = storage_usage_repo
+                    .record_cleanup_and_delete(&deltas, &ids_to_delete)
+                    .await
+                {
+                    let msg = format!(
+                        "atomic cleanup commit failed for project {}/{}: {}",
+                        tenant_id, project_id, e
+                    );
+                    error!("{}", msg);
+                    stats.errors.push(msg);
+                    // Do NOT fall through to a standalone delete_entries — the
+                    // files will be retried on the next cycle.
+                    continue;
+                }
+            } else if let Err(e) = self.file_list_repo.delete_entries(&ids_to_delete).await {
                 let msg = format!("DB delete_entries failed: {}", e);
                 error!("{}", msg);
                 stats.errors.push(msg);

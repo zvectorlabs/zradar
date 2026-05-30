@@ -2,7 +2,7 @@ use crate::client::PostgresClient;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use sqlx::{Postgres, QueryBuilder, Row};
+use sqlx::{Executor, Postgres, QueryBuilder, Row};
 use std::sync::Arc;
 use zradar_traits::{StorageUsageDailySnapshot, StorageUsageDelta, StorageUsageRepository};
 
@@ -22,48 +22,40 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
         if deltas.is_empty() {
             return Ok(());
         }
+        upsert_cleanup_deltas(self.client.pool(), deltas).await
+    }
 
-        let now = chrono::Utc::now().timestamp_micros();
-        let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            r#"
-            INSERT INTO storage_cleanup_daily (
-                tenant_id,
-                project_id,
-                signal_kind,
-                day,
-                compressed_bytes,
-                file_count,
-                updated_at
-            )
-            "#,
-        );
+    async fn record_cleanup_and_delete(
+        &self,
+        deltas: &[StorageUsageDelta],
+        file_ids: &[i64],
+    ) -> anyhow::Result<()> {
+        if deltas.is_empty() && file_ids.is_empty() {
+            return Ok(());
+        }
 
-        builder.push_values(deltas, |mut row, delta| {
-            row.push_bind(delta.tenant_id)
-                .push_bind(delta.project_id)
-                .push_bind(&delta.signal_kind)
-                .push_bind(delta.day)
-                .push_bind(delta.compressed_bytes.max(0))
-                .push_bind(delta.file_count.max(0))
-                .push_bind(now);
-        });
-
-        builder.push(
-            r#"
-            ON CONFLICT (tenant_id, project_id, signal_kind, day)
-            DO UPDATE SET
-                compressed_bytes = storage_cleanup_daily.compressed_bytes
-                    + EXCLUDED.compressed_bytes,
-                file_count = storage_cleanup_daily.file_count + EXCLUDED.file_count,
-                updated_at = GREATEST(storage_cleanup_daily.updated_at, EXCLUDED.updated_at)
-            "#,
-        );
-
-        builder
-            .build()
-            .execute(self.client.pool())
+        let mut tx = self
+            .client
+            .pool()
+            .begin()
             .await
-            .context("Failed to upsert storage cleanup daily deltas")?;
+            .context("Failed to begin cleanup transaction")?;
+
+        if !deltas.is_empty() {
+            upsert_cleanup_deltas(&mut *tx, deltas).await?;
+        }
+
+        if !file_ids.is_empty() {
+            sqlx::query("DELETE FROM file_list WHERE id = ANY($1)")
+                .bind(file_ids)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to delete file_list entries")?;
+        }
+
+        tx.commit()
+            .await
+            .context("Failed to commit cleanup transaction")?;
 
         Ok(())
     }
@@ -125,6 +117,14 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
                 LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
             ),
+            -- Tenants/projects/signals active today (in added or removed) but with
+            -- no previous snapshot — need a full count to establish a baseline.
+            -- Scoped to only those combinations to avoid a full file_list scan.
+            new_keys AS (
+                SELECT tenant_id, project_id, signal_kind FROM added
+                UNION
+                SELECT tenant_id, project_id, signal_kind FROM removed
+            ),
             bootstrap AS (
                 SELECT f.tenant_id,
                        f.project_id,
@@ -132,11 +132,18 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                        COALESCE(SUM(f.compressed_size), 0)::bigint AS compressed_bytes,
                        COUNT(*)::bigint AS file_count
                 FROM file_list f
-                LEFT JOIN previous p ON f.tenant_id = p.tenant_id 
-                                    AND f.project_id = p.project_id 
-                                    AND f.signal_type = p.signal_kind
+                JOIN new_keys nk ON f.tenant_id = nk.tenant_id
+                                AND f.project_id = nk.project_id
+                                AND f.signal_type = nk.signal_kind
+                LEFT JOIN previous prev ON f.tenant_id = prev.tenant_id
+                                       AND f.project_id = prev.project_id
+                                       AND f.signal_type = prev.signal_kind
+                CROSS JOIN params prm
                 WHERE f.deleted = false
-                  AND p.tenant_id IS NULL
+                  -- Only count files that existed as of the end of snapshot_day,
+                  -- so backfill runs for past days are not inflated by later ingestion.
+                  AND f.created_at < (EXTRACT(EPOCH FROM (prm.snapshot_day::timestamp + INTERVAL '1 day')) * 1000000)::bigint
+                  AND prev.tenant_id IS NULL
                 GROUP BY f.tenant_id, f.project_id, f.signal_type
             ),
             source AS (
@@ -249,6 +256,66 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
         });
         Ok(snapshots)
     }
+}
+
+/// Upsert cleanup deltas into `storage_cleanup_daily`.
+///
+/// Accepts any [`Executor`] so it can run inside or outside a transaction.
+/// On conflict it accumulates the delta (additive upsert), making it safe to
+/// retry: a duplicate call for the same `(tenant, project, signal, day)` key
+/// simply adds to the existing row rather than double-counting — callers must
+/// ensure they do not call this more than once per cleanup batch for the same
+/// key without also retrying the matching `delete_entries`.
+async fn upsert_cleanup_deltas<'e, E>(
+    executor: E,
+    deltas: &[StorageUsageDelta],
+) -> anyhow::Result<()>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let now = chrono::Utc::now().timestamp_micros();
+    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
+        r#"
+        INSERT INTO storage_cleanup_daily (
+            tenant_id,
+            project_id,
+            signal_kind,
+            day,
+            compressed_bytes,
+            file_count,
+            updated_at
+        )
+        "#,
+    );
+
+    builder.push_values(deltas, |mut row, delta| {
+        row.push_bind(delta.tenant_id)
+            .push_bind(delta.project_id)
+            .push_bind(&delta.signal_kind)
+            .push_bind(delta.day)
+            .push_bind(delta.compressed_bytes.max(0))
+            .push_bind(delta.file_count.max(0))
+            .push_bind(now);
+    });
+
+    builder.push(
+        r#"
+        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        DO UPDATE SET
+            compressed_bytes = storage_cleanup_daily.compressed_bytes
+                + EXCLUDED.compressed_bytes,
+            file_count = storage_cleanup_daily.file_count + EXCLUDED.file_count,
+            updated_at = GREATEST(storage_cleanup_daily.updated_at, EXCLUDED.updated_at)
+        "#,
+    );
+
+    builder
+        .build()
+        .execute(executor)
+        .await
+        .context("Failed to upsert storage cleanup daily deltas")?;
+
+    Ok(())
 }
 
 fn storage_usage_daily_snapshot_from_row(row: sqlx::postgres::PgRow) -> StorageUsageDailySnapshot {
