@@ -126,6 +126,12 @@ pub struct ParquetStorageConfig {
     #[serde(default = "default_retention_check_interval_secs")]
     pub retention_check_interval_secs: u64,
 
+    /// How often (seconds) the storage-usage snapshot job runs.
+    /// Since it snapshots the previous day's immutable data, once per day is
+    /// sufficient. Default: 86400
+    #[serde(default = "default_storage_snapshot_interval_secs")]
+    pub storage_snapshot_interval_secs: u64,
+
     /// Default retention in days for files not covered by a project override.
     /// Default: 30
     #[serde(default = "default_retention_days")]
@@ -234,6 +240,7 @@ impl Default for ParquetStorageConfig {
             cache_max_size_bytes: default_cache_max_size_bytes(),
             cache_ttl_secs: default_cache_ttl_secs(),
             retention_check_interval_secs: default_retention_check_interval_secs(),
+            storage_snapshot_interval_secs: default_storage_snapshot_interval_secs(),
             retention_days: default_retention_days(),
             circuit_breaker_max_disk_usage_percent: default_circuit_breaker_max_disk_usage_percent(
             ),
@@ -288,6 +295,9 @@ fn default_cache_ttl_secs() -> u64 {
 }
 fn default_retention_check_interval_secs() -> u64 {
     3600
+}
+fn default_storage_snapshot_interval_secs() -> u64 {
+    86_400
 }
 fn default_retention_days() -> u32 {
     30
