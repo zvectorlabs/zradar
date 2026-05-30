@@ -187,7 +187,6 @@ impl CleanupJob {
                     let msg = format!("storage cleanup daily accounting failed: {}", e);
                     error!("{}", msg);
                     stats.errors.push(msg);
-                    continue;
                 }
             }
 

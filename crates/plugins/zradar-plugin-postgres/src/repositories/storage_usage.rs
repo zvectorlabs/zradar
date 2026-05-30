@@ -105,17 +105,10 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 FROM storage_cleanup_daily c, params p
                 WHERE c.day = p.snapshot_day
             ),
-            keys AS (
-                SELECT tenant_id, project_id, signal_kind FROM previous
-                UNION
-                SELECT tenant_id, project_id, signal_kind FROM added
-                UNION
-                SELECT tenant_id, project_id, signal_kind FROM removed
-            ),
             incremental AS (
-                SELECT k.tenant_id,
-                       k.project_id,
-                       k.signal_kind,
+                SELECT p.tenant_id,
+                       p.project_id,
+                       p.signal_kind,
                        GREATEST(
                            COALESCE(p.compressed_bytes, 0)
                            + COALESCE(a.compressed_bytes, 0)
@@ -128,8 +121,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                            - COALESCE(r.file_count, 0),
                            0
                        )::bigint AS file_count
-                FROM keys k
-                JOIN previous p USING (tenant_id, project_id, signal_kind)
+                FROM previous p
                 LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
                 LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
             ),
@@ -339,17 +331,10 @@ pub async fn derive_storage_usage_daily_rows(
               AND c.day = p.snapshot_day
               AND ($3::text IS NULL OR c.signal_kind = $3)
         ),
-        keys AS (
-            SELECT tenant_id, project_id, signal_kind FROM previous
-            UNION
-            SELECT tenant_id, project_id, signal_kind FROM added
-            UNION
-            SELECT tenant_id, project_id, signal_kind FROM removed
-        ),
         incremental AS (
-            SELECT k.tenant_id,
-                   k.project_id,
-                   k.signal_kind,
+            SELECT p.tenant_id,
+                   p.project_id,
+                   p.signal_kind,
                    GREATEST(
                        COALESCE(p.compressed_bytes, 0)
                        + COALESCE(a.compressed_bytes, 0)
@@ -362,8 +347,7 @@ pub async fn derive_storage_usage_daily_rows(
                        - COALESCE(r.file_count, 0),
                        0
                    )::bigint AS file_count
-            FROM keys k
-            JOIN previous p USING (tenant_id, project_id, signal_kind)
+            FROM previous p
             LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
             LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
         ),
