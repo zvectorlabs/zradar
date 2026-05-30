@@ -21,7 +21,8 @@ pub use capability::Capability;
 // Re-export repository traits
 pub use repositories::{
     AnalyticsReader, AuditLogFilters, AuditLogPage, AuditLogRepository, FileListRepository,
-    RetentionPolicyRepository, SettingsRepository, TelemetryReader, TelemetryWriter,
+    RetentionPolicyRepository, SettingsRepository, StorageUsageDailySnapshot, StorageUsageDelta,
+    StorageUsageRepository, TelemetryReader, TelemetryWriter,
 };
 
 // Re-export entity types

@@ -292,6 +292,18 @@ pub async fn get_storage_usage(
     Ok(Json(results))
 }
 
+pub async fn get_storage_usage_daily(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<StorageUsageDailyQuery>,
+) -> Result<Json<Vec<StorageUsageDaily>>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let results = service.get_storage_usage_daily(tenant_id, query).await?;
+    Ok(Json(results))
+}
+
 pub async fn get_quota_status(
     State(service): State<Arc<QueryService>>,
     auth: AuthContext,

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use zradar_models::FileListFilter;
-use zradar_traits::{BlockStorage, FileListRepository};
+use zradar_traits::{BlockStorage, FileListRepository, StorageUsageDelta, StorageUsageRepository};
 
 use crate::config::RetentionConfigStore;
 
@@ -32,6 +32,7 @@ pub struct CleanupStats {
 pub struct CleanupJob {
     file_list_repo: Arc<dyn FileListRepository>,
     block_storage: Option<Arc<dyn BlockStorage>>,
+    storage_usage_repo: Option<Arc<dyn StorageUsageRepository>>,
     config_store: Arc<RetentionConfigStore>,
     /// How often (seconds) the scheduled loop wakes up.
     interval_secs: u64,
@@ -47,6 +48,7 @@ impl CleanupJob {
         Self {
             file_list_repo,
             block_storage: None,
+            storage_usage_repo: None,
             config_store,
             interval_secs,
         }
@@ -62,9 +64,18 @@ impl CleanupJob {
         Self {
             file_list_repo,
             block_storage: Some(block_storage),
+            storage_usage_repo: None,
             config_store,
             interval_secs,
         }
+    }
+
+    pub fn with_storage_usage_repository(
+        mut self,
+        storage_usage_repo: Arc<dyn StorageUsageRepository>,
+    ) -> Self {
+        self.storage_usage_repo = Some(storage_usage_repo);
+        self
     }
 
     /// Execute one cleanup cycle and return statistics.
@@ -91,6 +102,7 @@ impl CleanupJob {
         // Group files by (tenant_id, project_id) so we do one cutoff lookup per project.
         use std::collections::HashMap;
         let mut by_project: HashMap<(uuid::Uuid, uuid::Uuid), Vec<_>> = HashMap::new();
+        let cleanup_day = chrono::Utc::now().date_naive();
         for file in all_files {
             by_project
                 .entry((file.tenant_id, file.project_id))
@@ -118,6 +130,10 @@ impl CleanupJob {
             );
 
             let mut ids_to_delete: Vec<i64> = Vec::with_capacity(expired.len());
+            let mut cleanup_deltas: HashMap<
+                (uuid::Uuid, uuid::Uuid, String, chrono::NaiveDate),
+                StorageUsageDelta,
+            > = HashMap::new();
 
             for file in &expired {
                 // Physical deletion
@@ -143,6 +159,36 @@ impl CleanupJob {
                 stats.bytes_freed += file.compressed_size as u64;
                 stats.files_deleted += 1;
                 ids_to_delete.push(file.id);
+                let key = (
+                    file.tenant_id,
+                    file.project_id,
+                    file.signal_type.clone(),
+                    cleanup_day,
+                );
+                let delta = cleanup_deltas
+                    .entry(key)
+                    .or_insert_with(|| StorageUsageDelta {
+                        tenant_id: file.tenant_id,
+                        project_id: file.project_id,
+                        signal_kind: file.signal_type.clone(),
+                        day: cleanup_day,
+                        compressed_bytes: 0,
+                        file_count: 0,
+                    });
+                delta.compressed_bytes += file.compressed_size.max(0);
+                delta.file_count += 1;
+            }
+
+            if !ids_to_delete.is_empty()
+                && let Some(storage_usage_repo) = &self.storage_usage_repo
+            {
+                let deltas = cleanup_deltas.values().cloned().collect::<Vec<_>>();
+                if let Err(e) = storage_usage_repo.record_cleanup_daily(&deltas).await {
+                    let msg = format!("storage cleanup daily accounting failed: {}", e);
+                    error!("{}", msg);
+                    stats.errors.push(msg);
+                    continue;
+                }
             }
 
             if !ids_to_delete.is_empty()

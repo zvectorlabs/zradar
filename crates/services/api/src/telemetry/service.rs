@@ -8,8 +8,9 @@ use super::types::{
     AgentAnalytics, AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown,
     IngestRateQuery, LlmAnalytics, LogDetail, LogQueryFilters, MetricDetail, MetricQueryFilters,
     MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse, QueryUsageQuery, QuotaStatusQuery,
-    SpanDetail, SpanQueryFilters, StorageUsage, StorageUsageQuery, TopEndpoint, TopNQuery,
-    TraceDetail, TraceQueryFilters, TraceSummary, UsageDailyQuery,
+    SpanDetail, SpanQueryFilters, StorageUsage, StorageUsageDaily, StorageUsageDailyQuery,
+    StorageUsageQuery, TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary,
+    UsageDailyQuery,
 };
 use crate::errors::{ControlError, Result};
 
@@ -19,8 +20,8 @@ use zradar_traits::{
     AnalyticsQueryFilters as StorageAnalyticsFilters, FileListRepository,
     LogQueryFilters as StorageLogFilters, MetricQueryFilters as StorageMetricFilters,
     MetricSeriesFilters as StorageMetricSeriesFilters, Pagination,
-    SpanQueryFilters as StorageSpanFilters, TelemetryReader as StorageTelemetryReader, TimeRange,
-    TraceQueryFilters as StorageTraceFilters,
+    SpanQueryFilters as StorageSpanFilters, StorageUsageRepository,
+    TelemetryReader as StorageTelemetryReader, TimeRange, TraceQueryFilters as StorageTraceFilters,
 };
 
 use zradar_policy::{
@@ -112,6 +113,7 @@ pub struct QueryService {
     pub policy_store: Option<Arc<dyn PolicyStore>>,
     pub usage_reader: Option<Arc<dyn UsageReader>>,
     pub usage_analytics_reader: Option<Arc<dyn UsageAnalyticsReader>>,
+    pub storage_usage_repo: Option<Arc<dyn StorageUsageRepository>>,
 }
 
 impl QueryService {
@@ -126,6 +128,7 @@ impl QueryService {
             policy_store: None,
             usage_reader: None,
             usage_analytics_reader: None,
+            storage_usage_repo: None,
         }
     }
 
@@ -143,12 +146,21 @@ impl QueryService {
             policy_store: None,
             usage_reader: None,
             usage_analytics_reader: None,
+            storage_usage_repo: None,
         }
     }
 
     /// Add file metadata access for storage usage analytics.
     pub fn with_file_list_repo(mut self, file_list_repo: Arc<dyn FileListRepository>) -> Self {
         self.file_list_repo = Some(file_list_repo);
+        self
+    }
+
+    pub fn with_storage_usage_repo(
+        mut self,
+        storage_usage_repo: Arc<dyn StorageUsageRepository>,
+    ) -> Self {
+        self.storage_usage_repo = Some(storage_usage_repo);
         self
     }
 
@@ -1199,6 +1211,45 @@ impl QueryService {
             )
             .await
             .map_err(|e| ControlError::Internal(e.to_string()))
+    }
+
+    pub async fn get_storage_usage_daily(
+        &self,
+        tenant_id: Uuid,
+        query: StorageUsageDailyQuery,
+    ) -> Result<Vec<StorageUsageDaily>> {
+        let project_id = Uuid::parse_str(&query.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        let storage_usage_repo = self.storage_usage_repo.as_ref().ok_or_else(|| {
+            ControlError::Internal("Storage usage repository is not configured".to_string())
+        })?;
+        let signal = query.signal.as_deref().map(parse_signal_kind).transpose()?;
+        let signal_kind = signal.and_then(signal_type_name);
+
+        let rows = storage_usage_repo
+            .query_storage_usage_daily(
+                tenant_id,
+                project_id,
+                signal_kind,
+                query.start_time.map(|start| start.timestamp_micros()),
+                query.end_time.map(|end| end.timestamp_micros()),
+            )
+            .await
+            .map_err(|e| ControlError::Internal(e.to_string()))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| StorageUsageDaily {
+                tenant_id: row.tenant_id.to_string(),
+                project_id: row.project_id.to_string(),
+                signal: row.signal_kind,
+                day: row.day,
+                compressed_bytes: row.compressed_bytes,
+                file_count: row.file_count,
+                captured_at: row.captured_at,
+                estimated_today: row.estimated_today,
+            })
+            .collect())
     }
 
     pub async fn get_ingest_rate(
