@@ -308,7 +308,7 @@ check:
 
 # Lint code
 lint:
-	@cargo clippy -- -D warnings
+	@cargo clippy --all-targets -- -D warnings
 
 # Fix warnings
 fix:
