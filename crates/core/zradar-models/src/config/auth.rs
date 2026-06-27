@@ -34,6 +34,14 @@ pub struct AuthConfig {
     /// When `false`, OTLP gRPC accepts requests without an API key. Default: `true`.
     #[serde(default = "default_true")]
     pub otlp_require_api_key: bool,
+    /// Test-only context simulation for functional/E2E tests.
+    ///
+    /// When `true`, standalone API-key auth accepts `x-tenant-id` and
+    /// `x-project-id` headers after validating the bearer token. This lets tests
+    /// simulate many API keys/contexts with one static key. Keep this `false`
+    /// in all non-test configs.
+    #[serde(default)]
+    pub allow_test_header_context: bool,
 }
 
 fn default_true() -> bool {

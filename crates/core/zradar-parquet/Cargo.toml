@@ -6,6 +6,12 @@ description = "Parquet storage layer for zradar — write and query telemetry vi
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[[bench]]
+name = "query_bench"
+harness = false
 
 [dependencies]
 # Arrow ecosystem

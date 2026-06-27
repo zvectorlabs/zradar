@@ -1,0 +1,14 @@
+# Mock DCGM-Exporter payload used by the Phase 3 smoke test.
+# Only the three metrics named in TECH-SPEC-PHASE-3.md §4.3 are included.
+
+# HELP DCGM_FI_DEV_GPU_UTIL GPU utilization (in %).
+# TYPE DCGM_FI_DEV_GPU_UTIL gauge
+DCGM_FI_DEV_GPU_UTIL{gpu="0",modelName="NVIDIA H100"} 78
+
+# HELP DCGM_FI_DEV_MEM_COPY_UTIL Memory utilization (in %).
+# TYPE DCGM_FI_DEV_MEM_COPY_UTIL gauge
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="0",modelName="NVIDIA H100"} 64
+
+# HELP DCGM_FI_DEV_FB_USED Frame-buffer memory used (MiB).
+# TYPE DCGM_FI_DEV_FB_USED gauge
+DCGM_FI_DEV_FB_USED{gpu="0",modelName="NVIDIA H100"} 28160

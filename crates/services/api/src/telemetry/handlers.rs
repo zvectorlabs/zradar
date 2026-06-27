@@ -26,6 +26,7 @@ use crate::http::{AuthContext, Capability};
         ("max_duration_ms" = Option<i64>, Query, description = "Maximum duration"),
         ("llm_model" = Option<String>, Query, description = "LLM model filter"),
         ("llm_provider" = Option<String>, Query, description = "LLM provider filter"),
+        ("llm_response_model" = Option<String>, Query, description = "LLM response model filter"),
         ("has_error" = Option<bool>, Query, description = "Filter traces with errors"),
         ("offset" = Option<u64>, Query, description = "Pagination offset"),
         ("limit" = Option<u64>, Query, description = "Pagination limit"),
@@ -117,6 +118,10 @@ pub async fn get_span(
         ("service_name" = Option<String>, Query, description = "Service name filter"),
         ("span_type" = Option<String>, Query, description = "Filter by single span type"),
         ("span_types" = Option<String>, Query, description = "Filter by multiple span types (comma-separated)"),
+        ("status" = Option<String>, Query, description = "Status filter (OK, ERROR, UNSET)"),
+        ("llm_model" = Option<String>, Query, description = "LLM model filter"),
+        ("llm_provider" = Option<String>, Query, description = "LLM provider filter"),
+        ("llm_response_model" = Option<String>, Query, description = "LLM response model filter"),
         ("min_duration_ms" = Option<i64>, Query, description = "Minimum duration"),
         ("max_duration_ms" = Option<i64>, Query, description = "Maximum duration"),
         ("offset" = Option<u64>, Query, description = "Pagination offset"),
@@ -278,6 +283,18 @@ pub async fn get_agent_analytics(
     let tenant_id = auth.tenant_uuid()?;
     let results = service.get_agent_analytics(tenant_id, query).await?;
     Ok(Json(results))
+}
+
+pub async fn get_guardrails_analytics(
+    State(service): State<Arc<QueryService>>,
+    auth: AuthContext,
+    Query(mut query): Query<AnalyticsQuery>,
+) -> Result<Json<GuardrailsAnalytics>> {
+    auth.require(Capability::ReadDashboards)?;
+    query.project_id = auth.project_id().to_string();
+    let tenant_id = auth.tenant_uuid()?;
+    let result = service.get_guardrails_analytics(tenant_id, query).await?;
+    Ok(Json(result))
 }
 
 pub async fn get_storage_usage(

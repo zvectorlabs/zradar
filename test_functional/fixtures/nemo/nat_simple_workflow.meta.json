@@ -1,0 +1,24 @@
+{
+  "description": "NAT minimal workflow — one LLM call + one tool call under one workflow_run_id",
+  "expected_attributes": [
+    {
+      "fields": {
+        "framework": "langchain",
+        "llm_model": "gpt-4-turbo",
+        "llm_provider": "openai",
+        "workflow_run_id": "wf-fixture-001"
+      },
+      "span_name": "nat.llm.call"
+    },
+    {
+      "fields": {
+        "tool_name": "websearch",
+        "workflow_run_id": "wf-fixture-001"
+      },
+      "span_name": "nat.tool.call"
+    }
+  ],
+  "expected_total_spans": 3,
+  "fixture": "nat_simple_workflow",
+  "kind": "traces"
+}

@@ -16,11 +16,20 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 /// without capability checks by checking `AuthMode::Standalone`.
 pub struct ApiKeyAdminAuthorizer {
     keys: HashMap<String, RequestContext>,
+    allow_test_header_context: bool,
 }
 
 impl ApiKeyAdminAuthorizer {
     /// Build from the `[[api_keys]]` section of the config.
     pub fn from_config(api_keys: &[ApiKeyConfig]) -> Self {
+        Self::from_config_with_test_header_context(api_keys, false)
+    }
+
+    /// Build from config and optionally enable test-only header context.
+    pub fn from_config_with_test_header_context(
+        api_keys: &[ApiKeyConfig],
+        allow_test_header_context: bool,
+    ) -> Self {
         let keys = api_keys
             .iter()
             .map(|k| {
@@ -33,7 +42,10 @@ impl ApiKeyAdminAuthorizer {
                 )
             })
             .collect();
-        Self { keys }
+        Self {
+            keys,
+            allow_test_header_context,
+        }
     }
 }
 
@@ -52,13 +64,13 @@ impl AdminAuthorizer for ApiKeyAdminAuthorizer {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid API key"))?;
 
-        // Honour x-tenant-id / x-project-id override headers (intra-org routing).
-        // This preserves the behaviour of the old build_standalone_context function.
-        if let Some(val) = header_str(headers, "x-tenant-id") {
-            context.tenant_id = val.to_string();
-        }
-        if let Some(val) = header_str(headers, "x-project-id") {
-            context.project_id = val.to_string();
+        if self.allow_test_header_context {
+            if let Some(val) = header_str(headers, "x-tenant-id") {
+                context.tenant_id = val.to_string();
+            }
+            if let Some(val) = header_str(headers, "x-project-id") {
+                context.project_id = val.to_string();
+            }
         }
 
         Ok(AdminAuth {

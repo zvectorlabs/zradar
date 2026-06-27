@@ -1,0 +1,15 @@
+{
+  "description": "Non-halting Guardrails action passes through to the next rail",
+  "expected_attributes": [
+    {
+      "fields": {
+        "action_name": "summarize",
+        "rail_type": "output"
+      },
+      "span_name": "guardrails.action.summarize"
+    }
+  ],
+  "expected_total_spans": 1,
+  "fixture": "guardrails_action_passthrough",
+  "kind": "traces"
+}

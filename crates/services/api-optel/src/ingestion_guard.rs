@@ -31,10 +31,21 @@ pub async fn enforce_project_settings(
     context: &RequestContext,
     records: u64,
 ) -> Result<(), Status> {
+    enforce_project_settings_and_get(repository, rate_limiter, context, records)
+        .await
+        .map(|_| ())
+}
+
+pub async fn enforce_project_settings_and_get(
+    repository: &Option<Arc<dyn SettingsRepository>>,
+    rate_limiter: &Option<Arc<ProjectRateLimiter>>,
+    context: &RequestContext,
+    records: u64,
+) -> Result<Option<ProjectSettings>, Status> {
     let (project_id, settings) = load_project_settings(repository, context).await?;
 
     let Some(settings) = settings else {
-        return Ok(());
+        return Ok(None);
     };
 
     if settings.blocked {
@@ -48,7 +59,7 @@ pub async fn enforce_project_settings(
             .map_err(|_| Status::invalid_argument("Invalid max_ingestion_rate"))?;
 
         let Some(rate_limiter) = rate_limiter else {
-            return Ok(());
+            return Ok(Some(settings));
         };
 
         if !rate_limiter.check_and_record(project_id, limit, records) {
@@ -58,7 +69,7 @@ pub async fn enforce_project_settings(
         }
     }
 
-    Ok(())
+    Ok(Some(settings))
 }
 
 pub async fn enforce_policy_ingest(

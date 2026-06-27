@@ -24,7 +24,7 @@ impl SettingsRepository for PostgresSettingsRepository {
             SELECT
                 id, project_id, traces_retention_days, metrics_retention_days,
                 logs_retention_days, max_ingestion_rate, file_push_interval_secs,
-                blocked, updated_at
+                blocked, capture_llm_content_enabled, updated_at
             FROM project_settings
             WHERE project_id = $1
             "#,
@@ -47,9 +47,9 @@ impl SettingsRepository for PostgresSettingsRepository {
             INSERT INTO project_settings (
                 project_id, traces_retention_days, metrics_retention_days,
                 logs_retention_days, max_ingestion_rate, file_push_interval_secs,
-                blocked, updated_at
+                blocked, capture_llm_content_enabled, updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
+                $1, $2, $3, $4, $5, $6, $7, $8, $9
             )
             ON CONFLICT (project_id)
             DO UPDATE SET
@@ -59,11 +59,12 @@ impl SettingsRepository for PostgresSettingsRepository {
                 max_ingestion_rate = EXCLUDED.max_ingestion_rate,
                 file_push_interval_secs = EXCLUDED.file_push_interval_secs,
                 blocked = EXCLUDED.blocked,
+                capture_llm_content_enabled = EXCLUDED.capture_llm_content_enabled,
                 updated_at = EXCLUDED.updated_at
             RETURNING
                 id, project_id, traces_retention_days, metrics_retention_days,
                 logs_retention_days, max_ingestion_rate, file_push_interval_secs,
-                blocked, updated_at
+                blocked, capture_llm_content_enabled, updated_at
             "#,
         )
         .bind(settings.project_id)
@@ -73,6 +74,7 @@ impl SettingsRepository for PostgresSettingsRepository {
         .bind(settings.max_ingestion_rate)
         .bind(settings.file_push_interval_secs)
         .bind(settings.blocked)
+        .bind(settings.capture_llm_content_enabled)
         .bind(now)
         .fetch_one(self.client.pool())
         .await

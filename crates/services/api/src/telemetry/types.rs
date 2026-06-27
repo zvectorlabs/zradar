@@ -22,8 +22,18 @@ pub struct TraceQueryFilters {
     pub status: Option<String>,
     pub llm_model: Option<String>,
     pub llm_provider: Option<String>,
+    pub llm_response_model: Option<String>,
     pub agent_name: Option<String>,
     pub session_id: Option<String>,
+    // NeMo Phase 2 filters
+    pub rail_type: Option<String>,
+    pub action_name: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub framework: Option<String>,
+    pub tool_name: Option<String>,
+    pub invocation_id: Option<String>,
+    // Phase 4 R4.5 — deployment.environment filter
+    pub environment: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -39,9 +49,21 @@ pub struct SpanQueryFilters {
     pub operation_name: Option<String>,
     pub span_type: Option<String>,
     pub span_types: Option<String>, // comma-separated list
+    pub status: Option<String>,
     pub llm_model: Option<String>,
+    pub llm_provider: Option<String>,
+    pub llm_response_model: Option<String>,
     pub agent_name: Option<String>,
     pub session_id: Option<String>,
+    // NeMo Phase 2 filters
+    pub rail_type: Option<String>,
+    pub action_name: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub framework: Option<String>,
+    pub tool_name: Option<String>,
+    pub invocation_id: Option<String>,
+    // Phase 4 R4.5 — deployment.environment filter
+    pub environment: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -84,9 +106,19 @@ mod tests {
             operation_name: None,
             span_type: Some("GENERATION".to_string()),
             span_types: None,
+            status: None,
             llm_model: None,
+            llm_provider: None,
+            llm_response_model: None,
             agent_name: None,
             session_id: None,
+            rail_type: None,
+            action_name: None,
+            workflow_run_id: None,
+            framework: None,
+            tool_name: None,
+            invocation_id: None,
+            environment: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
@@ -104,9 +136,19 @@ mod tests {
             operation_name: None,
             span_type: None,
             span_types: Some("GENERATION,TOOL,AGENT".to_string()),
+            status: None,
             llm_model: None,
+            llm_provider: None,
+            llm_response_model: None,
             agent_name: None,
             session_id: None,
+            rail_type: None,
+            action_name: None,
+            workflow_run_id: None,
+            framework: None,
+            tool_name: None,
+            invocation_id: None,
+            environment: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
@@ -131,9 +173,19 @@ mod tests {
             operation_name: None,
             span_type: Some("INVALID".to_string()),
             span_types: None,
+            status: None,
             llm_model: None,
+            llm_provider: None,
+            llm_response_model: None,
             agent_name: None,
             session_id: None,
+            rail_type: None,
+            action_name: None,
+            workflow_run_id: None,
+            framework: None,
+            tool_name: None,
+            invocation_id: None,
+            environment: None,
             limit: None,
         };
         assert!(params.parse_span_types().is_err());
@@ -150,15 +202,68 @@ mod tests {
             operation_name: None,
             span_type: None,
             span_types: Some(" GENERATION , TOOL ".to_string()),
+            status: None,
             llm_model: None,
+            llm_provider: None,
+            llm_response_model: None,
             agent_name: None,
             session_id: None,
+            rail_type: None,
+            action_name: None,
+            workflow_run_id: None,
+            framework: None,
+            tool_name: None,
+            invocation_id: None,
+            environment: None,
             limit: None,
         };
         let result = params.parse_span_types().unwrap();
         assert_eq!(
             result,
             Some(vec!["GENERATION".to_string(), "TOOL".to_string()])
+        );
+    }
+
+    /// Regression test for R0.1 (NeMo compatibility, Phase 0).
+    ///
+    /// `SpanDetail.attributes` was previously typed `HashMap<String, String>`,
+    /// which made the trace-detail projection silently drop the entire map
+    /// whenever any attribute value was non-string (bool, int, array, nested
+    /// object) — e.g. Guardrails spans with `{"rail.stop": true}`. Widening
+    /// to `HashMap<String, serde_json::Value>` lets arbitrary JSON round-trip
+    /// intact through the same `serde_json::from_str(...).unwrap_or_default()`
+    /// projection in `service.rs`.
+    #[test]
+    fn test_spandetail_attributes_preserves_non_string_values() {
+        let raw = r#"{"rail.stop": true, "rail.name": "input", "count": 7, "tags": ["a","b"]}"#;
+        let attrs: HashMap<String, serde_json::Value> =
+            serde_json::from_str(raw).expect("mixed-type JSON must deserialize into Value map");
+
+        assert_eq!(attrs.len(), 4, "all four keys must round-trip");
+        assert_eq!(attrs.get("rail.stop"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(
+            attrs.get("rail.name"),
+            Some(&serde_json::Value::String("input".to_string()))
+        );
+        assert_eq!(
+            attrs.get("count"),
+            Some(&serde_json::Value::Number(serde_json::Number::from(7)))
+        );
+        assert_eq!(
+            attrs.get("tags"),
+            Some(&serde_json::Value::Array(vec![
+                serde_json::Value::String("a".to_string()),
+                serde_json::Value::String("b".to_string()),
+            ]))
+        );
+
+        // Verify the projection-site pattern (unwrap_or_default) also works.
+        let projected: HashMap<String, serde_json::Value> =
+            serde_json::from_str(raw).unwrap_or_default();
+        assert_eq!(
+            projected.len(),
+            4,
+            "unwrap_or_default path must not lose keys"
         );
     }
 }
@@ -222,7 +327,42 @@ pub struct SpanDetail {
     pub agent_name: Option<String>,
     pub agent_type: Option<String>,
     pub session_id: Option<String>,
-    pub attributes: HashMap<String, String>,
+    // LLM fields
+    pub llm_model: Option<String>,
+    pub llm_provider: Option<String>,
+    pub llm_response_model: Option<String>,
+    pub llm_input: Option<String>,
+    pub llm_output: Option<String>,
+    pub prompt_tokens: Option<i32>,
+    pub completion_tokens: Option<i32>,
+    pub total_tokens: Option<i32>,
+    pub prompt_cost_usd: Option<f64>,
+    pub completion_cost_usd: Option<f64>,
+    pub total_cost_usd: Option<f64>,
+    // Tool fields
+    pub tool_name: Option<String>,
+    pub tool_call_id: Option<String>,
+    // Guardrails fields
+    pub rail_type: Option<String>,
+    pub rail_name: Option<String>,
+    pub rail_stop: Option<bool>,
+    pub action_name: Option<String>,
+    // NeMo / GenAI 1.29 fields
+    pub workflow_run_id: Option<String>,
+    pub framework: Option<String>,
+    // Phase 4 R4.2 / R4.3 — NeMo extensions on Guardrails LLM children.
+    pub llm_cache_hit: Option<bool>,
+    pub llm_response_id: Option<String>,
+    // Phase 4 R4.5 — deployment.environment resource attribute (prod / staging / etc.).
+    pub environment: Option<String>,
+    // Phase 4 R4.4 — gen_ai.request.* sampling params parsed back from the
+    // model_parameters JSON column. None when no allowlisted params present.
+    pub model_parameters: Option<serde_json::Value>,
+    // Span events (serialized JSON allowlist)
+    pub events: Option<serde_json::Value>,
+    // OTLP span links (Phase 4 R4.6). Serialized JSON parsed back here.
+    pub links: Option<serde_json::Value>,
+    pub attributes: HashMap<String, serde_json::Value>,
 }
 
 /// Analytics result
@@ -271,6 +411,34 @@ pub struct AgentAnalytics {
     pub error_count: i64,
     pub total_tokens: f64,
     pub avg_duration_ms: f64,
+}
+
+/// Per-rail-type breakdown for guardrails analytics.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RailTypeBreakdownDto {
+    pub rail_type: String,
+    pub count: i64,
+    pub halted: i64,
+    pub halt_rate: f64,
+}
+
+/// Per-rail-name stat for guardrails analytics.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RailNameStatDto {
+    pub rail_name: String,
+    pub rail_type: String,
+    pub halts: i64,
+    pub total: i64,
+}
+
+/// Guardrails analytics response (R2.2).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GuardrailsAnalytics {
+    pub total_requests: i64,
+    pub halted_requests: i64,
+    pub halt_rate: f64,
+    pub by_rail_type: Vec<RailTypeBreakdownDto>,
+    pub top_halting_rails: Vec<RailNameStatDto>,
 }
 
 /// Storage usage query filters.

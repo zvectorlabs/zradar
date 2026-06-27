@@ -3,6 +3,7 @@
 pub mod api_client;
 pub mod fixtures;
 pub mod grpc_client;
+pub mod nim_mocks;
 pub mod polling;
 pub mod test_env;
 pub mod test_helpers;

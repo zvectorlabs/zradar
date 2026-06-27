@@ -54,3 +54,27 @@ mod test_agent_load;
 
 #[path = "scenarios/test_agent_analytics.rs"]
 mod test_agent_analytics;
+
+#[path = "scenarios/test_nemo_phase1.rs"]
+mod test_nemo_phase1;
+
+#[path = "scenarios/test_nemo_phase2.rs"]
+mod test_nemo_phase2;
+
+#[path = "scenarios/test_nemo_phase4.rs"]
+mod test_nemo_phase4;
+
+#[path = "scenarios/test_e2e_fixtures.rs"]
+mod test_e2e_fixtures;
+
+#[path = "scenarios/test_e2e_multi_tenant.rs"]
+mod test_e2e_multi_tenant;
+
+#[path = "scenarios/test_nemo_gap_fixes.rs"]
+mod test_nemo_gap_fixes;
+
+#[path = "scenarios/test_nim_collector.rs"]
+mod test_nim_collector;
+
+#[path = "scenarios/test_security.rs"]
+mod test_security;

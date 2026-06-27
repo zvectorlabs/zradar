@@ -22,7 +22,8 @@
 //!    `max_file_size_bytes`**, schedule a merge.
 //! 4. For each merge candidate group: read all files into Arrow `RecordBatch`
 //!    slices, concatenate, write a single new Parquet file via
-//!    `ParquetFileWriter`, soft-delete originals.
+//!    `ParquetFileWriter`, soft-delete originals (`deleted=true`). Physical
+//!    bytes are reclaimed later by `FileReclaimer` in `zradar-retention`.
 //!
 //! CPU-bound Parquet I/O is offloaded to `spawn_blocking`.
 
@@ -214,7 +215,11 @@ impl Compactor {
             .await
             .context("Compactor: failed to write merged Parquet file")?;
 
-        // Soft-delete the original files.
+        // Soft-delete the original files: flip `deleted=true` so queries stop
+        // seeing them immediately. We never unlink here — the lease-aware
+        // FileReclaimer (zradar-retention) sweeps `deleted=true` rows and is the
+        // sole owner of physical removal, so a query still reading an original
+        // (and holding a lease) can finish before its bytes are reclaimed.
         let ids: Vec<i64> = files.iter().map(|f| f.id).collect();
         self.file_list_repo
             .mark_deleted(&ids)

@@ -7,6 +7,8 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord as OtlpLogRecord;
 use uuid::Uuid;
 use zradar_models::{LogRecord, RequestContext};
 
+use crate::otlp_util::attrs_to_json;
+
 /// Converts an `ExportLogsServiceRequest` into a flat `Vec<LogRecord>`.
 pub struct OtlpLogsConverter;
 
@@ -138,31 +140,6 @@ fn extract_string_attr(attrs: &[KeyValue], key: &str) -> Option<String> {
             _ => None,
         })
     })
-}
-
-/// Serialize a list of `KeyValue` pairs to a JSON object string.
-fn attrs_to_json(attrs: &[KeyValue]) -> String {
-    let map: serde_json::Map<String, serde_json::Value> = attrs
-        .iter()
-        .map(|kv| {
-            let v = kv
-                .value
-                .as_ref()
-                .and_then(|v| v.value.as_ref())
-                .map(|v| match v {
-                    AnyValue::StringValue(s) => serde_json::Value::String(s.clone()),
-                    AnyValue::IntValue(i) => serde_json::Value::Number((*i).into()),
-                    AnyValue::DoubleValue(d) => serde_json::Number::from_f64(*d)
-                        .map(serde_json::Value::Number)
-                        .unwrap_or(serde_json::Value::Null),
-                    AnyValue::BoolValue(b) => serde_json::Value::Bool(*b),
-                    _ => serde_json::Value::Null,
-                })
-                .unwrap_or(serde_json::Value::Null);
-            (kv.key.clone(), v)
-        })
-        .collect();
-    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

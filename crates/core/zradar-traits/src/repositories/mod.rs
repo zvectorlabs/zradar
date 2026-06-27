@@ -16,7 +16,9 @@ pub use telemetry::{AnalyticsReader, TelemetryReader, TelemetryWriter};
 
 // Re-export entity types
 pub use telemetry::{
-    AnalyticsDataPoint, AnalyticsQueryFilters, LogQueryFilters, MetricPoint, MetricQueryFilters,
-    MetricSeriesFilters, MetricsSummary, PaginatedResponse, Pagination, SpanQueryFilters,
-    TimeRange, TimeSeriesPoint, TraceQueryFilters, TraceSummary,
+    AnalyticsDataPoint, AnalyticsQueryFilters, GuardrailsAnalyticsFilters,
+    GuardrailsAnalyticsResult, LogQueryFilters, MetricPoint, MetricQueryFilters,
+    MetricSeriesFilters, MetricsSummary, PaginatedResponse, Pagination, RailNameStat,
+    RailTypeBreakdown, SpanQueryFilters, TimeRange, TimeSeriesPoint, TraceQueryFilters,
+    TraceSummary,
 };

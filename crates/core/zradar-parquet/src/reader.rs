@@ -18,7 +18,7 @@
 //! The `SessionContext` is created fresh per query (via `SharedEngine`) so
 //! concurrent queries never see each other's registered tables.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -28,7 +28,7 @@ use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
 use zradar_models::FileListFilter;
-use zradar_traits::FileListRepository;
+use zradar_traits::{FileLeaseRegistry, FileListRepository};
 
 use crate::disk_cache::DiskCache;
 use crate::engine::SharedEngine;
@@ -48,6 +48,10 @@ pub struct ParquetFileReader {
     memory_cache: Option<Arc<MemoryCache>>,
     /// Pre-configured DataFusion session factory (M07-05).
     engine: SharedEngine,
+    /// Optional file-lease registry. When set, every file the reader is about
+    /// to scan is leased for the duration of the scan, and background jobs
+    /// (FileMover, Compactor, retention) skip leased files.
+    lease_registry: Option<Arc<FileLeaseRegistry>>,
 }
 
 impl ParquetFileReader {
@@ -59,6 +63,7 @@ impl ParquetFileReader {
             disk_cache: None,
             memory_cache: None,
             engine: SharedEngine::new(),
+            lease_registry: None,
         }
     }
 
@@ -74,6 +79,7 @@ impl ParquetFileReader {
             disk_cache: Some(disk_cache),
             memory_cache: None,
             engine: SharedEngine::new(),
+            lease_registry: None,
         }
     }
 
@@ -89,6 +95,7 @@ impl ParquetFileReader {
             disk_cache: Some(disk_cache),
             memory_cache: Some(memory_cache),
             engine: SharedEngine::new(),
+            lease_registry: None,
         }
     }
 
@@ -103,7 +110,17 @@ impl ParquetFileReader {
             disk_cache: None,
             memory_cache: Some(memory_cache),
             engine: SharedEngine::new(),
+            lease_registry: None,
         }
+    }
+
+    /// Install a [`FileLeaseRegistry`] so that every file scanned by this
+    /// reader is leased for the duration of the scan. Background jobs that
+    /// consult the same registry will skip files with active leases, avoiding
+    /// move/delete races against in-flight queries.
+    pub fn with_lease_registry(mut self, registry: Arc<FileLeaseRegistry>) -> Self {
+        self.lease_registry = Some(registry);
+        self
     }
 
     /// Execute `sql` against the Parquet files that match `filter`.
@@ -144,6 +161,27 @@ impl ParquetFileReader {
             return Ok(vec![]);
         }
 
+        // Acquire a read lease on every file we are about to scan. The leases
+        // are held in `_file_leases` (RAII) and released when this function
+        // returns. The FileMover (local→S3 promotion) and the FileReclaimer
+        // (the single physical-deletion chokepoint) consult the same registry
+        // and skip leased files, so an in-flight query cannot race a move or a
+        // delete.
+        //
+        // Lease ordering is deliberate: we acquire here *synchronously*,
+        // immediately after `query_files` returns and before any `.await`
+        // below. That closes the window where the reclaimer could see the file
+        // unleased and unlink it after we listed it. The only residual is a
+        // sub-microsecond cross-thread gap between the list and this `acquire`,
+        // and even then both fallbacks below (local: skip-if-missing at the
+        // `exists()` check; S3: scans the DiskCache-local copy, which the
+        // reclaimer never deletes) degrade gracefully rather than erroring —
+        // so a DataFusion-level scan retry (3a) is not required.
+        let _file_leases = self.lease_registry.as_ref().map(|registry| {
+            let ids: Vec<i64> = files.iter().map(|f| f.id).collect();
+            registry.acquire(&ids)
+        });
+
         // Resolve each file to a local path (fetch from S3 via DiskCache if needed).
         let mut resolved_paths: Vec<String> = Vec::with_capacity(files.len());
         for file in &files {
@@ -175,8 +213,18 @@ impl ParquetFileReader {
                     file.file_path.clone()
                 }
             };
+            if file.location != "s3" && !Path::new(&local_path).exists() {
+                tracing::warn!(
+                    file_path = %local_path,
+                    "Skipping stale file_list entry for missing local Parquet file"
+                );
+                continue;
+            }
             self.populate_memory_cache(&local_path).await?;
             resolved_paths.push(local_path);
+        }
+        if resolved_paths.is_empty() {
+            return Ok(vec![]);
         }
 
         // Build a fresh SessionContext from the shared engine config.
@@ -296,6 +344,21 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_with_lease_registry_releases_all_leases_on_return() {
+        // After every code path (including the empty-files fast return), the
+        // registry must have zero active leases. This is the RAII contract.
+        let registry = Arc::new(FileLeaseRegistry::new());
+        let reader = ParquetFileReader::new(PathBuf::from("/tmp"), Arc::new(EmptyRepo))
+            .with_lease_registry(registry.clone());
+
+        let _ = reader
+            .query_parquet(FileListFilter::default(), "SELECT * FROM spans")
+            .await
+            .unwrap();
+        assert_eq!(registry.active_lease_count(), 0);
     }
 
     /// Full round-trip: write a Parquet file, read it back via DataFusion ListingTable.

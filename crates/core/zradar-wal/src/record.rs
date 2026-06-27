@@ -17,6 +17,8 @@ pub enum SignalType {
     Trace = 0,
     Metric = 1,
     Log = 2,
+    /// NeMo Evaluator scores — Phase 1 R1.8 / OQ8.
+    Score = 3,
 }
 
 impl SignalType {
@@ -25,6 +27,7 @@ impl SignalType {
             0 => Some(Self::Trace),
             1 => Some(Self::Metric),
             2 => Some(Self::Log),
+            3 => Some(Self::Score),
             _ => None,
         }
     }
@@ -197,7 +200,12 @@ mod tests {
 
     #[test]
     fn test_round_trip_all_signal_types() {
-        for signal in [SignalType::Trace, SignalType::Metric, SignalType::Log] {
+        for signal in [
+            SignalType::Trace,
+            SignalType::Metric,
+            SignalType::Log,
+            SignalType::Score,
+        ] {
             let rec = make_record(signal, 42);
             let serialized = rec.serialize();
             let (deserialized, consumed) = WalRecord::deserialize(&serialized, 0).unwrap();
@@ -210,6 +218,18 @@ mod tests {
             assert_eq!(deserialized.assigned_offset, rec.assigned_offset);
             assert_eq!(deserialized.payload, rec.payload);
         }
+    }
+
+    #[test]
+    fn test_signal_type_from_u8_round_trip() {
+        // SignalType::Score is the Phase 1 R1.8 addition; assert the discriminant
+        // contract directly so a future renumbering can't silently shadow it.
+        assert_eq!(SignalType::from_u8(0), Some(SignalType::Trace));
+        assert_eq!(SignalType::from_u8(1), Some(SignalType::Metric));
+        assert_eq!(SignalType::from_u8(2), Some(SignalType::Log));
+        assert_eq!(SignalType::from_u8(3), Some(SignalType::Score));
+        assert_eq!(SignalType::from_u8(4), None);
+        assert_eq!(SignalType::from_u8(255), None);
     }
 
     #[test]
@@ -252,6 +272,7 @@ mod proptests {
             Just(SignalType::Trace),
             Just(SignalType::Metric),
             Just(SignalType::Log),
+            Just(SignalType::Score),
         ]
     }
 

@@ -53,6 +53,20 @@ impl ApiClient {
         self.project_id = Some(project_id);
     }
 
+    /// Return the configured tenant ID header.
+    pub fn tenant_id(&self) -> &str {
+        self.tenant_id
+            .as_deref()
+            .expect("test ApiClient tenant_id is not configured")
+    }
+
+    /// Return the configured project ID header.
+    pub fn project_id(&self) -> &str {
+        self.project_id
+            .as_deref()
+            .expect("test ApiClient project_id is not configured")
+    }
+
     /// Apply common headers (auth + tenant/project overrides) to a request builder.
     fn apply_headers(&self, mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         if let Some(token) = &self.token {

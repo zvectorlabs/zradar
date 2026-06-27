@@ -25,9 +25,13 @@ jwt_expiry_hours = 24
 [auth]
 enabled = true
 cache_ttl_seconds = 300
+# TEST ONLY: after validating the single static API key, accept x-tenant-id and
+# x-project-id as simulated API-key context. Do not enable outside functional/E2E
+# test configs.
+allow_test_header_context = true
 
 # Config-based API key for functional tests (matches TEST_API_KEY default)
-# Tests override tenant_id/project_id via x-tenant-id / x-project-id headers
+# Tests use this one API key and pass unique x-tenant-id/x-project-id values for isolation.
 [[api_keys]]
 key = "zk_test_default"
 tenant_id = "00000000-0000-0000-0000-000000000000"

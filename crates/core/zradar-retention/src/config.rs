@@ -50,6 +50,23 @@ impl RetentionConfigStore {
         self.configs.insert(config.org_id, config);
     }
 
+    /// Insert or update a project-level retention override.
+    pub fn upsert_project_override(&self, org_id: Uuid, project_id: Uuid, days: u32) {
+        if let Some(mut cfg) = self.configs.get_mut(&org_id) {
+            cfg.project_overrides.insert(project_id, days);
+            return;
+        }
+
+        self.configs.insert(
+            org_id,
+            OrgRetentionConfig {
+                org_id,
+                default_days: self.global_default_days,
+                project_overrides: [(project_id, days)].into(),
+            },
+        );
+    }
+
     /// Get the effective retention in days for a project.
     ///
     /// Lookup order:

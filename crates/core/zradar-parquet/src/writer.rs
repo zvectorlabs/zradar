@@ -29,12 +29,15 @@ use parquet::basic::Compression;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use tracing::debug;
 use uuid::Uuid;
-use zradar_models::{FileListFilter, LogRecord, Metric, NewFileListEntry, Span, StreamStatsUpdate};
+use zradar_models::{
+    EvaluationScore, FileListFilter, LogRecord, Metric, NewFileListEntry, Span, StreamStatsUpdate,
+};
 use zradar_policy::{DecisionSummary, SignalKind, UsageTracker, WriteSample};
 use zradar_traits::FileListRepository;
 
 use crate::schema::logs::logs_to_record_batch;
 use crate::schema::metrics::metrics_to_record_batch;
+use crate::schema::scores::scores_to_record_batch;
 use crate::schema::spans::spans_to_record_batch;
 
 // ---------------------------------------------------------------------------
@@ -226,6 +229,39 @@ impl ParquetFileWriter {
             min_ts_ns / 1_000,
             max_ts_ns / 1_000,
             logs.len() as i64,
+        )
+        .await
+    }
+
+    /// Write `scores` to a Parquet file and register it in `file_list` under
+    /// `signal_type = "scores"`. Phase 1 R1.8 / OQ8 / OQ9.
+    pub async fn write_scores(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        stream_name: &str,
+        scores: &[EvaluationScore],
+    ) -> anyhow::Result<String> {
+        if scores.is_empty() {
+            return Err(anyhow!("write_scores called with empty slice"));
+        }
+
+        let batch =
+            scores_to_record_batch(scores).context("Failed to convert scores to RecordBatch")?;
+
+        let min_ts_ns = scores.iter().map(|s| s.timestamp).min().unwrap_or(0);
+        let max_ts_ns = scores.iter().map(|s| s.timestamp).max().unwrap_or(0);
+
+        self.write_batch(
+            tenant_id,
+            project_id,
+            stream_name,
+            "scores",
+            batch,
+            min_ts_ns,
+            min_ts_ns / 1_000,
+            max_ts_ns / 1_000,
+            scores.len() as i64,
         )
         .await
     }
@@ -478,6 +514,10 @@ fn signal_kind(signal_type: &str) -> SignalKind {
         "traces" => SignalKind::Traces,
         "logs" => SignalKind::Logs,
         "metrics" => SignalKind::Metrics,
+        // Evaluation scores (Phase 1 R1.8) bill against the parent trace's
+        // SignalKind::Traces budget; adding a dedicated SignalKind::Scores
+        // would touch policy/quota wiring, deferred until usage signal warrants.
+        "scores" => SignalKind::Traces,
         "rum" => SignalKind::Rum,
         "session_replay" => SignalKind::SessionReplay,
         "error_tracking" => SignalKind::ErrorTracking,

@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use zradar_retention::{CleanupJob, CleanupStats, OrgRetentionConfig, RetentionConfigStore};
+use zradar_retention::{
+    CleanupJob, FileReclaimer, OrgRetentionConfig, RetentionConfigStore, RetentionRunStats,
+};
 use zradar_traits::{AuditLogRepository, RetentionPolicyRepository};
 
 use crate::http::{AuthContext, Capability};
@@ -18,6 +20,7 @@ use crate::http::{AuthContext, Capability};
 /// Shared state for retention handlers.
 pub struct RetentionState {
     pub cleanup_job: Arc<CleanupJob>,
+    pub file_reclaimer: Arc<FileReclaimer>,
     pub config_store: Arc<RetentionConfigStore>,
     pub policy_repo: Arc<dyn RetentionPolicyRepository>,
     pub audit_log_repo: Option<Arc<dyn AuditLogRepository>>,
@@ -32,12 +35,14 @@ pub struct RunCleanupParams {
     pub retention_days: Option<u32>,
     /// If provided, restrict cleanup to this org.
     pub org_id: Option<Uuid>,
+    /// If provided, restrict cleanup to this project within the resolved org.
+    pub project_id: Option<Uuid>,
 }
 
 /// Response body for a cleanup run.
 #[derive(Debug, Serialize)]
 pub struct RunCleanupResponse {
-    pub stats: CleanupStats,
+    pub stats: RetentionRunStats,
 }
 
 /// `POST /api/v1/admin/retention/run`
@@ -50,6 +55,7 @@ pub struct RunCleanupResponse {
     params(
         ("retention_days" = Option<u32>, Query, description = "Override retention days (0 = delete all)"),
         ("org_id" = Option<Uuid>, Query, description = "Restrict to a specific org"),
+        ("project_id" = Option<Uuid>, Query, description = "Restrict to a specific project"),
     ),
     responses(
         (status = 200, description = "Cleanup completed", body = RunCleanupResponse),
@@ -68,20 +74,55 @@ pub async fn run_cleanup(
 
     // Platform mode: ignore org_id override from params — always scope to ctx tenant.
     // Standalone mode: allow org_id override for intra-org admin operations.
+    let org_id = match auth.tenant_or_standalone_override(params.org_id) {
+        Ok(org_id) => org_id,
+        Err(e) => return e.into_response(),
+    };
+
     if let Some(days) = params.retention_days {
-        let org_id = match auth.tenant_or_standalone_override(params.org_id) {
-            Ok(org_id) => org_id,
-            Err(e) => return e.into_response(),
-        };
-        state.config_store.upsert(OrgRetentionConfig {
-            org_id,
-            default_days: days,
-            project_overrides: Default::default(),
-        });
+        if let Some(project_id) = params.project_id {
+            state
+                .config_store
+                .upsert_project_override(org_id, project_id, days);
+        } else {
+            state.config_store.upsert(OrgRetentionConfig {
+                org_id,
+                default_days: days,
+                project_overrides: Default::default(),
+            });
+        }
     }
 
-    match state.cleanup_job.run_now().await {
-        Ok(stats) => (StatusCode::OK, Json(RunCleanupResponse { stats })).into_response(),
+    // Policy pass: mark expired files deleted=true, then reclaim pass: physically
+    // remove soft-deleted files lease-aware. Admin callers see combined stats;
+    // `files_deleted` counts physical reclaims (backward-compatible field name).
+    let mark_stats = match state
+        .cleanup_job
+        .run_now_scoped(Some(org_id), params.project_id)
+        .await
+    {
+        Ok(stats) => stats,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    match state
+        .file_reclaimer
+        .run_now_scoped(Some(org_id), params.project_id)
+        .await
+    {
+        Ok(reclaim_stats) => (
+            StatusCode::OK,
+            Json(RunCleanupResponse {
+                stats: mark_stats.with_reclaim(&reclaim_stats),
+            }),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),

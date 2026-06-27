@@ -43,7 +43,10 @@ async fn main() -> Result<()> {
         None
     };
 
-    let admin = Arc::new(ApiKeyAdminAuthorizer::from_config(api_keys));
+    let admin = Arc::new(ApiKeyAdminAuthorizer::from_config_with_test_header_context(
+        api_keys,
+        config.auth.allow_test_header_context,
+    ));
 
     let runtime_auth = RuntimeAuth {
         otlp: otlp_auth,

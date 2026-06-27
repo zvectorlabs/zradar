@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use dashmap::DashMap;
 use tokio::sync::Notify;
-use zradar_models::{LogRecord, Metric, Span};
+use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
 
 // ---------------------------------------------------------------------------
 // Key
@@ -49,6 +49,8 @@ pub enum SignalBatch {
     Spans(Vec<Span>),
     Metrics(Vec<Metric>),
     Logs(Vec<LogRecord>),
+    /// Evaluation scores — Phase 1 R1.8.
+    Scores(Vec<EvaluationScore>),
 }
 
 impl SignalBatch {
@@ -58,6 +60,7 @@ impl SignalBatch {
             Self::Spans(v) => v.len(),
             Self::Metrics(v) => v.len(),
             Self::Logs(v) => v.len(),
+            Self::Scores(v) => v.len(),
         }
     }
 
@@ -187,6 +190,31 @@ impl WriteBuffer {
         }
     }
 
+    /// Append evaluation `scores` into the slot identified by `key`.
+    /// Phase 1 R1.8.
+    pub fn push_scores(&self, key: BufferKey, scores: &[EvaluationScore]) {
+        let added = rough_size(scores.len(), 256);
+        let max = self.max_slot_bytes;
+
+        let size_after = {
+            let mut slot = self.slots.entry(key).or_insert_with(|| BufferSlot {
+                data: SignalBatch::Scores(Vec::new()),
+                size_bytes: 0,
+                created_at: Instant::now(),
+            });
+
+            if let SignalBatch::Scores(ref mut v) = slot.data {
+                v.extend_from_slice(scores);
+            }
+            slot.size_bytes += added;
+            slot.size_bytes
+        };
+
+        if size_after >= max {
+            self.flush_notify.notify_one();
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Drain methods (called by FlushWorker)
     // -----------------------------------------------------------------------
@@ -244,6 +272,7 @@ impl WriteBuffer {
                 SignalBatch::Spans(spans) => spans.len(),
                 SignalBatch::Metrics(metrics) => metrics.len(),
                 SignalBatch::Logs(logs) => logs.len(),
+                SignalBatch::Scores(scores) => scores.len(),
             })
             .sum()
     }

@@ -137,6 +137,27 @@ TEST_ADMIN_EMAIL=admin@example.com
 TEST_ADMIN_PASSWORD=changeme123
 ```
 
+### Test-Only Header Context
+
+Functional/E2E tests run with `config.test.toml`, which sets:
+
+```toml
+[auth]
+allow_test_header_context = true
+```
+
+This is a test-only bypass. The server still validates `Authorization: Bearer <api-key>` first, then accepts `x-tenant-id` and `x-project-id` as simulated API-key context. This lets tests use one static key (`zk_test_default`) while running each test in an isolated tenant/project.
+
+Do not enable `allow_test_header_context` outside test configs.
+
+Use the helpers instead of hand-rolling headers:
+
+```rust
+let env = TestEnv::setup().await?;
+// env.client sends Authorization, x-tenant-id, and x-project-id.
+// env.otlp sends the same context over OTLP/gRPC metadata.
+```
+
 ## 🐛 Manual Testing
 
 ```bash
