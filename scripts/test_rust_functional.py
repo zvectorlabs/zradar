@@ -212,7 +212,8 @@ class TestRunner:
         server_env["RUST_LOG"] = "info,zradar=debug"
         
         try:
-            self.server_proc = subprocess.Popen([self.zradar_bin], env=server_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            # Inherit stdout/stderr to prevent the OS pipe buffer from filling up and hanging the process
+            self.server_proc = subprocess.Popen([self.zradar_bin], env=server_env, text=True)
         except Exception as e:
             err(f"Failed to start server process: {e}")
             self.teardown(1)
@@ -324,6 +325,11 @@ class TestRunner:
         sys.exit(exit_code)
 
 def main():
+    # Ensure we run from the repository root directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(script_dir)
+    os.chdir(root_dir)
+
     parser = argparse.ArgumentParser(description="zradar Functional Test Runner")
     parser.add_argument("-l", "--list", action="store_true", help="List all available tests")
     parser.add_argument("-r", "--reuse", action="store_true", help="Reuse a healthy test container if present; keep it running after")
@@ -338,7 +344,14 @@ def main():
         warn(f"Filter: {args.filter}")
         
     runner = TestRunner(args)
-    runner.run_tests()
+    try:
+        runner.run_tests()
+    except KeyboardInterrupt:
+        warn("Interrupted by user")
+        runner.teardown(1)
+    except Exception as e:
+        err(f"Unexpected error: {e}")
+        runner.teardown(1)
 
 if __name__ == '__main__':
     main()

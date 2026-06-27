@@ -35,7 +35,14 @@ def main():
 
     # 2. Check for sqlx-cli
     print(f"{GREEN}[2/5]{NC} Checking sqlx-cli...")
-    if shutil.which("sqlx"):
+    sqlx_bin = shutil.which("sqlx")
+    if not sqlx_bin:
+        cargo_home = os.environ.get("CARGO_HOME", os.path.expanduser("~/.cargo"))
+        candidate = os.path.join(cargo_home, "bin", "sqlx.exe" if os.name == "nt" else "sqlx")
+        if os.path.exists(candidate):
+            sqlx_bin = candidate
+
+    if sqlx_bin:
         print("  ✓ sqlx-cli found")
     else:
         print(f"{YELLOW}  ⚠ sqlx-cli not found, installing...{NC}")
@@ -43,6 +50,8 @@ def main():
             # We use cargo install. Specify CARGO_TARGET_DIR to separate target folders if needed
             env = os.environ.copy()
             subprocess.run(["cargo", "install", "sqlx-cli", "--no-default-features", "--features", "postgres"], env=env, check=True)
+            cargo_home = os.environ.get("CARGO_HOME", os.path.expanduser("~/.cargo"))
+            sqlx_bin = os.path.join(cargo_home, "bin", "sqlx.exe" if os.name == "nt" else "sqlx")
         except subprocess.CalledProcessError:
             print(f"{RED}  ✗ Failed to install sqlx-cli{NC}", file=sys.stderr)
             sys.exit(1)
@@ -51,7 +60,7 @@ def main():
     print(f"{GREEN}[3/5]{NC} Running PostgreSQL migrations...")
     try:
         env = os.environ.copy()
-        subprocess.run(["sqlx", "migrate", "run", "--source", "migrations"], env=env, check=True)
+        subprocess.run([sqlx_bin, "migrate", "run", "--source", "migrations"], env=env, check=True)
         print("  ✓ Migrations completed")
     except subprocess.CalledProcessError:
         print(f"{RED}  ✗ Migrations failed{NC}", file=sys.stderr)

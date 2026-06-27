@@ -130,10 +130,13 @@ def main():
 
     # Detect if VERSION or Cargo.toml changed
     version_changes = False
-    diff_status_unstaged = subprocess.run(["git", "diff", "--quiet", "VERSION", "Cargo.toml"])
-    diff_status_staged = subprocess.run(["git", "diff", "--cached", "--quiet", "VERSION", "Cargo.toml"])
-    if diff_status_unstaged.returncode != 0 or diff_status_staged.returncode != 0:
-        version_changes = True
+    if dry_run:
+        version_changes = (new_version != current)
+    else:
+        diff_status_unstaged = subprocess.run(["git", "diff", "--quiet", "VERSION", "Cargo.toml"])
+        diff_status_staged = subprocess.run(["git", "diff", "--cached", "--quiet", "VERSION", "Cargo.toml"])
+        if diff_status_unstaged.returncode != 0 or diff_status_staged.returncode != 0:
+            version_changes = True
 
     if version_changes:
         if not run_cmd(["git", "add", "VERSION", "Cargo.toml"], dry_run):

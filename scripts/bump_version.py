@@ -32,13 +32,24 @@ def write_version(version_file, cargo_toml, new_version):
     with open(cargo_toml, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # Search for version key under [workspace.package] or just global version
-    pattern = r'^version\s*=\s*".*"'
-    updated_content, count = re.subn(pattern, f'version = "{new_version}"', content, flags=re.M)
-    if count == 0:
-        print(f"error: version = \"...\" not found in {cargo_toml}", file=sys.stderr)
+    # Search for version key under [workspace.package] or [package]
+    section_match = re.search(r'^\[(?:workspace\.)?package\]', content, re.M)
+    if not section_match:
+        print(f"error: [workspace.package] or [package] section not found in {cargo_toml}", file=sys.stderr)
         sys.exit(1)
         
+    start_idx = section_match.end()
+    next_section_match = re.search(r'^\[', content[start_idx:], re.M)
+    end_idx = start_idx + next_section_match.start() if next_section_match else len(content)
+    
+    section_content = content[start_idx:end_idx]
+    pattern = r'^version\s*=\s*"[^"]*"'
+    updated_section, count = re.subn(pattern, f'version = "{new_version}"', section_content, flags=re.M)
+    if count == 0:
+        print(f"error: version = \"...\" not found under package section in {cargo_toml}", file=sys.stderr)
+        sys.exit(1)
+        
+    updated_content = content[:start_idx] + updated_section + content[end_idx:]
     with open(cargo_toml, 'w', encoding='utf-8') as f:
         f.write(updated_content)
 

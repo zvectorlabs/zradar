@@ -49,16 +49,16 @@ logs-server:
 
 # Show service status and health check
 status:
-    @echo "📊 Docker Services Status:"
-    docker-compose ps
-    @echo ""
-    @echo "🏥 Health Check:"
-    @python3 -c "import urllib.request; \
-        try: \
-            res=urllib.request.urlopen('http://localhost:8081/health', timeout=2); \
-            print('✅ Service healthy' if res.getcode() == 200 else '❌ Service not healthy'); \
-        except Exception as e: \
-            print('❌ Health check failed:', e)"
+    #!/usr/bin/env python3
+    import os, urllib.request
+    print("📊 Docker Services Status:")
+    os.system("docker-compose ps")
+    print("\n🏥 Health Check:")
+    try:
+        res = urllib.request.urlopen('http://localhost:8081/health', timeout=2)
+        print('✅ Service healthy' if res.getcode() == 200 else '❌ Service not healthy')
+    except Exception as e:
+        print('❌ Health check failed:', e)
 
 # Clean containers and Docker volumes (keeps data/ directory)
 clean:
@@ -153,17 +153,18 @@ functional-tests-fast test_name="":
 
 # Check service health
 health:
-    @python3 -c "import urllib.request; \
-        try: \
-            res1=urllib.request.urlopen('http://localhost:8081/health', timeout=2); \
-            print('✅ Service healthy' if res1.getcode() == 200 else '❌ Service not healthy'); \
-        except Exception as e: \
-            print('❌ Service not healthy:', e); \
-        try: \
-            res2=urllib.request.urlopen('http://localhost:8081/health/ready', timeout=2); \
-            print('✅ Service ready' if res2.getcode() == 200 else '❌ Service not ready'); \
-        except Exception as e: \
-            print('❌ Service not ready:', e)"
+    #!/usr/bin/env python3
+    import urllib.request
+    try:
+        res1 = urllib.request.urlopen('http://localhost:8081/health', timeout=2)
+        print('✅ Service healthy' if res1.getcode() == 200 else '❌ Service not healthy')
+    except Exception as e:
+        print('❌ Service not healthy:', e)
+    try:
+        res2 = urllib.request.urlopen('http://localhost:8081/health/ready', timeout=2)
+        print('✅ Service ready' if res2.getcode() == 200 else '❌ Service not ready')
+    except Exception as e:
+        print('❌ Service not ready:', e)
 
 # Open shell in zradar container
 shell:
