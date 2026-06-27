@@ -1,0 +1,120 @@
+# =============================================================================
+# zradar — NIM Metrics Integration Reference (Phase 3 R3.1)
+#
+# Validated against:
+#   - NVIDIA NIM LLM 1.x        (https://docs.nvidia.com/nim/large-language-models/)
+#   - vLLM 0.6+                 (https://docs.vllm.ai/en/stable/usage/metrics/)
+#   - DCGM-Exporter 3.x         (https://github.com/NVIDIA/dcgm-exporter)
+#   - OpenTelemetry Collector v0.95+ (contrib distribution)
+#
+# DECISION REF (OQ20): a single pin + scheduled drift check. Rotate this header
+# block in the same PR that bumps the version. Drift-check CI workflow is
+# deferred — track manually until it lands.
+#
+# Pattern (see TECH-SPEC-PHASE-3.md):
+#   nim-llm:8000/v1/metrics  ┐
+#   nim-retriever:8000/...   ├─→ otel-collector (prom receiver + batch)
+#   dcgm-exporter:9400/...   ┘                       │
+#                                                    └─→ zradar OTLP/HTTP :4318
+#
+# zradar's role is "what receives OTLP" — no built-in Prom scraper. The
+# collector translates Prometheus → OTLP and forwards.
+#
+# Required env vars at the collector's environment:
+#   ZRADAR_OTLP_HTTP_URL  — e.g. http://zradar.zradar.svc.cluster.local:4318
+#   ZRADAR_API_KEY        — API key with metrics-ingest capability
+#
+# See docs/INTEGRATIONS/NEMO.md for end-to-end deployment guidance.
+# =============================================================================
+
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        # ---------------------------------------------------------------------
+        # NIM LLM (vllm:* metrics: TTFT, queue depth, KV cache, token totals)
+        # ---------------------------------------------------------------------
+        - job_name: nim-llm
+          scrape_interval: 15s
+          scrape_timeout: 10s
+          metrics_path: /v1/metrics
+          static_configs:
+            - targets: ['nim-llm:8000']
+              labels:
+                source: nim-llm
+
+        # ---------------------------------------------------------------------
+        # NIM Retriever (same surface as the LLM service; remove the job if you
+        # are not running NeMo Retriever).
+        # ---------------------------------------------------------------------
+        - job_name: nim-retriever
+          scrape_interval: 15s
+          scrape_timeout: 10s
+          metrics_path: /v1/metrics
+          static_configs:
+            - targets: ['nim-retriever:8000']
+              labels:
+                source: nim-retriever
+
+        # ---------------------------------------------------------------------
+        # DCGM-Exporter (DCGM_FI_*: GPU utilization, memory, temperature, power)
+        # ---------------------------------------------------------------------
+        - job_name: dcgm
+          scrape_interval: 15s
+          scrape_timeout: 10s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ['dcgm-exporter:9400']
+              labels:
+                source: dcgm-exporter
+
+processors:
+  # Batch keeps OTLP push frequency manageable. 30 s is a defensive default;
+  # tune down to ~5 s if you need fresher dashboards (cost: more OTLP calls).
+  batch:
+    timeout: 30s
+    send_batch_size: 8192
+
+  # Resource attributes — let zradar identify the cluster/region/env without
+  # depending on Prometheus relabels. Override `cluster.name` / `deployment.env`
+  # to match your environment.
+  resource:
+    attributes:
+      - key: service.namespace
+        value: nim
+        action: upsert
+      - key: cluster.name
+        value: default
+        action: upsert
+      - key: deployment.env
+        value: production
+        action: upsert
+
+exporters:
+  # OTLP/HTTP push to zradar. Phase 1 receiver listens on :4318.
+  otlphttp:
+    endpoint: ${env:ZRADAR_OTLP_HTTP_URL}
+    headers:
+      authorization: "Bearer ${env:ZRADAR_API_KEY}"
+    # Compression keeps the wire small for bursty histogram pushes.
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [resource, batch]
+      exporters: [otlphttp]
+
+  # Collector self-telemetry — INFO logs and basic internal metrics on :8888.
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

@@ -24,6 +24,12 @@ pub struct UpdateProjectSettingsRequest {
     pub max_ingestion_rate: Option<i32>,
     pub file_push_interval_secs: i32,
     pub blocked: bool,
+    #[serde(default = "default_capture_llm_content")]
+    pub capture_llm_content_enabled: bool,
+}
+
+fn default_capture_llm_content() -> bool {
+    true
 }
 
 pub async fn get_project_settings(
@@ -67,6 +73,7 @@ pub async fn update_project_settings(
             max_ingestion_rate: body.max_ingestion_rate,
             file_push_interval_secs: body.file_push_interval_secs,
             blocked: body.blocked,
+            capture_llm_content_enabled: body.capture_llm_content_enabled,
         })
         .await?;
 
@@ -89,6 +96,7 @@ pub async fn update_project_settings(
                     "max_ingestion_rate": settings.max_ingestion_rate,
                     "file_push_interval_secs": settings.file_push_interval_secs,
                     "blocked": settings.blocked,
+                    "capture_llm_content_enabled": settings.capture_llm_content_enabled,
                 }),
             })
             .await?;

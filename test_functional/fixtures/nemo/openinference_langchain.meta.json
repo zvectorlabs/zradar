@@ -1,0 +1,16 @@
+{
+  "description": "LangChain instrumented via OpenInference convention — proves vendor-neutral coverage",
+  "expected_attributes": [
+    {
+      "fields": {
+        "llm_model": "gpt-4-turbo-preview",
+        "llm_provider": "openai",
+        "llm_response_model": "gpt-4-turbo-2024-04-09"
+      },
+      "span_name": "ChatOpenAI.invoke"
+    }
+  ],
+  "expected_total_spans": 1,
+  "fixture": "openinference_langchain",
+  "kind": "traces"
+}

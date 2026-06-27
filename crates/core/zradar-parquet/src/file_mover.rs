@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use zradar_models::{FileListFilter, ParquetStorageConfig};
-use zradar_traits::{BlockStorage, FileListRepository};
+use zradar_traits::{BlockStorage, FileLeaseRegistry, FileListRepository};
 
 /// Moves local Parquet files to S3 on a configurable schedule.
 pub struct FileMover {
@@ -25,6 +25,7 @@ pub struct FileMover {
     block_storage: Arc<dyn BlockStorage>,
     config: ParquetStorageConfig,
     data_dir: PathBuf,
+    lease_registry: Option<Arc<FileLeaseRegistry>>,
 }
 
 impl FileMover {
@@ -40,7 +41,15 @@ impl FileMover {
             block_storage,
             config,
             data_dir,
+            lease_registry: None,
         }
+    }
+
+    /// Install a [`FileLeaseRegistry`] so that files actively being read by
+    /// queries are skipped this tick. They will be retried on the next cycle.
+    pub fn with_lease_registry(mut self, registry: Arc<FileLeaseRegistry>) -> Self {
+        self.lease_registry = Some(registry);
+        self
     }
 
     /// Run the FileMover loop until `cancel` is cancelled.
@@ -88,6 +97,21 @@ impl FileMover {
         let eligible: Vec<_> = files
             .into_iter()
             .filter(|f| f.created_at <= cutoff_us)
+            .filter(|f| {
+                // Defer files that an active query is reading. Logged so that
+                // a chronically-leased file is visible in ops without spamming.
+                match &self.lease_registry {
+                    Some(registry) if registry.is_leased(f.id) => {
+                        info!(
+                            file_id = f.id,
+                            path = %f.file_path,
+                            "FileMover: skipping leased file, will retry next cycle"
+                        );
+                        false
+                    }
+                    _ => true,
+                }
+            })
             .collect();
 
         if eligible.is_empty() {
@@ -298,6 +322,131 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), mover.run(cancel))
             .await
             .expect("FileMover should stop when cancelled");
+    }
+
+    /// Repo that returns one eligible local file. Used to drive the lease
+    /// skip path without standing up Postgres.
+    struct SingleFileRepo {
+        entry: FileListEntry,
+        update_calls: Mutex<Vec<i64>>,
+    }
+
+    #[async_trait::async_trait]
+    impl FileListRepository for SingleFileRepo {
+        async fn register_file(&self, _: NewFileListEntry) -> anyhow::Result<i64> {
+            Ok(self.entry.id)
+        }
+        async fn query_files(&self, _: FileListFilter) -> anyhow::Result<Vec<FileListEntry>> {
+            Ok(vec![self.entry.clone()])
+        }
+        async fn update_location(
+            &self,
+            file_id: i64,
+            _location: &str,
+            _path: &str,
+        ) -> anyhow::Result<()> {
+            self.update_calls.lock().unwrap().push(file_id);
+            Ok(())
+        }
+        async fn mark_deleted(&self, _: &[i64]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            Ok(vec![])
+        }
+        async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_entry(tmp: &tempfile::TempDir, id: i64) -> FileListEntry {
+        let path = tmp.path().join(format!("file_{id}.parquet"));
+        // Touch the file so FileMover's tokio::fs::read does not skip it.
+        std::fs::write(&path, b"parquet bytes here").unwrap();
+        FileListEntry {
+            id,
+            tenant_id: Uuid::nil(),
+            project_id: Uuid::nil(),
+            signal_type: "traces".to_string(),
+            stream_name: "default".to_string(),
+            date: "2026/06/26/00".to_string(),
+            file_path: path.to_string_lossy().into_owned(),
+            location: "local".to_string(),
+            min_ts: 0,
+            max_ts: i64::MAX,
+            records: 1,
+            original_size: 0,
+            compressed_size: 0,
+            deleted: false,
+            // Created far enough in the past to clear `file_push_delay_secs`.
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn file_mover_uploads_when_no_lease() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let entry = make_entry(&tmp, 1);
+        let repo = Arc::new(SingleFileRepo {
+            entry,
+            update_calls: Mutex::new(Vec::new()),
+        });
+        let storage = Arc::new(MockBlockStorage::new());
+
+        let mover = FileMover::new(
+            repo.clone(),
+            storage.clone(),
+            ParquetStorageConfig::default(),
+            tmp.path().to_path_buf(),
+        );
+
+        mover.push_eligible_files().await.unwrap();
+
+        // The file was uploaded and its location updated.
+        assert_eq!(storage.uploaded.lock().unwrap().len(), 1);
+        assert_eq!(repo.update_calls.lock().unwrap().as_slice(), &[1]);
+    }
+
+    #[tokio::test]
+    async fn file_mover_skips_leased_file_and_resumes_after_release() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let entry = make_entry(&tmp, 42);
+        let repo = Arc::new(SingleFileRepo {
+            entry,
+            update_calls: Mutex::new(Vec::new()),
+        });
+        let storage = Arc::new(MockBlockStorage::new());
+        let registry = Arc::new(FileLeaseRegistry::new());
+
+        let mover = FileMover::new(
+            repo.clone(),
+            storage.clone(),
+            ParquetStorageConfig::default(),
+            tmp.path().to_path_buf(),
+        )
+        .with_lease_registry(registry.clone());
+
+        // Acquire a lease — simulating an in-flight query reading the file.
+        let _lease = registry.acquire(&[42]);
+        mover.push_eligible_files().await.unwrap();
+        assert!(
+            storage.uploaded.lock().unwrap().is_empty(),
+            "leased file must not be uploaded"
+        );
+        assert!(
+            repo.update_calls.lock().unwrap().is_empty(),
+            "leased file must not have its location updated"
+        );
+
+        // Release the lease and run again — now the upload proceeds.
+        drop(_lease);
+        mover.push_eligible_files().await.unwrap();
+        assert_eq!(storage.uploaded.lock().unwrap().len(), 1);
+        assert_eq!(repo.update_calls.lock().unwrap().as_slice(), &[42]);
     }
 
     #[test]

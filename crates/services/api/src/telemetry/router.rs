@@ -31,6 +31,10 @@ pub fn router(service: Arc<QueryService>) -> Router {
             get(handlers::get_agent_analytics),
         )
         .route(
+            "/api/v1/analytics/guardrails",
+            get(handlers::get_guardrails_analytics),
+        )
+        .route(
             "/api/v1/analytics/storage-usage",
             get(handlers::get_storage_usage),
         )

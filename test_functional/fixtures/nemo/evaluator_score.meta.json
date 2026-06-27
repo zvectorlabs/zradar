@@ -1,0 +1,16 @@
+{
+  "description": "NeMo Evaluator emits a numeric score as an OTLP log under the trace it scored",
+  "expected_attributes": [
+    {
+      "fields": {
+        "evaluator_name": "answer_relevance",
+        "score_type": "numeric",
+        "score_value": 0.92
+      },
+      "log_body_contains": "evaluation completed"
+    }
+  ],
+  "expected_log_count": 1,
+  "fixture": "evaluator_score",
+  "kind": "logs"
+}

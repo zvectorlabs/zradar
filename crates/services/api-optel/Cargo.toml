@@ -19,6 +19,11 @@ tonic = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
 
+# HTTP (OTLP/HTTP receiver on :4318)
+axum = { workspace = true }
+bytes = { workspace = true }
+tower-http = { workspace = true }
+
 # Error handling
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -33,3 +38,23 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 dashmap = { workspace = true }
 
+# OQ15 zero-copy invariant test gates on `--features count-allocations`.
+# `allocation-counter` swaps in a custom global allocator, so it stays opt-in
+# and is never linked into the production binary or the default `cargo test`
+# run. See `tests/oq15_zero_copy.rs`.
+#
+# Cargo requires optional deps to live in `[dependencies]` (not
+# `[dev-dependencies]`); the feature gate keeps it out of normal builds.
+allocation-counter = { version = "0.8", optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[features]
+# Enable the OQ15 zero-copy invariant test. Activates the custom global
+# allocator that counts allocations on the current thread.
+count-allocations = ["dep:allocation-counter"]
+
+[[bench]]
+name = "converter_bench"
+harness = false

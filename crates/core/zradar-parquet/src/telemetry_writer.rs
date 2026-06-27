@@ -8,10 +8,11 @@
 //!   `WriteBuffer`; a background `FlushWorker` batches them into fewer files.
 //!   Enable by passing a `WriteBuffer` to `ParquetTelemetryWriter::with_buffer`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use zradar_models::{LogRecord, Metric, Span};
+use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
 use zradar_traits::TelemetryWriter;
 
 use crate::write_buffer::{BufferKey, WriteBuffer};
@@ -52,95 +53,259 @@ impl TelemetryWriter for ParquetTelemetryWriter {
         if spans.is_empty() {
             return Ok(());
         }
-
-        let first = &spans[0];
-        let stream_name = stream_name_or_default(&first.service_name);
-
-        if let Some(buf) = &self.buffer {
-            let hour = ts_ns_to_date_path(first.timestamp);
-            buf.push_spans(
-                BufferKey {
-                    tenant_id: first.tenant_id.clone(),
-                    project_id: first.project_id.clone(),
-                    signal_type: "traces".to_string(),
-                    stream_name,
-                    hour,
-                },
-                spans,
-            );
-        } else {
-            self.writer
-                .write_spans(&first.tenant_id, &first.project_id, &stream_name, spans)
-                .await?;
+        match partition_by_storage_key(
+            spans,
+            |s| s.tenant_id.as_str(),
+            |s| s.project_id.as_str(),
+            |s| s.service_name.as_str(),
+            |s| s.timestamp,
+        ) {
+            Partitioned::Homogeneous(key, slice) => self.write_span_partition(&key, slice).await,
+            Partitioned::Grouped(groups) => {
+                for (key, group) in &groups {
+                    self.write_span_partition(key, group).await?;
+                }
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     async fn insert_metrics(&self, metrics: &[Metric]) -> anyhow::Result<()> {
         if metrics.is_empty() {
             return Ok(());
         }
-
-        let first = &metrics[0];
-        let stream_name = stream_name_or_default(&first.service_name);
-
-        if let Some(buf) = &self.buffer {
-            let hour = ts_ns_to_date_path(first.timestamp);
-            buf.push_metrics(
-                BufferKey {
-                    tenant_id: first.tenant_id.clone(),
-                    project_id: first.project_id.clone(),
-                    signal_type: "metrics".to_string(),
-                    stream_name,
-                    hour,
-                },
-                metrics,
-            );
-        } else {
-            self.writer
-                .write_metrics(&first.tenant_id, &first.project_id, &stream_name, metrics)
-                .await?;
+        match partition_by_storage_key(
+            metrics,
+            |m| m.tenant_id.as_str(),
+            |m| m.project_id.as_str(),
+            |m| m.service_name.as_str(),
+            |m| m.timestamp,
+        ) {
+            Partitioned::Homogeneous(key, slice) => self.write_metric_partition(&key, slice).await,
+            Partitioned::Grouped(groups) => {
+                for (key, group) in &groups {
+                    self.write_metric_partition(key, group).await?;
+                }
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     async fn insert_logs(&self, logs: &[LogRecord]) -> anyhow::Result<()> {
         if logs.is_empty() {
             return Ok(());
         }
+        match partition_by_storage_key(
+            logs,
+            |l| l.tenant_id.as_str(),
+            |l| l.project_id.as_str(),
+            |l| l.service_name.as_str(),
+            |l| l.timestamp,
+        ) {
+            Partitioned::Homogeneous(key, slice) => self.write_log_partition(&key, slice).await,
+            Partitioned::Grouped(groups) => {
+                for (key, group) in &groups {
+                    self.write_log_partition(key, group).await?;
+                }
+                Ok(())
+            }
+        }
+    }
 
-        let first = &logs[0];
-        let stream_name = stream_name_or_default(&first.service_name);
+    async fn insert_scores(&self, scores: &[EvaluationScore]) -> anyhow::Result<()> {
+        if scores.is_empty() {
+            return Ok(());
+        }
+        // Scores have no service_name of their own; they are binned under the
+        // parent trace's service so per-stream queries co-locate scores with the
+        // traces they evaluate.
+        match partition_by_storage_key(
+            scores,
+            |s| s.tenant_id.as_str(),
+            |s| s.project_id.as_str(),
+            |s| s.service_name.as_str(),
+            |s| s.timestamp,
+        ) {
+            Partitioned::Homogeneous(key, slice) => self.write_score_partition(&key, slice).await,
+            Partitioned::Grouped(groups) => {
+                for (key, group) in &groups {
+                    self.write_score_partition(key, group).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
 
+impl ParquetTelemetryWriter {
+    async fn write_span_partition(&self, key: &PartitionKey, spans: &[Span]) -> anyhow::Result<()> {
         if let Some(buf) = &self.buffer {
-            let hour = ts_ns_to_date_path(first.timestamp);
-            buf.push_logs(
-                BufferKey {
-                    tenant_id: first.tenant_id.clone(),
-                    project_id: first.project_id.clone(),
-                    signal_type: "logs".to_string(),
-                    stream_name,
-                    hour,
-                },
-                logs,
-            );
+            buf.push_spans(key.buffer_key("traces"), spans);
         } else {
             self.writer
-                .write_logs(&first.tenant_id, &first.project_id, &stream_name, logs)
+                .write_spans(&key.tenant_id, &key.project_id, &key.stream_name, spans)
                 .await?;
         }
+        Ok(())
+    }
 
+    async fn write_metric_partition(
+        &self,
+        key: &PartitionKey,
+        metrics: &[Metric],
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_metrics(key.buffer_key("metrics"), metrics);
+        } else {
+            self.writer
+                .write_metrics(&key.tenant_id, &key.project_id, &key.stream_name, metrics)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_log_partition(
+        &self,
+        key: &PartitionKey,
+        logs: &[LogRecord],
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_logs(key.buffer_key("logs"), logs);
+        } else {
+            self.writer
+                .write_logs(&key.tenant_id, &key.project_id, &key.stream_name, logs)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_score_partition(
+        &self,
+        key: &PartitionKey,
+        scores: &[EvaluationScore],
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_scores(key.buffer_key("scores"), scores);
+        } else {
+            self.writer
+                .write_scores(&key.tenant_id, &key.project_id, &key.stream_name, scores)
+                .await?;
+        }
         Ok(())
     }
 }
 
-fn stream_name_or_default(service_name: &str) -> String {
+/// Nanoseconds in one UTC hour — the granularity Parquet files are partitioned
+/// at. Two timestamps share an hour partition iff they share this bucket.
+const NANOS_PER_HOUR: i64 = 3_600_000_000_000;
+
+/// The storage partition a single telemetry row belongs to: `(tenant, project,
+/// stream, hour)` (the signal type is fixed per `insert_*` call).
+///
+/// A batch handed to an `insert_*` method can span many partitions — most
+/// notably, the WAL flusher merges records from many tenants into one slice —
+/// so each row must be keyed from its own fields, never from `rows[0]`. Keying
+/// the whole batch off the first row caused a cross-tenant leak plus hour/stream
+/// mis-binning.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PartitionKey {
+    tenant_id: String,
+    project_id: String,
+    stream_name: String,
+    hour: String,
+}
+
+impl PartitionKey {
+    fn of(tenant_id: &str, project_id: &str, service_name: &str, ts_ns: i64) -> Self {
+        Self {
+            tenant_id: tenant_id.to_string(),
+            project_id: project_id.to_string(),
+            stream_name: stream_of(service_name).to_string(),
+            hour: ts_ns_to_date_path(ts_ns),
+        }
+    }
+
+    fn buffer_key(&self, signal_type: &str) -> BufferKey {
+        BufferKey {
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            signal_type: signal_type.to_string(),
+            stream_name: self.stream_name.clone(),
+            hour: self.hour.clone(),
+        }
+    }
+}
+
+/// Outcome of partitioning a batch by its storage key.
+enum Partitioned<'a, T> {
+    /// Every row maps to the same partition — the common case. Carries the
+    /// original slice, so the hot path does no per-row grouping or cloning.
+    Homogeneous(PartitionKey, &'a [T]),
+    /// Rows span multiple partitions; split into per-partition owned groups in
+    /// first-seen order, preserving arrival order within each group.
+    Grouped(Vec<(PartitionKey, Vec<T>)>),
+}
+
+/// Partition `rows` (which must be non-empty) by `(tenant, project, stream,
+/// hour)`.
+///
+/// Homogeneity is checked with an allocation-free discriminator
+/// `(&tenant, &project, &stream, hour_bucket)` so the common single-partition
+/// batch never allocates; only a genuinely mixed batch pays for grouping. The
+/// `hour_bucket` integer is a faithful stand-in for the formatted hour string:
+/// UTC hours are exactly `NANOS_PER_HOUR` wide and epoch-aligned, so equal
+/// buckets ⇔ equal `"%Y/%m/%d/%H"`.
+fn partition_by_storage_key<T: Clone>(
+    rows: &[T],
+    tenant_of: impl Fn(&T) -> &str,
+    project_of: impl Fn(&T) -> &str,
+    service_of: impl Fn(&T) -> &str,
+    ts_of: impl Fn(&T) -> i64,
+) -> Partitioned<'_, T> {
+    let first = &rows[0];
+    let d0 = (
+        tenant_of(first),
+        project_of(first),
+        stream_of(service_of(first)),
+        ts_of(first).div_euclid(NANOS_PER_HOUR),
+    );
+    let homogeneous = rows.iter().all(|r| {
+        (
+            tenant_of(r),
+            project_of(r),
+            stream_of(service_of(r)),
+            ts_of(r).div_euclid(NANOS_PER_HOUR),
+        ) == d0
+    });
+    if homogeneous {
+        let key = PartitionKey::of(
+            tenant_of(first),
+            project_of(first),
+            service_of(first),
+            ts_of(first),
+        );
+        return Partitioned::Homogeneous(key, rows);
+    }
+
+    let mut index: HashMap<PartitionKey, usize> = HashMap::new();
+    let mut groups: Vec<(PartitionKey, Vec<T>)> = Vec::new();
+    for r in rows {
+        let key = PartitionKey::of(tenant_of(r), project_of(r), service_of(r), ts_of(r));
+        let idx = *index.entry(key.clone()).or_insert_with(|| {
+            groups.push((key.clone(), Vec::new()));
+            groups.len() - 1
+        });
+        groups[idx].1.push(r.clone());
+    }
+    Partitioned::Grouped(groups)
+}
+
+/// Map an OTLP `service.name` to its stream name, defaulting empty to "default".
+fn stream_of(service_name: &str) -> &str {
     if service_name.is_empty() {
-        "default".to_string()
+        "default"
     } else {
-        service_name.to_string()
+        service_name
     }
 }
 
@@ -299,11 +464,237 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_name_helper_empty() {
-        assert_eq!(stream_name_or_default(""), "default");
+        assert_eq!(stream_of(""), "default");
     }
 
     #[tokio::test]
     async fn test_stream_name_helper_non_empty() {
-        assert_eq!(stream_name_or_default("my-svc"), "my-svc");
+        assert_eq!(stream_of("my-svc"), "my-svc");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Per-row partitioning — regression for the cross-tenant leak / hour & stream
+    // mis-binning where a mixed batch was keyed entirely off `rows[0]`.
+    // ---------------------------------------------------------------------------
+
+    /// Repo that records *every* registered entry (not just the last) so the
+    /// direct write path can be asserted per partition.
+    #[derive(Default)]
+    struct MultiCapturingRepo {
+        entries: Mutex<Vec<NewFileListEntry>>,
+    }
+
+    #[async_trait::async_trait]
+    impl zradar_traits::FileListRepository for MultiCapturingRepo {
+        async fn register_file(&self, entry: NewFileListEntry) -> anyhow::Result<i64> {
+            let mut e = self.entries.lock().unwrap();
+            e.push(entry);
+            Ok(e.len() as i64)
+        }
+        async fn query_files(&self, _: FileListFilter) -> anyhow::Result<Vec<FileListEntry>> {
+            Ok(vec![])
+        }
+        async fn update_location(&self, _: i64, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn mark_deleted(&self, _: &[i64]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            Ok(vec![])
+        }
+        async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn buffered_writer(buffer: Arc<WriteBuffer>) -> ParquetTelemetryWriter {
+        let repo = Arc::new(CapturingRepo::default());
+        let fw = Arc::new(ParquetFileWriter::new(
+            std::path::PathBuf::from("/tmp"),
+            repo,
+        ));
+        ParquetTelemetryWriter::with_buffer(fw, buffer)
+    }
+
+    fn span_at(tenant: &str, project: &str, svc: &str, ts: i64) -> Span {
+        Span {
+            tenant_id: tenant.to_string(),
+            project_id: project.to_string(),
+            service_name: svc.to_string(),
+            timestamp: ts,
+            ..Span::default()
+        }
+    }
+
+    /// The bot's exact scenario: one slice mixing two tenants, two streams, and
+    /// two hours must fan out into three partitions — tenant B never merged into
+    /// tenant A, and tenant A's two hours kept apart.
+    #[tokio::test]
+    async fn test_insert_spans_mixed_tenants_and_hours_partitioned() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let (ta, pa) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let (tb, pb) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let h10 = 10 * NANOS_PER_HOUR;
+        let h11 = 11 * NANOS_PER_HOUR;
+
+        writer
+            .insert_spans(&[
+                span_at(&ta, &pa, "api", h10),
+                span_at(&tb, &pb, "web", h10),
+                span_at(&ta, &pa, "api", h11),
+            ])
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 3, "three distinct partitions expected");
+
+        // Tenant B's span must live in its OWN slot — never merged into A.
+        let (b_key, b_slot) = slots
+            .iter()
+            .find(|(k, _)| k.tenant_id == tb)
+            .expect("tenant B partition must exist");
+        assert_eq!(b_key.project_id, pb);
+        assert_eq!(b_key.stream_name, "web");
+        match &b_slot.data {
+            SignalBatch::Spans(v) => {
+                assert_eq!(v.len(), 1);
+                assert_eq!(
+                    v[0].tenant_id, tb,
+                    "no cross-tenant leak into tenant B's slot"
+                );
+            }
+            _ => panic!("expected Spans batch"),
+        }
+
+        // Tenant A has two slots, same tenant/stream but different hour.
+        let a_slots: Vec<_> = slots.iter().filter(|(k, _)| k.tenant_id == ta).collect();
+        assert_eq!(a_slots.len(), 2, "tenant A split across two hours");
+        let hours: std::collections::HashSet<_> =
+            a_slots.iter().map(|(k, _)| k.hour.clone()).collect();
+        assert_eq!(hours.len(), 2, "two distinct hour partitions for tenant A");
+    }
+
+    /// Scores were the originally flagged signal — verify they bin per tenant.
+    #[tokio::test]
+    async fn test_insert_scores_mixed_tenants_no_leak() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let ta = Uuid::new_v4().to_string();
+        let tb = Uuid::new_v4().to_string();
+        let score = |tenant: &str| EvaluationScore {
+            tenant_id: tenant.to_string(),
+            project_id: Uuid::new_v4().to_string(),
+            service_name: "api".to_string(),
+            timestamp: 10 * NANOS_PER_HOUR,
+            ..EvaluationScore::default()
+        };
+
+        writer
+            .insert_scores(&[score(&ta), score(&tb)])
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 2, "one partition per tenant");
+        for (k, slot) in &slots {
+            match &slot.data {
+                SignalBatch::Scores(v) => {
+                    assert_eq!(v.len(), 1);
+                    assert_eq!(
+                        v[0].tenant_id, k.tenant_id,
+                        "each score binned under its own tenant"
+                    );
+                }
+                _ => panic!("expected Scores batch"),
+            }
+        }
+        let tenants: std::collections::HashSet<_> =
+            slots.iter().map(|(k, _)| k.tenant_id.clone()).collect();
+        assert!(tenants.contains(&ta) && tenants.contains(&tb));
+    }
+
+    /// Fast path: a homogeneous batch stays a single partition with all rows.
+    #[tokio::test]
+    async fn test_insert_spans_homogeneous_single_partition() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let (t, p) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let h10 = 10 * NANOS_PER_HOUR;
+
+        // Same tenant/project/stream, both within the same hour.
+        writer
+            .insert_spans(&[span_at(&t, &p, "api", h10), span_at(&t, &p, "api", h10 + 5)])
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 1, "one partition for a homogeneous batch");
+        match &slots[0].1.data {
+            SignalBatch::Spans(v) => assert_eq!(v.len(), 2),
+            _ => panic!("expected Spans batch"),
+        }
+    }
+
+    /// Direct (unbuffered) path: a mixed batch must register one Parquet file per
+    /// partition, each carrying only its own tenant's rows.
+    #[tokio::test]
+    async fn test_direct_insert_spans_mixed_tenants_registers_per_partition() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Arc::new(MultiCapturingRepo::default());
+        let writer = {
+            let fw = Arc::new(ParquetFileWriter::new(
+                dir.path().to_path_buf(),
+                repo.clone(),
+            ));
+            ParquetTelemetryWriter::new(fw)
+        };
+
+        let (ta, pa) = (Uuid::new_v4(), Uuid::new_v4());
+        let (tb, pb) = (Uuid::new_v4(), Uuid::new_v4());
+        let h10 = 10 * NANOS_PER_HOUR;
+
+        writer
+            .insert_spans(&[
+                span_at(&ta.to_string(), &pa.to_string(), "api", h10),
+                span_at(&tb.to_string(), &pb.to_string(), "web", h10),
+                span_at(&ta.to_string(), &pa.to_string(), "api", h10),
+            ])
+            .await
+            .unwrap();
+
+        let entries = repo.entries.lock().unwrap();
+        assert_eq!(entries.len(), 2, "one file per partition");
+
+        let b = entries
+            .iter()
+            .find(|e| e.tenant_id == tb)
+            .expect("tenant B file must exist");
+        assert_eq!(b.records, 1, "tenant B file holds only B's span");
+        assert_eq!(b.stream_name, "web");
+
+        let a = entries
+            .iter()
+            .find(|e| e.tenant_id == ta)
+            .expect("tenant A file must exist");
+        assert_eq!(
+            a.records, 2,
+            "tenant A's two same-partition spans coalesced"
+        );
+        assert_eq!(a.stream_name, "api");
     }
 }

@@ -23,20 +23,19 @@ use api::{
 };
 use api_optel::{
     CircuitBreaker, LogsServiceServer, MetricsServiceServer, OtlpLogsService, OtlpMetricsService,
-    OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    OtlpTraceService, ProjectRateLimiter, TraceServiceServer, otlp_http_router,
 };
 use axum::Router;
+use sqlx::postgres::PgPoolOptions;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::Server;
 use tower_http::compression::CompressionLayer;
 
-use sqlx::postgres::PgPoolOptions;
-
 use zradar_models::Config;
 use zradar_parquet::{
-    Compactor, DiskCache, FileMover, FlushWorker, MemoryCache, ParquetFileReader,
-    ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter, WriteBuffer, WriterConfig,
-    recover_incomplete_writes,
+    Compactor, DiskCache, FileLeaseRegistry, FileMover, FlushWorker, MemoryCache,
+    ParquetFileReader, ParquetFileWriter, ParquetTelemetryReader, ParquetTelemetryWriter,
+    WriteBuffer, WriterConfig, recover_incomplete_writes,
 };
 use zradar_plugin_postgres::{
     PostgresAuditLogRepository, PostgresClient, PostgresDecisionAuditSink,
@@ -50,8 +49,8 @@ use zradar_policy::{
     PolicyStore, ThresholdSink, UsageAnalyticsReader, UsageReader, UsageTracker,
 };
 use zradar_retention::{
-    CleanupJob, EnforcementStrategy, OrgRetentionConfig, QueryEnforcer, RetentionConfigStore,
-    StorageUsageDailyJob,
+    CleanupJob, EnforcementStrategy, FileReclaimer, OrgRetentionConfig, QueryEnforcer,
+    RetentionConfigStore, StorageUsageDailyJob,
 };
 use zradar_traits::{AdminAuthorizer, Authenticator};
 
@@ -313,6 +312,11 @@ impl ZradarRuntimeBuilder {
             usage_tracker.clone(),
         ));
 
+        // Single registry shared between the reader (acquires leases on scan),
+        // FileMover (defers local delete while leased), and FileReclaimer
+        // (the sole physical-deletion chokepoint for soft-deleted files).
+        let file_lease_registry = Arc::new(FileLeaseRegistry::new());
+
         let cancel_token = CancellationToken::new();
         if let Some(policy_store_refresh) = policy_store_refresh {
             let cancel = cancel_token.clone();
@@ -401,7 +405,8 @@ impl ZradarRuntimeBuilder {
                             s3.clone(),
                             parquet_lifecycle_config.clone(),
                             parquet_data_dir.clone(),
-                        );
+                        )
+                        .with_lease_registry(file_lease_registry.clone());
                         tokio::spawn(mover.run(cancel_token.clone()));
                         info!("FileMover background task started");
 
@@ -419,7 +424,7 @@ impl ZradarRuntimeBuilder {
         let parquet_file_reader: Arc<ParquetFileReader> =
             if let Some(s3_storage) = s3_block_storage.clone() {
                 let disk_cache = Arc::new(DiskCache::new(s3_storage, &parquet_lifecycle_config));
-                Arc::new(if let Some(mc) = memory_cache.clone() {
+                let reader = if let Some(mc) = memory_cache.clone() {
                     ParquetFileReader::with_cache_and_memory_cache(
                         parquet_data_dir.clone(),
                         file_list_repo.clone(),
@@ -432,9 +437,10 @@ impl ZradarRuntimeBuilder {
                         file_list_repo.clone(),
                         disk_cache,
                     )
-                })
+                };
+                Arc::new(reader.with_lease_registry(file_lease_registry.clone()))
             } else {
-                Arc::new(if let Some(mc) = memory_cache.clone() {
+                let reader = if let Some(mc) = memory_cache.clone() {
                     ParquetFileReader::with_memory_cache(
                         parquet_data_dir.clone(),
                         file_list_repo.clone(),
@@ -442,7 +448,8 @@ impl ZradarRuntimeBuilder {
                     )
                 } else {
                     ParquetFileReader::new(parquet_data_dir.clone(), file_list_repo.clone())
-                })
+                };
+                Arc::new(reader.with_lease_registry(file_lease_registry.clone()))
             };
 
         let parquet_telemetry_reader =
@@ -466,29 +473,41 @@ impl ZradarRuntimeBuilder {
             "RetentionConfigStore initialized"
         );
 
-        let cleanup_job = Arc::new(
-            if let Some(s3_storage) = s3_block_storage.clone() {
-                CleanupJob::with_storage(
-                    file_list_repo.clone(),
-                    s3_storage,
-                    retention_config_store.clone(),
-                    parquet_lifecycle_config.retention_check_interval_secs,
-                )
-            } else {
-                CleanupJob::new(
-                    file_list_repo.clone(),
-                    retention_config_store.clone(),
-                    parquet_lifecycle_config.retention_check_interval_secs,
-                )
-            }
-            .with_storage_usage_repository(storage_usage_repo.clone()),
-        );
+        let cleanup_job = Arc::new(CleanupJob::new(
+            file_list_repo.clone(),
+            retention_config_store.clone(),
+            parquet_lifecycle_config.retention_check_interval_secs,
+        ));
         {
             let job = cleanup_job.clone();
             let cancel = cancel_token.clone();
             tokio::spawn(async move { job.run(cancel).await });
         }
         info!("CleanupJob background task started");
+
+        let file_reclaimer = Arc::new(
+            if let Some(s3_storage) = s3_block_storage.clone() {
+                FileReclaimer::with_storage(
+                    file_list_repo.clone(),
+                    s3_storage,
+                    file_lease_registry.clone(),
+                    parquet_lifecycle_config.retention_check_interval_secs,
+                )
+            } else {
+                FileReclaimer::new(
+                    file_list_repo.clone(),
+                    file_lease_registry.clone(),
+                    parquet_lifecycle_config.retention_check_interval_secs,
+                )
+            }
+            .with_storage_usage_repository(storage_usage_repo.clone()),
+        );
+        {
+            let job = file_reclaimer.clone();
+            let cancel = cancel_token.clone();
+            tokio::spawn(async move { job.run(cancel).await });
+        }
+        info!("FileReclaimer background task started");
 
         let storage_usage_daily_job = Arc::new(StorageUsageDailyJob::new(
             file_list_repo.clone(),
@@ -504,6 +523,7 @@ impl ZradarRuntimeBuilder {
 
         let retention_state = Arc::new(RetentionState {
             cleanup_job: cleanup_job.clone(),
+            file_reclaimer: file_reclaimer.clone(),
             config_store: retention_config_store.clone(),
             policy_repo: retention_policy_repo.clone(),
             audit_log_repo: Some(audit_log_repo.clone()),
@@ -557,6 +577,7 @@ impl ZradarRuntimeBuilder {
             // The WAL writer wraps the Parquet writer and applies backpressure.
             // Inline here to avoid re-exporting WAL internals from this crate.
             use zradar_wal::Wal;
+            use zradar_wal::batch::{decode as decode_batch, encode_json_rows};
             use zradar_wal::checkpoint::CheckpointStore;
             use zradar_wal::config::WalConfig;
             use zradar_wal::flusher::{FlushSink, WalFlusher};
@@ -592,31 +613,85 @@ impl ZradarRuntimeBuilder {
             #[async_trait::async_trait]
             impl FlushSink for TelemetryFlushSink {
                 async fn flush_records(&self, records: &[WalRecord]) -> anyhow::Result<()> {
-                    use zradar_models::{LogRecord, Metric, Span};
+                    use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
+
+                    // A `WalRecord` may now carry either a batch envelope (one
+                    // append covering many rows) or a legacy single-row JSON
+                    // payload from a pre-upgrade segment. The envelope decoder
+                    // distinguishes the two by magic prefix.
                     let mut spans: Vec<Span> = Vec::new();
                     let mut metrics: Vec<Metric> = Vec::new();
                     let mut logs: Vec<LogRecord> = Vec::new();
+                    let mut scores: Vec<EvaluationScore> = Vec::new();
+
+                    let push_one =
+                        |signal: SignalType,
+                         row: &[u8],
+                         spans: &mut Vec<Span>,
+                         metrics: &mut Vec<Metric>,
+                         logs: &mut Vec<LogRecord>,
+                         scores: &mut Vec<EvaluationScore>| {
+                            match signal {
+                                SignalType::Trace => {
+                                    if let Ok(span) = serde_json::from_slice::<Span>(row) {
+                                        spans.push(span);
+                                    }
+                                }
+                                SignalType::Metric => {
+                                    if let Ok(m) = serde_json::from_slice::<Metric>(row) {
+                                        metrics.push(m);
+                                    }
+                                }
+                                SignalType::Log => {
+                                    if let Ok(log) = serde_json::from_slice::<LogRecord>(row) {
+                                        logs.push(log);
+                                    }
+                                }
+                                SignalType::Score => {
+                                    if let Ok(score) =
+                                        serde_json::from_slice::<EvaluationScore>(row)
+                                    {
+                                        scores.push(score);
+                                    }
+                                }
+                            }
+                        };
+
                     for record in records {
-                        match record.signal_type {
-                            SignalType::Trace => {
-                                if let Ok(span) = serde_json::from_slice::<Span>(&record.payload) {
-                                    spans.push(span);
+                        match decode_batch(&record.payload) {
+                            Ok(Some(batch)) => {
+                                for row in &batch.rows {
+                                    push_one(
+                                        record.signal_type,
+                                        row,
+                                        &mut spans,
+                                        &mut metrics,
+                                        &mut logs,
+                                        &mut scores,
+                                    );
                                 }
                             }
-                            SignalType::Metric => {
-                                if let Ok(m) = serde_json::from_slice::<Metric>(&record.payload) {
-                                    metrics.push(m);
-                                }
+                            Ok(None) => {
+                                // Legacy single-row payload from a pre-upgrade segment.
+                                push_one(
+                                    record.signal_type,
+                                    &record.payload,
+                                    &mut spans,
+                                    &mut metrics,
+                                    &mut logs,
+                                    &mut scores,
+                                );
                             }
-                            SignalType::Log => {
-                                if let Ok(log) =
-                                    serde_json::from_slice::<LogRecord>(&record.payload)
-                                {
-                                    logs.push(log);
-                                }
+                            Err(e) => {
+                                tracing::warn!(
+                                    offset = record.assigned_offset,
+                                    error = %e,
+                                    "skipping WAL record with malformed batch envelope"
+                                );
                             }
                         }
                     }
+
                     if !spans.is_empty() {
                         self.writer.insert_spans(&spans).await?;
                     }
@@ -625,6 +700,9 @@ impl ZradarRuntimeBuilder {
                     }
                     if !logs.is_empty() {
                         self.writer.insert_logs(&logs).await?;
+                    }
+                    if !scores.is_empty() {
+                        self.writer.insert_scores(&scores).await?;
                     }
                     Ok(())
                 }
@@ -667,105 +745,125 @@ impl ZradarRuntimeBuilder {
                 wal: Arc<Wal>,
             }
 
-            #[async_trait::async_trait]
-            impl zradar_traits::TelemetryWriter for WalTelemetryWriter {
-                async fn insert_spans(&self, spans: &[zradar_models::Span]) -> anyhow::Result<()> {
-                    for span in spans {
-                        let payload = serde_json::to_vec(span)
-                            .map_err(|e| anyhow::anyhow!("WAL span serialize: {}", e))?;
+            impl WalTelemetryWriter {
+                /// Group `rows` by `(tenant_id, project_id)`, serialize each row to
+                /// JSON, frame each group into one batch envelope, and append +
+                /// fsync once per group. The result is one durable wait per group
+                /// rather than per row — the contract widening behind R-arch P0-3.
+                async fn append_batches<T>(
+                    &self,
+                    signal: SignalType,
+                    rows: &[T],
+                    tenant_of: impl Fn(&T) -> &str,
+                    project_of: impl Fn(&T) -> &str,
+                ) -> anyhow::Result<()>
+                where
+                    T: serde::Serialize,
+                {
+                    if rows.is_empty() {
+                        return Ok(());
+                    }
+
+                    // Group while preserving the order rows arrived in for each
+                    // (tenant, project) — the WAL replay path relies on offset
+                    // ordering to preserve causal order per tenant.
+                    let mut groups: std::collections::BTreeMap<
+                        (uuid::Uuid, uuid::Uuid),
+                        Vec<Vec<u8>>,
+                    > = std::collections::BTreeMap::new();
+                    for row in rows {
                         let tenant_id =
-                            uuid::Uuid::parse_str(&span.tenant_id).unwrap_or(uuid::Uuid::nil());
+                            uuid::Uuid::parse_str(tenant_of(row)).unwrap_or(uuid::Uuid::nil());
                         let project_id =
-                            uuid::Uuid::parse_str(&span.project_id).unwrap_or(uuid::Uuid::nil());
+                            uuid::Uuid::parse_str(project_of(row)).unwrap_or(uuid::Uuid::nil());
+                        let bytes = serde_json::to_vec(row)
+                            .map_err(|e| anyhow::anyhow!("WAL row serialize: {}", e))?;
+                        groups
+                            .entry((tenant_id, project_id))
+                            .or_default()
+                            .push(bytes);
+                    }
+
+                    let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                    let mut handles = Vec::with_capacity(groups.len());
+
+                    for ((tenant_id, project_id), payloads) in groups {
+                        let envelope = encode_json_rows(payloads.iter().map(|v| v.as_slice()));
                         let record = WalRecord {
-                            signal_type: SignalType::Trace,
+                            signal_type: signal,
                             tenant_id,
                             project_id,
-                            arrival_timestamp_ns: chrono::Utc::now()
-                                .timestamp_nanos_opt()
-                                .unwrap_or(0),
+                            arrival_timestamp_ns: now_ns,
                             assigned_offset: 0,
-                            payload: bytes::Bytes::from(payload),
+                            payload: envelope,
                         };
                         let handle = self
                             .wal
                             .append(record)
                             .await
                             .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
+                        handles.push(handle);
+                    }
+
+                    for handle in handles {
                         handle
                             .durable()
                             .await
                             .map_err(|e| anyhow::anyhow!("WAL fsync: {}", e))?;
                     }
                     Ok(())
+                }
+            }
+
+            #[async_trait::async_trait]
+            impl zradar_traits::TelemetryWriter for WalTelemetryWriter {
+                async fn insert_spans(&self, spans: &[zradar_models::Span]) -> anyhow::Result<()> {
+                    self.append_batches(
+                        SignalType::Trace,
+                        spans,
+                        |s| s.tenant_id.as_str(),
+                        |s| s.project_id.as_str(),
+                    )
+                    .await
                 }
 
                 async fn insert_metrics(
                     &self,
                     metrics: &[zradar_models::Metric],
                 ) -> anyhow::Result<()> {
-                    for m in metrics {
-                        let payload = serde_json::to_vec(m)
-                            .map_err(|e| anyhow::anyhow!("WAL metric serialize: {}", e))?;
-                        let tenant_id =
-                            uuid::Uuid::parse_str(&m.tenant_id).unwrap_or(uuid::Uuid::nil());
-                        let project_id =
-                            uuid::Uuid::parse_str(&m.project_id).unwrap_or(uuid::Uuid::nil());
-                        let record = WalRecord {
-                            signal_type: SignalType::Metric,
-                            tenant_id,
-                            project_id,
-                            arrival_timestamp_ns: chrono::Utc::now()
-                                .timestamp_nanos_opt()
-                                .unwrap_or(0),
-                            assigned_offset: 0,
-                            payload: bytes::Bytes::from(payload),
-                        };
-                        let handle = self
-                            .wal
-                            .append(record)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
-                        handle
-                            .durable()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("WAL fsync: {}", e))?;
-                    }
-                    Ok(())
+                    self.append_batches(
+                        SignalType::Metric,
+                        metrics,
+                        |m| m.tenant_id.as_str(),
+                        |m| m.project_id.as_str(),
+                    )
+                    .await
                 }
 
                 async fn insert_logs(
                     &self,
                     logs: &[zradar_models::LogRecord],
                 ) -> anyhow::Result<()> {
-                    for log in logs {
-                        let payload = serde_json::to_vec(log)
-                            .map_err(|e| anyhow::anyhow!("WAL log serialize: {}", e))?;
-                        let tenant_id =
-                            uuid::Uuid::parse_str(&log.tenant_id).unwrap_or(uuid::Uuid::nil());
-                        let project_id =
-                            uuid::Uuid::parse_str(&log.project_id).unwrap_or(uuid::Uuid::nil());
-                        let record = WalRecord {
-                            signal_type: SignalType::Log,
-                            tenant_id,
-                            project_id,
-                            arrival_timestamp_ns: chrono::Utc::now()
-                                .timestamp_nanos_opt()
-                                .unwrap_or(0),
-                            assigned_offset: 0,
-                            payload: bytes::Bytes::from(payload),
-                        };
-                        let handle = self
-                            .wal
-                            .append(record)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
-                        handle
-                            .durable()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("WAL fsync: {}", e))?;
-                    }
-                    Ok(())
+                    self.append_batches(
+                        SignalType::Log,
+                        logs,
+                        |l| l.tenant_id.as_str(),
+                        |l| l.project_id.as_str(),
+                    )
+                    .await
+                }
+
+                async fn insert_scores(
+                    &self,
+                    scores: &[zradar_models::EvaluationScore],
+                ) -> anyhow::Result<()> {
+                    self.append_batches(
+                        SignalType::Score,
+                        scores,
+                        |s| s.tenant_id.as_str(),
+                        |s| s.project_id.as_str(),
+                    )
+                    .await
                 }
             }
 
@@ -781,6 +879,10 @@ impl ZradarRuntimeBuilder {
         // =====================================================================
 
         let otlp_auth_ext = otlp_auth;
+        let allow_test_header_context = config.auth.allow_test_header_context;
+        if allow_test_header_context {
+            info!("TEST ONLY: x-tenant-id/x-project-id header context overrides are enabled");
+        }
         if otlp_auth_ext.is_none() {
             info!("OTLP gRPC is open: no API key required");
         }
@@ -817,7 +919,8 @@ impl ZradarRuntimeBuilder {
             rate_limiter.clone(),
             policy_enforcer.clone(),
             circuit_breaker.clone(),
-        );
+        )
+        .with_test_header_context(allow_test_header_context);
         let metrics_service = OtlpMetricsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -825,15 +928,17 @@ impl ZradarRuntimeBuilder {
             rate_limiter.clone(),
             policy_enforcer.clone(),
             circuit_breaker.clone(),
-        );
+        )
+        .with_test_header_context(allow_test_header_context);
         let logs_service = OtlpLogsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
             settings_repo.clone(),
-            rate_limiter,
-            policy_enforcer,
+            rate_limiter.clone(),
+            policy_enforcer.clone(),
             circuit_breaker.clone(),
-        );
+        )
+        .with_test_header_context(allow_test_header_context);
 
         info!("OTLP services initialized");
 
@@ -842,12 +947,13 @@ impl ZradarRuntimeBuilder {
         // =====================================================================
 
         let otlp_port = config.otlp_port;
+        let otlp_http_port = config.otlp_http_port;
         let admin_port = config.effective_admin_port();
 
         let health_router = crate::health::create_health_router(crate::health::HealthState {
             pg_pool: Some(pg_pool.clone()),
             storage_path: parquet_data_dir.clone(),
-            circuit_breaker: Some(circuit_breaker),
+            circuit_breaker: Some(circuit_breaker.clone()),
             retention_initialized: true,
             ingestion_initialized: true,
             background_jobs_started: true,
@@ -862,7 +968,7 @@ impl ZradarRuntimeBuilder {
         let retention_api = retention_router(retention_state, admin_authorizer.clone(), auth_mode);
         let settings_api = settings_router(
             Arc::new(SettingsState {
-                repository: settings_repo,
+                repository: settings_repo.clone(),
                 audit_log_repo: Some(audit_log_repo.clone()),
             }),
             admin_authorizer.clone(),
@@ -942,19 +1048,63 @@ impl ZradarRuntimeBuilder {
                 .map_err(|e| anyhow::anyhow!("Admin API server failed: {}", e))
         };
 
-        info!("zradar is ready!");
-        info!("  OTLP gRPC: localhost:{}", otlp_port);
-        info!("  Admin API: http://localhost:{}", admin_port);
+        let otlp_http_server = if otlp_http_port > 0 {
+            let otlp_http_app = otlp_http_router(
+                otlp_writer.clone(),
+                otlp_auth_ext.clone(),
+                allow_test_header_context,
+                settings_repo.clone(),
+                rate_limiter.clone(),
+                policy_enforcer.clone(),
+                circuit_breaker.clone(),
+            );
+            let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
+            Some(async move {
+                info!("OTLP/HTTP receiver listening on http://{}", otlp_http_addr);
+                let listener = tokio::net::TcpListener::bind(&otlp_http_addr).await?;
+                axum::serve(listener, otlp_http_app)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("OTLP/HTTP server failed: {}", e))
+            })
+        } else {
+            info!("OTLP/HTTP receiver disabled (otlp_http_port = 0)");
+            None
+        };
 
-        tokio::select! {
-            result = otlp_server => {
-                if let Err(e) = result {
-                    error!("OTLP server failed: {}", e);
+        info!("zradar is ready!");
+        info!("  OTLP gRPC:  localhost:{}", otlp_port);
+        info!("  OTLP/HTTP:  http://localhost:{}", otlp_http_port);
+        info!("  Admin API:  http://localhost:{}", admin_port);
+
+        if let Some(otlp_http_server) = otlp_http_server {
+            tokio::select! {
+                result = otlp_server => {
+                    if let Err(e) = result {
+                        error!("OTLP server failed: {}", e);
+                    }
+                }
+                result = admin_server => {
+                    if let Err(e) = result {
+                        error!("Admin API server failed: {}", e);
+                    }
+                }
+                result = otlp_http_server => {
+                    if let Err(e) = result {
+                        error!("OTLP/HTTP server failed: {}", e);
+                    }
                 }
             }
-            result = admin_server => {
-                if let Err(e) = result {
-                    error!("Admin API server failed: {}", e);
+        } else {
+            tokio::select! {
+                result = otlp_server => {
+                    if let Err(e) = result {
+                        error!("OTLP server failed: {}", e);
+                    }
+                }
+                result = admin_server => {
+                    if let Err(e) = result {
+                        error!("Admin API server failed: {}", e);
+                    }
                 }
             }
         }

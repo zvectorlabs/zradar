@@ -10,6 +10,10 @@ pub struct Config {
     #[serde(default = "default_otlp_port")]
     pub otlp_port: u16,
 
+    /// OTLP/HTTP receiver port (default: 4318). Set to 0 to disable.
+    #[serde(default = "default_otlp_http_port")]
+    pub otlp_http_port: u16,
+
     #[serde(default = "default_query_api_port")]
     pub query_api_port: u16,
 
@@ -48,6 +52,10 @@ impl Config {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(4317),
+                otlp_http_port: std::env::var("OTLP_HTTP_PORT")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(4318),
                 query_api_port: std::env::var("QUERY_API_PORT")
                     .ok()
                     .and_then(|s| s.parse().ok())
@@ -93,6 +101,9 @@ impl Config {
 
 fn default_otlp_port() -> u16 {
     4317
+}
+fn default_otlp_http_port() -> u16 {
+    4318
 }
 fn default_query_api_port() -> u16 {
     8080

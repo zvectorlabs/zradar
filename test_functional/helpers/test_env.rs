@@ -15,9 +15,9 @@ pub struct TestEnv {
     pub ctx: TestContext,
     /// REST client with API key already set.
     pub client: ApiClient,
-    /// Tenant ID — unique per test for full isolation.
+    /// Tenant ID — unique per test when test header context is enabled.
     pub tenant_id: Uuid,
-    /// Project ID — unique per test for full isolation.
+    /// Project ID — unique per test for idempotent isolation.
     pub project_id: Uuid,
     /// Raw API key string.
     pub api_key: String,
@@ -34,8 +34,9 @@ impl TestEnv {
         let ctx = TestContext::new();
         ctx.wait_for_ready(30).await?;
 
-        // Each test gets a unique tenant_id and project_id for full data isolation.
-        // Spawned OtlpClients must clone both to keep writes and queries aligned.
+        // config.test.toml enables test-only header context, so the static API
+        // key is validated first and these headers simulate per-test API-key
+        // tenant/project context for full E2E isolation.
         let tenant_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
 

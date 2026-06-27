@@ -11,6 +11,9 @@ pub struct ProjectSettings {
     pub max_ingestion_rate: Option<i32>,
     pub file_push_interval_secs: i32,
     pub blocked: bool,
+    /// When false, llm_input and llm_output are cleared before persisting.
+    #[sqlx(default)]
+    pub capture_llm_content_enabled: bool,
     pub updated_at: i64,
 }
 
@@ -23,6 +26,7 @@ pub struct NewProjectSettings {
     pub max_ingestion_rate: Option<i32>,
     pub file_push_interval_secs: i32,
     pub blocked: bool,
+    pub capture_llm_content_enabled: bool,
 }
 
 impl NewProjectSettings {
@@ -35,6 +39,7 @@ impl NewProjectSettings {
             max_ingestion_rate: None,
             file_push_interval_secs: 300,
             blocked: false,
+            capture_llm_content_enabled: true,
         }
     }
 }

@@ -3,7 +3,8 @@
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
 use crate::converter::OtlpConverter;
-use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings};
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings_and_get};
+use crate::parser_caps::validate_trace_request;
 use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse, trace_service_server::TraceService,
@@ -22,6 +23,7 @@ pub struct OtlpTraceService {
     rate_limiter: Option<Arc<ProjectRateLimiter>>,
     policy_enforcer: Option<Arc<dyn PolicyEnforcer>>,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
+    allow_test_header_context: bool,
 }
 
 impl OtlpTraceService {
@@ -33,6 +35,7 @@ impl OtlpTraceService {
             rate_limiter: None,
             policy_enforcer: None,
             circuit_breaker: None,
+            allow_test_header_context: false,
         }
     }
 
@@ -50,6 +53,7 @@ impl OtlpTraceService {
             rate_limiter: Some(rate_limiter),
             policy_enforcer: None,
             circuit_breaker: Some(circuit_breaker),
+            allow_test_header_context: false,
         }
     }
 
@@ -66,6 +70,7 @@ impl OtlpTraceService {
             rate_limiter: None,
             policy_enforcer: Some(policy_enforcer),
             circuit_breaker: Some(circuit_breaker),
+            allow_test_header_context: false,
         }
     }
 
@@ -84,7 +89,13 @@ impl OtlpTraceService {
             rate_limiter: Some(rate_limiter),
             policy_enforcer: Some(policy_enforcer),
             circuit_breaker: Some(circuit_breaker),
+            allow_test_header_context: false,
         }
+    }
+
+    pub fn with_test_header_context(mut self, allow: bool) -> Self {
+        self.allow_test_header_context = allow;
+        self
     }
 }
 
@@ -94,11 +105,13 @@ impl TraceService for OtlpTraceService {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
-        let context = authenticate_grpc(&self.auth, &request).await?;
+        let context =
+            authenticate_grpc(&self.auth, &request, self.allow_test_header_context).await?;
         if let Some(circuit_breaker) = &self.circuit_breaker {
             circuit_breaker.check_status().await?;
         }
         let req = request.into_inner();
+        validate_trace_request(&req).map_err(|e| e.into_status())?;
         let span_count = req
             .resource_spans
             .iter()
@@ -115,13 +128,17 @@ impl TraceService for OtlpTraceService {
             )
             .await?;
         }
-        enforce_project_settings(
+        let settings = enforce_project_settings_and_get(
             &self.settings_repo,
             &self.rate_limiter,
             &context,
             span_count,
         )
         .await?;
+        let capture_enabled = settings
+            .as_ref()
+            .map(|settings| settings.capture_llm_content_enabled)
+            .unwrap_or(true);
 
         tracing::debug!(
             tenant_id = %context.tenant_id,
@@ -130,9 +147,11 @@ impl TraceService for OtlpTraceService {
             "Received trace export request"
         );
 
+        let converter = OtlpConverter::new().with_capture_enabled(capture_enabled);
         let mut all_spans = Vec::new();
         for resource_spans in req.resource_spans {
-            let spans = OtlpConverter::convert_resource_spans(resource_spans, &context)
+            let spans = converter
+                .convert_resource_spans_with(resource_spans, &context)
                 .map_err(|e| Status::internal(format!("Failed to convert spans: {}", e)))?;
             all_spans.extend(spans);
         }

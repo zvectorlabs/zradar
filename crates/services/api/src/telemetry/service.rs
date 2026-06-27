@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 use super::types::{
     AgentAnalytics, AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown,
-    IngestRateQuery, LlmAnalytics, LogDetail, LogQueryFilters, MetricDetail, MetricQueryFilters,
-    MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse, QueryUsageQuery, QuotaStatusQuery,
-    SpanDetail, SpanQueryFilters, StorageUsage, StorageUsageDaily, StorageUsageDailyQuery,
-    StorageUsageQuery, TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary,
-    UsageDailyQuery,
+    GuardrailsAnalytics, IngestRateQuery, LlmAnalytics, LogDetail, LogQueryFilters, MetricDetail,
+    MetricQueryFilters, MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse, QueryUsageQuery,
+    QuotaStatusQuery, RailNameStatDto, RailTypeBreakdownDto, SpanDetail, SpanQueryFilters,
+    StorageUsage, StorageUsageDaily, StorageUsageDailyQuery, StorageUsageQuery, TopEndpoint,
+    TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary, UsageDailyQuery,
 };
 use crate::errors::{ControlError, Result};
 
@@ -18,9 +18,10 @@ use crate::errors::{ControlError, Result};
 use zradar_models::FileListFilter;
 use zradar_traits::{
     AnalyticsQueryFilters as StorageAnalyticsFilters, FileListRepository,
-    LogQueryFilters as StorageLogFilters, MetricQueryFilters as StorageMetricFilters,
-    MetricSeriesFilters as StorageMetricSeriesFilters, Pagination,
-    SpanQueryFilters as StorageSpanFilters, StorageUsageRepository,
+    GuardrailsAnalyticsFilters as StorageGuardrailsFilters,
+    GuardrailsAnalyticsResult as StorageGuardrailsResult, LogQueryFilters as StorageLogFilters,
+    MetricQueryFilters as StorageMetricFilters, MetricSeriesFilters as StorageMetricSeriesFilters,
+    Pagination, SpanQueryFilters as StorageSpanFilters, StorageUsageRepository,
     TelemetryReader as StorageTelemetryReader, TimeRange, TraceQueryFilters as StorageTraceFilters,
 };
 
@@ -33,6 +34,51 @@ use zradar_retention::QueryEnforcer;
 
 fn non_empty_string(value: String) -> Option<String> {
     if value.is_empty() { None } else { Some(value) }
+}
+
+fn non_zero_i32(value: i32) -> Option<i32> {
+    if value == 0 { None } else { Some(value) }
+}
+
+/// Map the tri-state `Span.llm_cache_hit` SMALLINT to an optional bool:
+/// `1` → `Some(true)` (hit), `0` → `Some(false)` (explicit miss), anything
+/// else (the `-1` unknown sentinel / legacy files) → `None`. Phase 4 R4.2.
+fn cache_hit_to_bool(value: i16) -> Option<bool> {
+    match value {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
+}
+
+fn non_zero_f64(value: f64) -> Option<f64> {
+    if value == 0.0 { None } else { Some(value) }
+}
+
+/// Parse the `Span.model_parameters` JSON column into a serde Value, treating
+/// the empty / default `"{}"` shape as absent so the API response surfaces
+/// `null` instead of an always-empty object. Phase 4 R4.4 / AC4.7.
+fn parse_model_parameters(raw: &str) -> Option<serde_json::Value> {
+    if raw.is_empty() || raw == "{}" {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .filter(|v| !v.as_object().is_some_and(|m| m.is_empty()))
+}
+
+/// Parse a JSON-array column (`Span.links`, `Span.events`) into a serde Value,
+/// treating the default `"[]"` shape as absent so the API surfaces `null`
+/// instead of an always-empty array. Matches the `parse_model_parameters`
+/// precedent: storage stays non-null, the wire-level `Option` discriminates
+/// "no data" from "populated list."
+fn parse_json_array(raw: &str) -> Option<serde_json::Value> {
+    if raw.is_empty() || raw == "[]" {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .filter(|v| !v.as_array().is_some_and(|a| a.is_empty()))
 }
 
 fn signal_type_name(signal: SignalKind) -> Option<&'static str> {
@@ -327,21 +373,43 @@ impl QueryService {
             .and_then(|t| t.timestamp_nanos_opt());
         let enforced_start = self.enforce_start(tenant_id, project_id, raw_start)?;
 
-        // Convert API filters to storage filters
-        let storage_filters = StorageTraceFilters {
-            project_id: Some(project_id),
-            time_range: filters.end_time.map(|end| TimeRange {
+        // Convert API filters to storage filters.
+        // Build time_range when either start_time or end_time is supplied.
+        // A start-only request must not silently drop the start bound.
+        let trace_time_range = if filters.start_time.is_some() || filters.end_time.is_some() {
+            let end_ns = filters
+                .end_time
+                .and_then(|t| t.timestamp_nanos_opt())
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            Some(TimeRange {
                 start: enforced_start,
-                end: end.timestamp_nanos_opt().unwrap_or(0),
-            }),
+                end: end_ns,
+            })
+        } else {
+            None
+        };
+        let storage_filters = StorageTraceFilters {
+            tenant_id: Some(tenant_id),
+            project_id: Some(project_id),
+            time_range: trace_time_range,
             service_name: filters.service_name.clone(),
+            // R1.11: trace operation_name filter (maps to span_name at storage layer)
+            span_name: filters.operation_name.clone(),
             status: filters.status.clone(),
             min_duration_ms: filters.min_duration_ms.map(|d| d as u64),
             max_duration_ms: filters.max_duration_ms.map(|d| d as u64),
             llm_model: filters.llm_model.clone(),
             llm_provider: filters.llm_provider.clone(),
+            llm_response_model: filters.llm_response_model.clone(),
             agent_name: filters.agent_name.clone(),
             session_id: filters.session_id.clone(),
+            rail_type: filters.rail_type.clone(),
+            action_name: filters.action_name.clone(),
+            workflow_run_id: filters.workflow_run_id.clone(),
+            framework: filters.framework.clone(),
+            tool_name: filters.tool_name.clone(),
+            invocation_id: filters.invocation_id.clone(),
+            environment: filters.environment.clone(),
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
                 offset: Some(0),
@@ -432,6 +500,35 @@ impl QueryService {
                 agent_name: non_empty_string(s.agent_name.clone()),
                 agent_type: non_empty_string(s.agent_type.clone()),
                 session_id: non_empty_string(s.session_id.clone()),
+                llm_model: non_empty_string(s.llm_model.clone()),
+                llm_provider: non_empty_string(s.llm_provider.clone()),
+                llm_response_model: non_empty_string(s.llm_response_model.clone()),
+                llm_input: non_empty_string(s.llm_input.clone()),
+                llm_output: non_empty_string(s.llm_output.clone()),
+                prompt_tokens: non_zero_i32(s.prompt_tokens),
+                completion_tokens: non_zero_i32(s.completion_tokens),
+                total_tokens: non_zero_i32(s.total_tokens),
+                prompt_cost_usd: non_zero_f64(s.prompt_cost_usd),
+                completion_cost_usd: non_zero_f64(s.completion_cost_usd),
+                total_cost_usd: non_zero_f64(s.total_cost_usd),
+                tool_name: non_empty_string(s.tool_name.clone()),
+                tool_call_id: non_empty_string(s.tool_call_id.clone()),
+                rail_type: non_empty_string(s.rail_type.clone()),
+                rail_name: non_empty_string(s.rail_name.clone()),
+                rail_stop: if s.rail_stop != 0 {
+                    Some(s.rail_stop != 0)
+                } else {
+                    None
+                },
+                action_name: non_empty_string(s.action_name.clone()),
+                workflow_run_id: non_empty_string(s.workflow_run_id.clone()),
+                framework: non_empty_string(s.framework.clone()),
+                llm_cache_hit: cache_hit_to_bool(s.llm_cache_hit),
+                llm_response_id: non_empty_string(s.llm_response_id.clone()),
+                environment: non_empty_string(s.environment.clone()),
+                model_parameters: parse_model_parameters(&s.model_parameters),
+                events: parse_json_array(&s.events),
+                links: parse_json_array(&s.links),
                 attributes: serde_json::from_str(&s.attributes).unwrap_or_default(),
             })
             .collect();
@@ -481,21 +578,42 @@ impl QueryService {
             .parse_span_types()
             .map_err(ControlError::InvalidInput)?;
 
-        // Convert API filters to storage filters
+        // Convert API filters to storage filters.
+        // Build time_range when either bound is present; start-only requests
+        // must not silently drop the start bound.
+        let span_time_range = if filters.start_time.is_some() || filters.end_time.is_some() {
+            let end_ns = filters
+                .end_time
+                .and_then(|t| t.timestamp_nanos_opt())
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            Some(TimeRange {
+                start: enforced_start,
+                end: end_ns,
+            })
+        } else {
+            None
+        };
         let storage_filters = StorageSpanFilters {
+            tenant_id: Some(tenant_id),
             project_id: Some(project_id),
             trace_id: filters.trace_id.clone(),
-            time_range: filters.end_time.map(|end| TimeRange {
-                start: enforced_start,
-                end: end.timestamp_nanos_opt().unwrap_or(0),
-            }),
+            time_range: span_time_range,
             service_name: filters.service_name.clone(),
             span_name: filters.operation_name.clone(),
             span_types: span_types.clone(),
-            status: None,
+            status: filters.status.clone(),
             llm_model: filters.llm_model.clone(),
+            llm_provider: filters.llm_provider.clone(),
+            llm_response_model: filters.llm_response_model.clone(),
             agent_name: filters.agent_name.clone(),
             session_id: filters.session_id.clone(),
+            rail_type: filters.rail_type.clone(),
+            action_name: filters.action_name.clone(),
+            workflow_run_id: filters.workflow_run_id.clone(),
+            framework: filters.framework.clone(),
+            tool_name: filters.tool_name.clone(),
+            invocation_id: filters.invocation_id.clone(),
+            environment: filters.environment.clone(),
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
                 offset: Some(0),
@@ -540,6 +658,35 @@ impl QueryService {
                 agent_name: non_empty_string(s.agent_name),
                 agent_type: non_empty_string(s.agent_type),
                 session_id: non_empty_string(s.session_id),
+                llm_model: non_empty_string(s.llm_model),
+                llm_provider: non_empty_string(s.llm_provider),
+                llm_response_model: non_empty_string(s.llm_response_model),
+                llm_input: non_empty_string(s.llm_input),
+                llm_output: non_empty_string(s.llm_output),
+                prompt_tokens: non_zero_i32(s.prompt_tokens),
+                completion_tokens: non_zero_i32(s.completion_tokens),
+                total_tokens: non_zero_i32(s.total_tokens),
+                prompt_cost_usd: non_zero_f64(s.prompt_cost_usd),
+                completion_cost_usd: non_zero_f64(s.completion_cost_usd),
+                total_cost_usd: non_zero_f64(s.total_cost_usd),
+                tool_name: non_empty_string(s.tool_name),
+                tool_call_id: non_empty_string(s.tool_call_id),
+                rail_type: non_empty_string(s.rail_type),
+                rail_name: non_empty_string(s.rail_name),
+                rail_stop: if s.rail_stop != 0 {
+                    Some(s.rail_stop != 0)
+                } else {
+                    None
+                },
+                action_name: non_empty_string(s.action_name),
+                workflow_run_id: non_empty_string(s.workflow_run_id),
+                framework: non_empty_string(s.framework),
+                llm_cache_hit: cache_hit_to_bool(s.llm_cache_hit),
+                llm_response_id: non_empty_string(s.llm_response_id),
+                environment: non_empty_string(s.environment),
+                model_parameters: parse_model_parameters(&s.model_parameters),
+                events: parse_json_array(&s.events),
+                links: parse_json_array(&s.links),
                 attributes: serde_json::from_str(&s.attributes).unwrap_or_default(),
             })
             .collect();
@@ -583,6 +730,35 @@ impl QueryService {
             agent_name: non_empty_string(span.agent_name),
             agent_type: non_empty_string(span.agent_type),
             session_id: non_empty_string(span.session_id),
+            llm_model: non_empty_string(span.llm_model),
+            llm_provider: non_empty_string(span.llm_provider),
+            llm_response_model: non_empty_string(span.llm_response_model),
+            llm_input: non_empty_string(span.llm_input),
+            llm_output: non_empty_string(span.llm_output),
+            prompt_tokens: non_zero_i32(span.prompt_tokens),
+            completion_tokens: non_zero_i32(span.completion_tokens),
+            total_tokens: non_zero_i32(span.total_tokens),
+            prompt_cost_usd: non_zero_f64(span.prompt_cost_usd),
+            completion_cost_usd: non_zero_f64(span.completion_cost_usd),
+            total_cost_usd: non_zero_f64(span.total_cost_usd),
+            tool_name: non_empty_string(span.tool_name),
+            tool_call_id: non_empty_string(span.tool_call_id),
+            rail_type: non_empty_string(span.rail_type),
+            rail_name: non_empty_string(span.rail_name),
+            rail_stop: if span.rail_stop != 0 {
+                Some(span.rail_stop != 0)
+            } else {
+                None
+            },
+            action_name: non_empty_string(span.action_name),
+            workflow_run_id: non_empty_string(span.workflow_run_id),
+            framework: non_empty_string(span.framework),
+            llm_cache_hit: cache_hit_to_bool(span.llm_cache_hit),
+            llm_response_id: non_empty_string(span.llm_response_id),
+            environment: non_empty_string(span.environment),
+            model_parameters: parse_model_parameters(&span.model_parameters),
+            events: parse_json_array(&span.events),
+            links: parse_json_array(&span.links),
             attributes: serde_json::from_str(&span.attributes).unwrap_or_default(),
         })
     }
@@ -977,7 +1153,7 @@ impl QueryService {
                     start,
                     end,
                     metric: "span_count".to_string(),
-                    group_by: vec!["agent_name".to_string(), "agent_type".to_string()],
+                    group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
             )
@@ -992,7 +1168,7 @@ impl QueryService {
                     start,
                     end,
                     metric: "error_count".to_string(),
-                    group_by: vec!["agent_name".to_string(), "agent_type".to_string()],
+                    group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
             )
@@ -1007,7 +1183,7 @@ impl QueryService {
                     start,
                     end,
                     metric: "total_tokens".to_string(),
-                    group_by: vec!["agent_name".to_string(), "agent_type".to_string()],
+                    group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
             )
@@ -1022,7 +1198,7 @@ impl QueryService {
                     start,
                     end,
                     metric: "avg_duration_ms".to_string(),
-                    group_by: vec!["agent_name".to_string(), "agent_type".to_string()],
+                    group_by: vec!["agent_name".to_string()],
                     filters,
                 },
             )
@@ -1053,6 +1229,61 @@ impl QueryService {
                 }
             })
             .collect())
+    }
+
+    /// Return guardrails analytics: halt rate, rail-type breakdown, top halting rails.
+    pub async fn get_guardrails_analytics(
+        &self,
+        tenant_id: Uuid,
+        query: AnalyticsQuery,
+    ) -> Result<GuardrailsAnalytics> {
+        let project_id = Uuid::parse_str(&query.project_id)
+            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        let end = query
+            .end
+            .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+        let start = query
+            .start
+            .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| end - 7 * 24 * 60 * 60 * 1_000_000_000);
+
+        let result: StorageGuardrailsResult = self
+            .storage
+            .get_guardrails_analytics(StorageGuardrailsFilters {
+                tenant_id,
+                project_id,
+                start,
+                end,
+            })
+            .await
+            .map_err(|e| ControlError::Internal(format!("Guardrails analytics error: {e:#}")))?;
+
+        Ok(GuardrailsAnalytics {
+            total_requests: result.total_requests,
+            halted_requests: result.halted_requests,
+            halt_rate: result.halt_rate,
+            by_rail_type: result
+                .by_rail_type
+                .into_iter()
+                .map(|r| RailTypeBreakdownDto {
+                    rail_type: r.rail_type,
+                    count: r.count,
+                    halted: r.halted,
+                    halt_rate: r.halt_rate,
+                })
+                .collect(),
+            top_halting_rails: result
+                .top_halting_rails
+                .into_iter()
+                .map(|r| RailNameStatDto {
+                    rail_name: r.rail_name,
+                    rail_type: r.rail_type,
+                    halts: r.halts,
+                    total: r.total,
+                })
+                .collect(),
+        })
     }
 
     /// Return active storage usage grouped by signal type and storage location.

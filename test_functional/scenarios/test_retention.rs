@@ -33,18 +33,15 @@ struct RetentionConfigResponse {
 #[tokio::test]
 #[ignore]
 async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
-    // Use dedicated tenant_id and project_id for this destructive test
-    // to avoid interfering with other tests running in parallel
+    // Use a dedicated project_id so this destructive test is idempotent in
+    // reuse mode and does not affect other projects running in parallel.
     let mut env = TestEnv::setup().await?;
-    let retention_tenant_id = Uuid::new_v4();
     let retention_project_id = Uuid::new_v4();
 
-    // Override the clients with dedicated IDs
-    env.client.set_tenant_id(retention_tenant_id.to_string());
     env.client.set_project_id(retention_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(retention_tenant_id.to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(retention_project_id.to_string());
     env.project_id = retention_project_id;
 
@@ -71,7 +68,9 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
     let cleanup_resp = env
         .client
         .post(
-            "/api/v1/admin/retention/run?retention_days=0",
+            &format!(
+                "/api/v1/admin/retention/run?retention_days=0&project_id={retention_project_id}"
+            ),
             &serde_json::Value::Null,
         )
         .await?;
@@ -96,18 +95,14 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_cleanup_preserves_recent_data() -> Result<()> {
-    // Use dedicated tenant_id and project_id for this test
-    // to avoid interfering with other tests running in parallel
+    // Use a dedicated project_id so cleanup is scoped and parallel-safe.
     let mut env = TestEnv::setup().await?;
-    let retention_tenant_id = Uuid::new_v4();
     let retention_project_id = Uuid::new_v4();
 
-    // Override the clients with dedicated IDs
-    env.client.set_tenant_id(retention_tenant_id.to_string());
     env.client.set_project_id(retention_project_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(retention_tenant_id.to_string())
+        .with_tenant_id(env.tenant_id.to_string())
         .with_project_id(retention_project_id.to_string());
     env.project_id = retention_project_id;
 
@@ -148,7 +143,9 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
     let cleanup_resp = env
         .client
         .post(
-            "/api/v1/admin/retention/run?retention_days=7",
+            &format!(
+                "/api/v1/admin/retention/run?retention_days=7&project_id={retention_project_id}"
+            ),
             &serde_json::Value::Null,
         )
         .await?;

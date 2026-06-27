@@ -10,7 +10,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
 
-# Concurrency
+# Concurrency (RetentionConfigStore)
 dashmap = "5"
 
 # Serialization / Utilities
@@ -23,3 +23,6 @@ serde = { workspace = true }
 # Internal workspace crates
 zradar-models = { workspace = true }
 zradar-traits = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

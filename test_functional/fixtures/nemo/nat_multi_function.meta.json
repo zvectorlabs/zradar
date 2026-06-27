@@ -1,0 +1,27 @@
+{
+  "description": "NAT 3-function workflow; every span shares workflow_run_id",
+  "expected_attributes": [
+    {
+      "fields": {
+        "framework": "langgraph",
+        "workflow_run_id": "wf-multi-002"
+      },
+      "span_name": "nat.function.router"
+    },
+    {
+      "fields": {
+        "workflow_run_id": "wf-multi-002"
+      },
+      "span_name": "nat.function.retriever"
+    },
+    {
+      "fields": {
+        "workflow_run_id": "wf-multi-002"
+      },
+      "span_name": "nat.function.responder"
+    }
+  ],
+  "expected_total_spans": 4,
+  "fixture": "nat_multi_function",
+  "kind": "traces"
+}

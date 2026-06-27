@@ -15,9 +15,11 @@ use uuid::Uuid;
 use zradar_models::{FileListFilter, LogRecord, Metric, Span};
 
 use zradar_traits::{
-    AnalyticsDataPoint, AnalyticsQueryFilters, AnalyticsReader, LogQueryFilters, MetricPoint,
-    MetricQueryFilters, MetricSeriesFilters, MetricsSummary, PaginatedResponse, Pagination,
-    SpanQueryFilters, TelemetryReader, TimeSeriesPoint, TraceQueryFilters, TraceSummary,
+    AnalyticsDataPoint, AnalyticsQueryFilters, AnalyticsReader, GuardrailsAnalyticsFilters,
+    GuardrailsAnalyticsResult, LogQueryFilters, MetricPoint, MetricQueryFilters,
+    MetricSeriesFilters, MetricsSummary, PaginatedResponse, Pagination, RailNameStat,
+    RailTypeBreakdown, SpanQueryFilters, TelemetryReader, TimeSeriesPoint, TraceQueryFilters,
+    TraceSummary,
 };
 
 use crate::reader::ParquetFileReader;
@@ -366,6 +368,167 @@ impl AnalyticsReader for ParquetTelemetryReader {
 
         Ok(results)
     }
+
+    async fn get_guardrails_analytics(
+        &self,
+        filters: GuardrailsAnalyticsFilters,
+    ) -> anyhow::Result<GuardrailsAnalyticsResult> {
+        let tenant_id = filters.tenant_id;
+        let project_id = filters.project_id;
+        let file_filter = FileListFilter {
+            tenant_id: Some(tenant_id),
+            project_id: Some(project_id),
+            signal_type: Some("traces".to_string()),
+            time_range_start: Some(filters.start / 1_000),
+            time_range_end: Some(filters.end / 1_000),
+            deleted: Some(false),
+            ..Default::default()
+        };
+
+        let base_where = format!(
+            "tenant_id = '{}' AND project_id = '{}' AND span_type = 'GUARDRAIL' \
+             AND timestamp >= {} AND timestamp <= {}",
+            tenant_id, project_id, filters.start, filters.end
+        );
+
+        // total_requests: COUNT spans WHERE span_name = 'guardrails.request'
+        let total_sql = format!(
+            "SELECT COUNT(*) AS cnt FROM spans WHERE {} AND span_name = 'guardrails.request'",
+            base_where
+        );
+        let total_batches = self
+            .reader
+            .query_parquet(file_filter.clone(), &total_sql)
+            .await
+            .context("Failed to count guardrail requests")?;
+        let total_requests = extract_count(&total_batches).unwrap_or(0) as i64;
+
+        // halted_requests: COUNT spans WHERE span_name = 'guardrails.rail' AND rail_stop = true
+        let halted_sql = format!(
+            "SELECT COUNT(*) AS cnt FROM spans WHERE {} AND span_name = 'guardrails.rail' AND rail_stop = 1",
+            base_where
+        );
+        let halted_batches = self
+            .reader
+            .query_parquet(file_filter.clone(), &halted_sql)
+            .await
+            .context("Failed to count halted guardrail requests")?;
+        let halted_requests = extract_count(&halted_batches).unwrap_or(0) as i64;
+
+        let halt_rate = if total_requests > 0 {
+            halted_requests as f64 / total_requests as f64
+        } else {
+            0.0
+        };
+
+        // by_rail_type: GROUP BY rail_type, COUNT total + SUM(rail_stop)
+        let by_type_sql = format!(
+            r#"SELECT rail_type,
+                COUNT(*) AS total,
+                CAST(SUM(CASE WHEN rail_stop = 1 THEN 1 ELSE 0 END) AS BIGINT) AS halted
+            FROM spans
+            WHERE {} AND rail_type != ''
+            GROUP BY rail_type
+            ORDER BY rail_type"#,
+            base_where
+        );
+        let type_batches = self
+            .reader
+            .query_parquet(file_filter.clone(), &by_type_sql)
+            .await
+            .context("Failed to query rail_type breakdown")?;
+
+        let mut by_rail_type: Vec<RailTypeBreakdown> = Vec::new();
+        for batch in &type_batches {
+            let n = batch.num_rows();
+            if n == 0 {
+                continue;
+            }
+            let rail_type_col = batch
+                .column_by_name("rail_type")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let total_col = batch
+                .column_by_name("total")
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+            let halted_col = batch
+                .column_by_name("halted")
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+            if let (Some(rt), Some(tc), Some(hc)) = (rail_type_col, total_col, halted_col) {
+                for i in 0..n {
+                    let count = tc.value(i);
+                    let halted = hc.value(i);
+                    by_rail_type.push(RailTypeBreakdown {
+                        rail_type: rt.value(i).to_string(),
+                        count,
+                        halted,
+                        halt_rate: if count > 0 {
+                            halted as f64 / count as f64
+                        } else {
+                            0.0
+                        },
+                    });
+                }
+            }
+        }
+
+        // top_halting_rails: GROUP BY rail_name, ORDER BY halts DESC LIMIT 10
+        let top_rails_sql = format!(
+            r#"SELECT rail_name, rail_type,
+                CAST(SUM(CASE WHEN rail_stop = 1 THEN 1 ELSE 0 END) AS BIGINT) AS halts,
+                COUNT(*) AS total
+            FROM spans
+            WHERE {} AND rail_name != ''
+            GROUP BY rail_name, rail_type
+            ORDER BY halts DESC
+            LIMIT 10"#,
+            base_where
+        );
+        let top_batches = self
+            .reader
+            .query_parquet(file_filter, &top_rails_sql)
+            .await
+            .context("Failed to query top halting rails")?;
+
+        let mut top_halting_rails: Vec<RailNameStat> = Vec::new();
+        for batch in &top_batches {
+            let n = batch.num_rows();
+            if n == 0 {
+                continue;
+            }
+            let name_col = batch
+                .column_by_name("rail_name")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let type_col = batch
+                .column_by_name("rail_type")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let halts_col = batch
+                .column_by_name("halts")
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+            let total_col = batch
+                .column_by_name("total")
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+            if let (Some(nc), Some(tc), Some(hc), Some(totc)) =
+                (name_col, type_col, halts_col, total_col)
+            {
+                for i in 0..n {
+                    top_halting_rails.push(RailNameStat {
+                        rail_name: nc.value(i).to_string(),
+                        rail_type: tc.value(i).to_string(),
+                        halts: hc.value(i),
+                        total: totc.value(i),
+                    });
+                }
+            }
+        }
+
+        Ok(GuardrailsAnalyticsResult {
+            total_requests,
+            halted_requests,
+            halt_rate,
+            by_rail_type,
+            top_halting_rails,
+        })
+    }
 }
 
 #[async_trait]
@@ -378,28 +541,59 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: TraceQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<TraceSummary>> {
+        let tenant_id = filters
+            .tenant_id
+            .ok_or_else(|| anyhow!("tenant_id is required for query_traces"))?;
         let project_id = filters
             .project_id
             .ok_or_else(|| anyhow!("project_id is required for query_traces"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
-        let file_filter = trace_file_filter(project_id, &filters);
+        let file_filter = trace_file_filter(tenant_id, project_id, &filters);
 
         // ------------------------------------------------------------------
         // Inner aggregate query: group spans into trace summaries.
         // ------------------------------------------------------------------
-        let mut inner_where = format!("project_id = '{}'", project_id);
+        let mut inner_where = format!(
+            "tenant_id = '{}' AND project_id = '{}'",
+            tenant_id, project_id
+        );
         if let Some(ref svc) = filters.service_name {
             inner_where.push_str(&format!(" AND service_name = '{}'", escape_sql_str(svc)));
+        }
+        if let Some(ref name) = filters.span_name {
+            // Trace-level operation_name filter: keep traces that contain at
+            // least one span whose span_name substring-matches the filter.
+            // The subquery selects trace IDs; the outer aggregate still sees
+            // all spans in matching traces, preserving summary counts/duration.
+            inner_where.push_str(&format!(
+                " AND trace_id IN (SELECT DISTINCT trace_id FROM spans \
+                 WHERE tenant_id = '{}' AND project_id = '{}' AND span_name LIKE '%{}%')",
+                tenant_id,
+                project_id,
+                escape_sql_str(name)
+            ));
         }
         if let Some(ref tr) = filters.time_range {
             // timestamp is in nanoseconds; filter on raw ns.
             inner_where.push_str(&format!(" AND timestamp >= {}", tr.start));
             inner_where.push_str(&format!(" AND timestamp <= {}", tr.end));
         }
-        // Agent attribute filters — applied at span level before aggregation
+        // Agent / LLM attribute filters — applied at span level before aggregation
         if let Some(ref llm_model) = filters.llm_model {
             inner_where.push_str(&format!(" AND llm_model = '{}'", escape_sql_str(llm_model)));
+        }
+        if let Some(ref llm_provider) = filters.llm_provider {
+            inner_where.push_str(&format!(
+                " AND llm_provider = '{}'",
+                escape_sql_str(llm_provider)
+            ));
+        }
+        if let Some(ref llm_response_model) = filters.llm_response_model {
+            inner_where.push_str(&format!(
+                " AND llm_response_model = '{}'",
+                escape_sql_str(llm_response_model)
+            ));
         }
         if let Some(ref agent_name) = filters.agent_name {
             inner_where.push_str(&format!(
@@ -411,6 +605,41 @@ impl TelemetryReader for ParquetTelemetryReader {
             inner_where.push_str(&format!(
                 " AND session_id = '{}'",
                 escape_sql_str(session_id)
+            ));
+        }
+        // NeMo Phase 2 filters
+        if let Some(ref rail_type) = filters.rail_type {
+            inner_where.push_str(&format!(" AND rail_type = '{}'", escape_sql_str(rail_type)));
+        }
+        if let Some(ref action_name) = filters.action_name {
+            inner_where.push_str(&format!(
+                " AND action_name = '{}'",
+                escape_sql_str(action_name)
+            ));
+        }
+        if let Some(ref workflow_run_id) = filters.workflow_run_id {
+            inner_where.push_str(&format!(
+                " AND workflow_run_id = '{}'",
+                escape_sql_str(workflow_run_id)
+            ));
+        }
+        if let Some(ref framework) = filters.framework {
+            inner_where.push_str(&format!(" AND framework = '{}'", escape_sql_str(framework)));
+        }
+        if let Some(ref tool_name) = filters.tool_name {
+            inner_where.push_str(&format!(" AND tool_name = '{}'", escape_sql_str(tool_name)));
+        }
+        if let Some(ref invocation_id) = filters.invocation_id {
+            inner_where.push_str(&format!(
+                " AND invocation_id = '{}'",
+                escape_sql_str(invocation_id)
+            ));
+        }
+        // Phase 4 R4.5 — deployment.environment filter
+        if let Some(ref environment) = filters.environment {
+            inner_where.push_str(&format!(
+                " AND environment = '{}'",
+                escape_sql_str(environment)
             ));
         }
 
@@ -536,16 +765,22 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: SpanQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<Span>> {
+        let tenant_id = filters
+            .tenant_id
+            .ok_or_else(|| anyhow!("tenant_id is required for query_spans"))?;
         let project_id = filters
             .project_id
             .ok_or_else(|| anyhow!("project_id is required for query_spans"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
 
-        let file_filter = span_file_filter(project_id, &filters);
+        let file_filter = span_file_filter(tenant_id, project_id, &filters);
 
         // Build WHERE clause.
-        let mut conditions = vec![format!("project_id = '{project_id}'")];
+        let mut conditions = vec![
+            format!("tenant_id = '{tenant_id}'"),
+            format!("project_id = '{project_id}'"),
+        ];
 
         if let Some(ref tr) = filters.trace_id {
             conditions.push(format!("trace_id = '{}'", escape_sql_str(tr)));
@@ -571,15 +806,53 @@ impl TelemetryReader for ParquetTelemetryReader {
             conditions.push(format!("timestamp >= {}", tr.start));
             conditions.push(format!("timestamp <= {}", tr.end));
         }
-        // Agent attribute filters
+        // Agent / LLM attribute filters
         if let Some(ref llm_model) = filters.llm_model {
             conditions.push(format!("llm_model = '{}'", escape_sql_str(llm_model)));
+        }
+        if let Some(ref llm_provider) = filters.llm_provider {
+            conditions.push(format!("llm_provider = '{}'", escape_sql_str(llm_provider)));
+        }
+        if let Some(ref llm_response_model) = filters.llm_response_model {
+            conditions.push(format!(
+                "llm_response_model = '{}'",
+                escape_sql_str(llm_response_model)
+            ));
         }
         if let Some(ref agent_name) = filters.agent_name {
             conditions.push(format!("agent_name = '{}'", escape_sql_str(agent_name)));
         }
         if let Some(ref session_id) = filters.session_id {
             conditions.push(format!("session_id = '{}'", escape_sql_str(session_id)));
+        }
+        // NeMo Phase 2 filters
+        if let Some(ref rail_type) = filters.rail_type {
+            conditions.push(format!("rail_type = '{}'", escape_sql_str(rail_type)));
+        }
+        if let Some(ref action_name) = filters.action_name {
+            conditions.push(format!("action_name = '{}'", escape_sql_str(action_name)));
+        }
+        if let Some(ref workflow_run_id) = filters.workflow_run_id {
+            conditions.push(format!(
+                "workflow_run_id = '{}'",
+                escape_sql_str(workflow_run_id)
+            ));
+        }
+        if let Some(ref framework) = filters.framework {
+            conditions.push(format!("framework = '{}'", escape_sql_str(framework)));
+        }
+        if let Some(ref tool_name) = filters.tool_name {
+            conditions.push(format!("tool_name = '{}'", escape_sql_str(tool_name)));
+        }
+        if let Some(ref invocation_id) = filters.invocation_id {
+            conditions.push(format!(
+                "invocation_id = '{}'",
+                escape_sql_str(invocation_id)
+            ));
+        }
+        // Phase 4 R4.5 — deployment.environment filter
+        if let Some(ref environment) = filters.environment {
+            conditions.push(format!("environment = '{}'", escape_sql_str(environment)));
         }
 
         let where_clause = conditions.join(" AND ");
@@ -947,8 +1220,13 @@ fn pagination_values(p: &Pagination) -> (u32, u32) {
 }
 
 /// Build a `FileListFilter` for trace queries.
-fn trace_file_filter(project_id: Uuid, filters: &TraceQueryFilters) -> FileListFilter {
+fn trace_file_filter(
+    tenant_id: Uuid,
+    project_id: Uuid,
+    filters: &TraceQueryFilters,
+) -> FileListFilter {
     FileListFilter {
+        tenant_id: Some(tenant_id),
         project_id: Some(project_id),
         signal_type: Some("traces".to_string()),
         time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
@@ -959,8 +1237,13 @@ fn trace_file_filter(project_id: Uuid, filters: &TraceQueryFilters) -> FileListF
 }
 
 /// Build a `FileListFilter` for span queries.
-fn span_file_filter(project_id: Uuid, filters: &SpanQueryFilters) -> FileListFilter {
+fn span_file_filter(
+    tenant_id: Uuid,
+    project_id: Uuid,
+    filters: &SpanQueryFilters,
+) -> FileListFilter {
     FileListFilter {
+        tenant_id: Some(tenant_id),
         project_id: Some(project_id),
         signal_type: Some("traces".to_string()),
         time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
@@ -1102,6 +1385,7 @@ mod tests {
     fn test_trace_file_filter_converts_ns_to_us() {
         use zradar_traits::TimeRange;
         let filters = TraceQueryFilters {
+            tenant_id: Some(Uuid::nil()),
             project_id: Some(Uuid::nil()),
             time_range: Some(TimeRange {
                 start: 1_000_000_000,
@@ -1109,7 +1393,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let f = trace_file_filter(Uuid::nil(), &filters);
+        let f = trace_file_filter(Uuid::nil(), Uuid::nil(), &filters);
+        assert_eq!(f.tenant_id, Some(Uuid::nil()));
         assert_eq!(f.time_range_start, Some(1_000_000));
         assert_eq!(f.time_range_end, Some(2_000_000));
     }

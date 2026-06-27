@@ -74,6 +74,37 @@ pub struct Span {
     pub tool_call_id: String,
 
     // ============================================================
+    // Guardrails (Phase 0: NeMo Guardrails R0.2 – R0.4)
+    // ============================================================
+    pub rail_type: String,
+    pub rail_name: String,
+    pub rail_stop: i16, // bool stored as SMALLINT for PostgreSQL compat
+    pub action_name: String,
+    pub action_has_llm_calls: i16, // bool stored as SMALLINT for PG compat
+    pub action_llm_calls_count: i32,
+
+    // ============================================================
+    // NeMo Agent Toolkit + OTel GenAI 1.29 (Phase 1: R1.2 – R1.6)
+    // ============================================================
+    pub workflow_run_id: String, // nat.workflow.run_id / aiq.workflow.run_id
+    pub framework: String,       // nat.framework / aiq.framework
+    pub llm_provider: String,    // gen_ai.provider.name
+    pub llm_response_model: String, // gen_ai.response.model (request model stays in llm_model)
+    pub events: String,          // JSON: serialized span-event allowlist
+
+    // ============================================================
+    // Phase 4 polish columns (R4.2 – R4.6)
+    // ============================================================
+    // Tri-state SMALLINT for NeMo `llm.cache.hit`: `-1` = unknown/absent,
+    // `0` = explicit cache miss, `1` = explicit cache hit. The unknown state
+    // is distinct from an explicit miss so cache-hit-RATE analytics can use
+    // (hits) / (hits + misses) without counting spans that never reported.
+    pub llm_cache_hit: i16,
+    pub llm_response_id: String, // gen_ai.response.id (provider-side log join)
+    pub environment: String,     // deployment.environment resource attribute
+    pub links: String,           // JSON: OTLP span links array
+
+    // ============================================================
     // Resource Attributes (From Profiling)
     // ============================================================
     pub resource_cpu_micros: i64, // i64 for PostgreSQL compat
@@ -131,26 +162,12 @@ impl Span {
         "EVALUATOR",
         "EMBEDDING",
         "GUARDRAIL",
+        "RERANKER",
     ];
 
     /// Validate if a string is a valid span type
     pub fn validate_span_type(type_str: &str) -> bool {
         Self::VALID_SPAN_TYPES.contains(&type_str)
-    }
-
-    /// Check if this span is generation-like (could include LLM calls)
-    pub fn is_generation_like(&self) -> bool {
-        matches!(
-            self.span_type.as_str(),
-            "GENERATION"
-                | "AGENT"
-                | "TOOL"
-                | "CHAIN"
-                | "RETRIEVER"
-                | "EVALUATOR"
-                | "EMBEDDING"
-                | "GUARDRAIL"
-        )
     }
 }
 
@@ -187,6 +204,21 @@ impl Default for Span {
             total_cost_usd: 0.0,
             tool_name: String::new(),
             tool_call_id: String::new(),
+            rail_type: String::new(),
+            rail_name: String::new(),
+            rail_stop: 0, // i16 (bool false)
+            action_name: String::new(),
+            action_has_llm_calls: 0,   // i16 (bool false)
+            action_llm_calls_count: 0, // i32
+            workflow_run_id: String::new(),
+            framework: String::new(),
+            llm_provider: String::new(),
+            llm_response_model: String::new(),
+            events: "[]".to_string(), // JSON empty array
+            llm_cache_hit: -1,        // tri-state: -1 unknown, 0 miss, 1 hit
+            llm_response_id: String::new(),
+            environment: String::new(),
+            links: "[]".to_string(),  // JSON empty array
             resource_cpu_micros: 0,   // i64
             resource_memory_bytes: 0, // i64
             resource_memory_peak: 0,  // i64
@@ -223,6 +255,7 @@ mod tests {
         assert!(Span::validate_span_type("EMBEDDING"));
         assert!(Span::validate_span_type("GUARDRAIL"));
         assert!(Span::validate_span_type("EVENT"));
+        assert!(Span::validate_span_type("RERANKER"));
     }
 
     #[test]
@@ -231,42 +264,6 @@ mod tests {
         assert!(!Span::validate_span_type("generation")); // case sensitive
         assert!(!Span::validate_span_type(""));
         assert!(!Span::validate_span_type("SPAN ")); // whitespace
-    }
-
-    #[test]
-    fn test_is_generation_like() {
-        let mut span = Span {
-            span_type: "GENERATION".to_string(),
-            ..Span::default()
-        };
-        assert!(span.is_generation_like());
-
-        span.span_type = "TOOL".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "AGENT".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "CHAIN".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "RETRIEVER".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "EVALUATOR".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "EMBEDDING".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "GUARDRAIL".to_string();
-        assert!(span.is_generation_like());
-
-        span.span_type = "SPAN".to_string();
-        assert!(!span.is_generation_like());
-
-        span.span_type = "EVENT".to_string();
-        assert!(!span.is_generation_like());
     }
 
     #[test]

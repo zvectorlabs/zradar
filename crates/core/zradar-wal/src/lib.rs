@@ -5,6 +5,7 @@
 /// existing Parquet write path. On crash, replay re-materializes any records
 /// that had been acknowledged but not yet flushed.
 pub mod backpressure;
+pub mod batch;
 pub mod checkpoint;
 pub mod config;
 pub mod flusher;

@@ -150,6 +150,17 @@ impl FlushWorker {
                         )
                     })?;
             }
+            SignalBatch::Scores(scores) if !scores.is_empty() => {
+                self.writer
+                    .write_scores(&key.tenant_id, &key.project_id, &key.stream_name, &scores)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "FlushWorker write_scores failed for {}/{}",
+                            key.tenant_id, key.stream_name
+                        )
+                    })?;
+            }
             // Empty batches are no-ops (e.g. size 0 signals that should not
             // have been drained — this is a defensive guard).
             _ => {}

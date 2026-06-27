@@ -1,0 +1,29 @@
+{
+  "description": "NeMo Guardrails input rail halts the request before the LLM call completes",
+  "expected_attributes": [
+    {
+      "fields": {
+        "rail_stop": true,
+        "rail_type": "input"
+      },
+      "span_name": "guardrails.rail.input"
+    },
+    {
+      "fields": {
+        "action_has_llm_calls": true,
+        "action_name": "self_check_input"
+      },
+      "span_name": "guardrails.action.self_check_input"
+    },
+    {
+      "fields": {
+        "llm_model": "gpt-4",
+        "llm_response_model": "gpt-4-0613"
+      },
+      "span_name": "gen_ai.chat.completion"
+    }
+  ],
+  "expected_total_spans": 4,
+  "fixture": "guardrails_input_halt",
+  "kind": "traces"
+}

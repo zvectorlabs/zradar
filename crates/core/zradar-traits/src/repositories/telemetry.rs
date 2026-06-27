@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zradar_models::{LogRecord, Metric, Span};
+use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
 
 // ============================================================================
 // Query types
@@ -28,22 +28,37 @@ pub struct TimeRange {
 /// Trace query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TraceQueryFilters {
+    pub tenant_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub time_range: Option<TimeRange>,
     pub service_name: Option<String>,
+    /// Filter traces that contain at least one span whose `span_name` matches
+    /// (substring match). API layer maps `operation_name` to this field.
+    pub span_name: Option<String>,
     pub status: Option<String>,
     pub min_duration_ms: Option<u64>,
     pub max_duration_ms: Option<u64>,
     pub llm_model: Option<String>,
     pub llm_provider: Option<String>,
+    pub llm_response_model: Option<String>,
     pub agent_name: Option<String>,
     pub session_id: Option<String>,
+    // NeMo Phase 2 filters
+    pub rail_type: Option<String>,
+    pub action_name: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub framework: Option<String>,
+    pub tool_name: Option<String>,
+    pub invocation_id: Option<String>,
+    // Phase 4 R4.5 — deployment.environment filter
+    pub environment: Option<String>,
     pub pagination: Pagination,
 }
 
 /// Span query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SpanQueryFilters {
+    pub tenant_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub trace_id: Option<String>,
     pub time_range: Option<TimeRange>,
@@ -52,8 +67,19 @@ pub struct SpanQueryFilters {
     pub span_types: Option<Vec<String>>, // Filter by span_type(s)
     pub status: Option<String>,
     pub llm_model: Option<String>,
+    pub llm_provider: Option<String>,
+    pub llm_response_model: Option<String>,
     pub agent_name: Option<String>,
     pub session_id: Option<String>,
+    // NeMo Phase 2 filters
+    pub rail_type: Option<String>,
+    pub action_name: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub framework: Option<String>,
+    pub tool_name: Option<String>,
+    pub invocation_id: Option<String>,
+    // Phase 4 R4.5 — deployment.environment filter
+    pub environment: Option<String>,
     pub pagination: Pagination,
 }
 
@@ -131,7 +157,8 @@ pub struct PaginatedResponse<T> {
 
 /// Telemetry writer trait
 ///
-/// Used for inserting spans, metrics, and logs into storage.
+/// Used for inserting spans, metrics, logs, and evaluation scores into
+/// storage.
 #[async_trait]
 pub trait TelemetryWriter: Send + Sync {
     /// Insert spans
@@ -142,6 +169,13 @@ pub trait TelemetryWriter: Send + Sync {
 
     /// Insert log records
     async fn insert_logs(&self, logs: &[LogRecord]) -> anyhow::Result<()>;
+
+    /// Insert evaluation scores — Phase 1 R1.8 / OQ8.
+    ///
+    /// Scores are first-class telemetry: they go through the same
+    /// WAL + Parquet pipeline as traces/metrics/logs, registered under
+    /// `file_list.signal_type = "scores"`.
+    async fn insert_scores(&self, scores: &[EvaluationScore]) -> anyhow::Result<()>;
 }
 
 // ============================================================================
@@ -254,6 +288,43 @@ pub struct AnalyticsDataPoint {
     pub groups: HashMap<String, String>,
 }
 
+/// Guardrails analytics query input.
+#[derive(Debug, Clone, Default)]
+pub struct GuardrailsAnalyticsFilters {
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// Per-rail-type breakdown row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RailTypeBreakdown {
+    pub rail_type: String,
+    pub count: i64,
+    pub halted: i64,
+    pub halt_rate: f64,
+}
+
+/// Per-rail-name stat (top halting rails).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RailNameStat {
+    pub rail_name: String,
+    pub rail_type: String,
+    pub halts: i64,
+    pub total: i64,
+}
+
+/// Guardrails analytics response.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GuardrailsAnalyticsResult {
+    pub total_requests: i64,
+    pub halted_requests: i64,
+    pub halt_rate: f64,
+    pub by_rail_type: Vec<RailTypeBreakdown>,
+    pub top_halting_rails: Vec<RailNameStat>,
+}
+
 /// Analytics reader trait
 #[async_trait]
 pub trait AnalyticsReader: Send + Sync {
@@ -284,4 +355,13 @@ pub trait AnalyticsReader: Send + Sync {
         tenant_id: Uuid,
         filters: AnalyticsQueryFilters,
     ) -> anyhow::Result<Vec<AnalyticsDataPoint>>;
+
+    /// Dedicated guardrails analytics with halt-rate, rail-type breakdown, and
+    /// top-halting-rail ranking. Uses dedicated SQL because rail_type / rail_name
+    /// / rail_stop are not in ALLOWED_DIMENSIONS for the generic query_analytics
+    /// path (R2.2, Option B from TECH-SPEC-PHASE-2.md §5.3a).
+    async fn get_guardrails_analytics(
+        &self,
+        filters: GuardrailsAnalyticsFilters,
+    ) -> anyhow::Result<GuardrailsAnalyticsResult>;
 }

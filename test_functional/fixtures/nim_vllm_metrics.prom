@@ -1,0 +1,57 @@
+# Mock NIM/vLLM Prometheus payload used by the Phase 3 smoke test
+# (test_nim_collector.rs). Covers every vllm:* metric named in
+# TECH-SPEC-PHASE-3.md §4.3.
+#
+# WARNING: this is a deterministic fixture. Real NIM deployments emit far more
+# metrics, labels, and per-model series. Do not use this file as a reference
+# for production scraping.
+
+# HELP vllm:num_requests_running Number of requests currently running on GPU.
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{model="meta/llama-3-8b-instruct"} 3
+
+# HELP vllm:num_requests_waiting Number of requests waiting in the queue.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{model="meta/llama-3-8b-instruct"} 1
+
+# HELP vllm:time_to_first_token_seconds Time to first token in seconds.
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="0.1"} 12
+vllm:time_to_first_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="0.5"} 47
+vllm:time_to_first_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="1.0"} 58
+vllm:time_to_first_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="+Inf"} 60
+vllm:time_to_first_token_seconds_sum{model="meta/llama-3-8b-instruct"} 18.3
+vllm:time_to_first_token_seconds_count{model="meta/llama-3-8b-instruct"} 60
+
+# HELP vllm:time_per_output_token_seconds Time per output token in seconds.
+# TYPE vllm:time_per_output_token_seconds histogram
+vllm:time_per_output_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="0.02"} 320
+vllm:time_per_output_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="0.05"} 580
+vllm:time_per_output_token_seconds_bucket{model="meta/llama-3-8b-instruct",le="+Inf"} 600
+vllm:time_per_output_token_seconds_sum{model="meta/llama-3-8b-instruct"} 14.8
+vllm:time_per_output_token_seconds_count{model="meta/llama-3-8b-instruct"} 600
+
+# HELP vllm:e2e_request_latency_seconds End-to-end request latency in seconds.
+# TYPE vllm:e2e_request_latency_seconds histogram
+vllm:e2e_request_latency_seconds_bucket{model="meta/llama-3-8b-instruct",le="0.5"} 5
+vllm:e2e_request_latency_seconds_bucket{model="meta/llama-3-8b-instruct",le="1.0"} 28
+vllm:e2e_request_latency_seconds_bucket{model="meta/llama-3-8b-instruct",le="5.0"} 56
+vllm:e2e_request_latency_seconds_bucket{model="meta/llama-3-8b-instruct",le="+Inf"} 60
+vllm:e2e_request_latency_seconds_sum{model="meta/llama-3-8b-instruct"} 121.4
+vllm:e2e_request_latency_seconds_count{model="meta/llama-3-8b-instruct"} 60
+
+# HELP vllm:kv_cache_usage_perc KV cache utilization as a fraction (0..1).
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{model="meta/llama-3-8b-instruct"} 0.42
+
+# HELP vllm:prompt_tokens_total Total number of prompt tokens processed.
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{model="meta/llama-3-8b-instruct"} 8412
+
+# HELP vllm:generation_tokens_total Total number of generated tokens.
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model="meta/llama-3-8b-instruct"} 22184
+
+# HELP vllm:request_success_total Total number of successful inference requests.
+# TYPE vllm:request_success_total counter
+vllm:request_success_total{model="meta/llama-3-8b-instruct"} 58

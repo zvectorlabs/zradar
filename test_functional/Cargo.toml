@@ -13,6 +13,12 @@ name = "functional_tests"
 path = "functional_tests.rs"
 harness = true
 
+# Phase 5: regenerate fixtures under fixtures/nemo/ deterministically.
+# Run: `cargo run -p zradar-functional-tests --bin gen_nemo_fixtures`
+[[bin]]
+name = "gen_nemo_fixtures"
+path = "fixtures/nemo/build.rs"
+
 [dependencies]
 # Internal crates
 zradar-models = { path = "../crates/core/zradar-models" }
