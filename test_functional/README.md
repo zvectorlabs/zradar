@@ -55,7 +55,7 @@ cargo test --test functional_tests test_send_single_trace -- --ignored --nocaptu
 **`make functional_tests` flow:**
 
 1. **Build** — `cargo build --release --bin zradar` + test suite
-2. **Docker** — Start PostgreSQL (docker-compose.test.yml), wait for healthy
+2. **Docker** — Start PostgreSQL via `docker run` (container `zradar-test-postgres`), wait for healthy
 3. **Config** — Backup `config.toml`, use `config.test.toml`
 4. **Server** — Run `./target/release/zradar` in background with `DATABASE_URL`, `ZVRADAR_TEST_MODE=1`
 5. **Wait** — Poll `GET /health` up to 60s
@@ -161,8 +161,12 @@ let env = TestEnv::setup().await?;
 ## 🐛 Manual Testing
 
 ```bash
-# 1. Start databases
-docker-compose -f docker-compose.test.yml up -d
+# 1. Start the test database (direct docker, no compose)
+docker run -d --name zradar-test-postgres \
+  -e POSTGRES_DB=zradar_test -e POSTGRES_USER=zradar_test -e POSTGRES_PASSWORD=test_pass_123 \
+  -p 9011:5432 --tmpfs /var/lib/postgresql/data \
+  --health-cmd "pg_isready -U zradar_test" --health-interval 2s --health-retries 10 \
+  postgres:17-alpine
 
 # 2. Run migrations
 DATABASE_URL=postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test \
@@ -180,7 +184,7 @@ TEST_GRPC_URL=http://localhost:9016 \
   cargo test --test functional_tests -- --ignored --nocapture
 
 # 5. Cleanup
-docker-compose -f docker-compose.test.yml down -v
+docker rm -f zradar-test-postgres
 ```
 
 ## 🎯 Key Helpers
@@ -221,7 +225,7 @@ let trace_id = TestDataGenerator::trace_id();     // [u8; 16]
 docker ps --filter "name=zradar-test"
 
 # View logs
-docker-compose -f docker-compose.test.yml logs -f
+docker logs -f zradar-test-postgres
 
 # Kill test processes
 lsof -ti:9011-9016 | xargs kill -9

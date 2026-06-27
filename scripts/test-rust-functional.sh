@@ -1,14 +1,26 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# zradar functional test runner — uses Docker directly (no docker-compose).
+#
+# Mirrors the identity/ E2E architecture: a single disposable Postgres
+# container is started via `docker run`, health-gated, then the zradar server
+# and the functional test suite run against it. The whole lifecycle —
+# build → infra up → migrate/serve → test → tear down — is orchestrated here.
+#
+# Usage:
+#   ./scripts/test-rust-functional.sh                  # fresh container, tear down after (CI)
+#   ./scripts/test-rust-functional.sh -r               # reuse healthy container, keep it running
+#   ./scripts/test-rust-functional.sh -r TEST_FILTER   # reuse + run matching tests
+#   ./scripts/test-rust-functional.sh TEST_FILTER      # fresh, run matching tests
+#   ./scripts/test-rust-functional.sh -l               # list available tests
+set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# ── colours ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info() { echo -e "${BLUE}  $*${NC}"; }
+ok()   { echo -e "${GREEN}✓ $*${NC}"; }
+warn() { echo -e "${YELLOW}⚠ $*${NC}"; }
+err()  { echo -e "${RED}✗ $*${NC}"; }
 
-# Usage help
 usage() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}  zradar Functional Tests (Rust)${NC}"
@@ -17,23 +29,21 @@ usage() {
     echo "Usage: $0 [OPTIONS] [TEST_FILTER]"
     echo ""
     echo "Options:"
-    echo "  -h, --help           Show this help message"
-    echo "  -l, --list           List all available tests"
-    echo "  -r, --reuse          Reuse Docker if running, else start fresh. Keep running for next iteration."
+    echo "  -h, --help    Show this help message"
+    echo "  -l, --list    List all available tests"
+    echo "  -r, --reuse   Reuse a healthy test container if present; keep it running after"
     echo ""
     echo "Examples:"
-    echo "  $0                                    # Fresh Docker, cleanup after"
-    echo "  $0 -r                                 # Reuse Docker (or start fresh), keep running"
-    echo "  $0 -r test_create_api_key             # Reuse Docker, run specific test"
-    echo "  $0 -r test_api_keys                   # Reuse Docker, run filtered tests"
-    echo "  $0 test_e2e::test_api_key_lifecycle   # Run specific test in module"
+    echo "  $0                                    # Fresh container, cleanup after"
+    echo "  $0 -r                                 # Reuse container, keep running"
+    echo "  $0 -r test_create_api_key             # Reuse, run a specific test"
+    echo "  $0 test_e2e::test_api_key_lifecycle   # Fresh, run a specific test"
     echo ""
-    echo "Tip: Use -r for fast iteration during development"
-    echo ""
+    echo "Tip: use -r for fast iteration during development."
     exit 0
 }
 
-# Parse arguments
+# ── args ──────────────────────────────────────────────────────────────────────
 TEST_FILTER=""
 LIST_TESTS=false
 DOCKER_REUSE=false
@@ -41,21 +51,10 @@ FUNCTIONAL_TEST_THREADS="${FUNCTIONAL_TEST_THREADS:-4}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
-            usage
-            ;;
-        -l|--list)
-            LIST_TESTS=true
-            shift
-            ;;
-        -r|--reuse)
-            DOCKER_REUSE=true
-            shift
-            ;;
-        *)
-            TEST_FILTER="$1"
-            shift
-            ;;
+        -h|--help)  usage ;;
+        -l|--list)  LIST_TESTS=true; shift ;;
+        -r|--reuse) DOCKER_REUSE=true; shift ;;
+        *)          TEST_FILTER="$1"; shift ;;
     esac
 done
 
@@ -63,285 +62,217 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}  zradar Functional Tests (Rust)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
+[ "$DOCKER_REUSE" = true ] && warn "Reuse mode ON — container stays up after tests"
+[ -n "$TEST_FILTER" ]      && warn "Filter: ${TEST_FILTER}"
 
-# Show active flags
-if [ "$DOCKER_REUSE" = true ]; then
-    echo -e "${YELLOW}🔄 Reuse Mode: ON (reuse if available, keep running after)${NC}"
-fi
-if [ -n "$TEST_FILTER" ]; then
-    echo -e "${YELLOW}🔍 Test Filter: ${TEST_FILTER}${NC}"
-fi
-if [ "$DOCKER_REUSE" = true ] || [ -n "$TEST_FILTER" ]; then
-    echo ""
-fi
+# ── config ────────────────────────────────────────────────────────────────────
+# Container runtime — defaults to docker; override with CTR=podman if preferred.
+CTR="${CTR:-docker}"
+PG_NAME="zradar-test-postgres"
+PG_IMAGE="${ZRADAR_TEST_PG_IMAGE:-postgres:17-alpine}"
+PG_PORT=9011
 
-# Configuration - Test ports: 9011-9016
-TEST_DATABASE_URL="postgresql://zradar_test:test_pass_123@localhost:9011/zradar_test"
+TEST_DATABASE_URL="postgresql://zradar_test:test_pass_123@localhost:${PG_PORT}/zradar_test"
 TEST_API_URL="http://localhost:9015"
 TEST_GRPC_URL="http://localhost:9016"
 
-COMPOSE_FILE="docker-compose.test.yml"
+SERVER_PID=""
+SKIP_DOCKER_SETUP=false
+# Tracks what to do with config.toml on teardown: "untouched" (don't touch),
+# "backup" (restore the displaced original), or "created" (remove the test
+# config we wrote because there was no original).
+CONFIG_STATE="untouched"
 
-# Cleanup function
+# ── container helpers ─────────────────────────────────────────────────────────
+# Probe Postgres actively rather than reading .State.Health.Status: under
+# rootless Podman without a systemd user session the background health-check
+# timer never fires, so the status stays stuck at "starting". An explicit
+# pg_isready via exec is reliable across both Docker and Podman.
+pg_healthy() { $CTR exec "$PG_NAME" pg_isready -U zradar_test -q >/dev/null 2>&1; }
+
+stop_postgres() {
+    $CTR rm -f "$PG_NAME" >/dev/null 2>&1 || true
+    # Free the DB port in case a previous run left something behind.
+    lsof -ti:"$PG_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+}
+
+start_postgres() {
+    info "Starting Postgres on localhost:${PG_PORT} (container ${PG_NAME})..."
+    $CTR run -d --name "$PG_NAME" \
+        -e POSTGRES_DB=zradar_test \
+        -e POSTGRES_USER=zradar_test \
+        -e POSTGRES_PASSWORD=test_pass_123 \
+        -p "${PG_PORT}:5432" \
+        --tmpfs /var/lib/postgresql/data \
+        --health-cmd "pg_isready -U zradar_test" \
+        --health-interval 2s \
+        --health-timeout 2s \
+        --health-retries 10 \
+        "$PG_IMAGE" >/dev/null
+}
+
+wait_pg_healthy() {
+    local timeout=60 elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        pg_healthy && { ok "Postgres healthy"; return 0; }
+        # Fail fast if the container died during startup.
+        $CTR inspect "$PG_NAME" >/dev/null 2>&1 || { err "Postgres container exited"; return 1; }
+        printf '.'; sleep 1; elapsed=$((elapsed+1))
+    done
+    err "Timeout waiting for Postgres"
+    $CTR logs --tail 30 "$PG_NAME" 2>/dev/null || true
+    return 1
+}
+
+# ── cleanup trap — always runs, on success or failure ─────────────────────────
 cleanup() {
-    local exit_code=$?
+    local code=$?
     echo ""
     echo -e "${YELLOW}🧹 Cleaning up...${NC}"
-    
-    # Kill server process if running
-    if [ ! -z "$SERVER_PID" ]; then
-        kill $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
-        echo -e "${BLUE}   Stopped server${NC}"
+
+    if [ -n "$SERVER_PID" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
+        info "Stopped zradar server (pid $SERVER_PID)"
     fi
-    
-    # Force kill any processes on test ports
     lsof -ti:9015 2>/dev/null | xargs kill -9 2>/dev/null || true
     lsof -ti:9016 2>/dev/null | xargs kill -9 2>/dev/null || true
     pkill -f "target/release/zradar" 2>/dev/null || true
-    
-    # Conditionally stop and remove containers based on DOCKER_REUSE flag
-    if [ "$DOCKER_REUSE" = true ]; then
-        echo -e "${YELLOW}   Keeping Docker containers running (reuse mode)${NC}"
-        echo -e "${BLUE}   To stop: docker-compose -f $COMPOSE_FILE down -v${NC}"
-    else
-        echo -e "${BLUE}   Stopping Docker containers with docker-compose...${NC}"
-        # Stop and remove containers using docker-compose
-        docker-compose -f $COMPOSE_FILE down -v --remove-orphans 2>/dev/null || true
-        
-        # Remove test data
-        rm -rf ./data-test 2>/dev/null || true
-    fi
-    
-    # Restore original config
-    if [ -f "config.toml.backup" ]; then
-        mv config.toml.backup config.toml
-        echo -e "${BLUE}   Restored config.toml${NC}"
-    fi
-    
-    if [ $exit_code -eq 0 ]; then
-        echo -e "${GREEN}✅ Cleanup complete${NC}"
-    else
-        echo -e "${RED}❌ Tests failed (exit code: $exit_code)${NC}"
-    fi
-    
-    exit $exit_code
-}
 
-# Set trap to cleanup on exit
+    if [ "$DOCKER_REUSE" = true ]; then
+        warn "Container left running (reuse mode). To destroy: ${CTR} rm -f ${PG_NAME}"
+    else
+        info "Removing test container..."
+        stop_postgres
+        rm -rf ./data-test 2>/dev/null || true
+        ok "Container removed"
+    fi
+
+    case "$CONFIG_STATE" in
+        backup)  mv config.toml.backup config.toml; info "Restored config.toml" ;;
+        created) rm -f config.toml; info "Removed test config.toml" ;;
+    esac
+
+    if [ "$code" -eq 0 ]; then
+        ok "Cleanup complete"
+    else
+        err "Tests failed (exit code: $code)"
+    fi
+    exit "$code"
+}
 trap cleanup EXIT INT TERM
 
-# Step 1: Build server and tests on host (before Docker)
+# ── preflight ─────────────────────────────────────────────────────────────────
+command -v "$CTR" >/dev/null 2>&1 || { err "$CTR not found on PATH"; exit 1; }
+$CTR info >/dev/null 2>&1 || { err "$CTR daemon not reachable — is it running?"; exit 1; }
+
+# ── step 1: build server + test suite ─────────────────────────────────────────
 echo -e "${YELLOW}1️⃣  Building server and tests on host...${NC}"
-echo -e "${BLUE}   (Building once, reusing for tests)${NC}"
-
-# Build server
-echo -e "${BLUE}   → Building zradar server...${NC}"
+info "Building zradar server (release)..."
 cargo build --release --bin zradar
-if [ ! -f "./target/release/zradar" ]; then
-    echo -e "${RED}✗ Server build failed${NC}"
-    exit 1
-fi
-
-# Build test suite
-echo -e "${BLUE}   → Building test suite...${NC}"
+[ -f "./target/release/zradar" ] || { err "Server build failed"; exit 1; }
+info "Building functional test suite..."
 cargo build --package zradar-functional-tests --tests
-if [ $? -ne 0 ]; then
-    echo -e "${RED}✗ Test build failed${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Server and tests built successfully${NC}"
+ok "Server and tests built"
 echo ""
 
-# Step 2: Clean existing test containers (or reuse if -r flag)
-if [ "$DOCKER_REUSE" = true ]; then
-    echo -e "${YELLOW}2️⃣  Checking existing Docker containers for reuse...${NC}"
-    
-    # Check if all required containers exist and are healthy
-    # Note: We only need 1 container now (Postgres) - simplified setup
-    healthy=$(docker ps --filter "name=zradar-test" --format "{{.Status}}" 2>/dev/null | grep -c "(healthy)" 2>/dev/null | tr -d '\n' || echo "0")
-    healthy=${healthy:-0}
-    
-    if [ "$healthy" -ge 1 ] 2>/dev/null; then
-        echo -e "${GREEN}✓ Found healthy PostgreSQL container, reusing it${NC}"
-        SKIP_DOCKER_SETUP=true
-    else
-        echo -e "${YELLOW}   PostgreSQL not healthy, will recreate${NC}"
-        SKIP_DOCKER_SETUP=false
-        # Clean up unhealthy containers using docker-compose
-        echo -e "${BLUE}   → Stopping unhealthy containers with docker-compose...${NC}"
-        docker-compose -f $COMPOSE_FILE down -v --remove-orphans
-        sleep 1 
-    fi
+# ── step 2: infrastructure (fresh or reused) ──────────────────────────────────
+if [ "$DOCKER_REUSE" = true ] && pg_healthy; then
+    echo -e "${YELLOW}2️⃣  Reusing healthy Postgres container${NC}"
+    SKIP_DOCKER_SETUP=true
 else
-    echo -e "${YELLOW}2️⃣  Cleaning existing test containers (force fresh start)...${NC}"
-    SKIP_DOCKER_SETUP=false
-    
-    # Stop and remove any existing test containers and volumes using docker-compose
-    echo -e "${BLUE}   → Stopping containers with docker-compose...${NC}"
-    docker-compose -f $COMPOSE_FILE down -v --remove-orphans 2>/dev/null || true
-    
-    # Kill any processes still using test ports (in case something leaked)
-    echo -e "${BLUE}   → Cleaning up ports...${NC}"
-    lsof -ti:9011 2>/dev/null | xargs kill -9 2>/dev/null || true  # PostgreSQL
-    lsof -ti:9015 2>/dev/null | xargs kill -9 2>/dev/null || true  # API
-    lsof -ti:9016 2>/dev/null | xargs kill -9 2>/dev/null || true  # gRPC
-    
-    # Short pause to ensure cleanup is complete
-    sleep 2
-    
-    echo -e "${GREEN}✓ Cleanup complete${NC}"
-fi
-echo ""
-
-# Step 3: Start test databases (skip if reusing)
-if [ "$SKIP_DOCKER_SETUP" = true ]; then
-    echo -e "${YELLOW}3️⃣  Skipping Docker setup (reusing existing containers)${NC}"
-else
-    echo -e "${YELLOW}3️⃣  Starting fresh test databases (PostgreSQL)...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
-fi
-
-# Wait for PostgreSQL to be healthy
-echo -e "${YELLOW}   Waiting for PostgreSQL to be healthy...${NC}"
-timeout=30
-elapsed=0
-while [ $elapsed -lt $timeout ]; do
-    # Count healthy containers - ensure we get a clean integer
-    healthy=$(docker ps --filter "name=zradar-test-postgres" --format "{{.Status}}" 2>/dev/null | grep -c "(healthy)" 2>/dev/null | tr -d '\n' || echo "0")
-    healthy=${healthy:-0}  # Default to 0 if empty
-    
-    if [ "$healthy" -ge 1 ] 2>/dev/null; then
-        echo -e "${GREEN}✓ PostgreSQL healthy${NC}"
-        break
-    fi
-    
-    if [ $elapsed -eq $((timeout-1)) ]; then
-        echo -e "${RED}✗ Timeout waiting for PostgreSQL${NC}"
-        docker-compose -f $COMPOSE_FILE ps
-        exit 1
-    fi
-    
-    echo -n "."
+    echo -e "${YELLOW}2️⃣  Starting a fresh Postgres container${NC}"
+    stop_postgres
     sleep 1
-    elapsed=$((elapsed + 1))
-done
+    start_postgres
+fi
 echo ""
 
-# Step 4: Setup test configuration
-echo -e "${YELLOW}4️⃣  Setting up test configuration...${NC}"
-
-# Clean test data directory to ensure test isolation
-if [ -d "./data-test" ]; then
-    echo -e "${BLUE}   Removing old test data for clean run...${NC}"
-    rm -rf ./data-test
+# ── step 3: wait for Postgres ─────────────────────────────────────────────────
+if [ "$SKIP_DOCKER_SETUP" != true ]; then
+    echo -e "${YELLOW}3️⃣  Waiting for Postgres to be healthy...${NC}"
+    wait_pg_healthy
+    echo ""
 fi
 
+# ── step 4: test configuration ────────────────────────────────────────────────
+echo -e "${YELLOW}4️⃣  Setting up test configuration...${NC}"
+rm -rf ./data-test 2>/dev/null || true
 if [ -f "config.toml" ]; then
     mv config.toml config.toml.backup
-    echo -e "${BLUE}   Backed up config.toml → config.toml.backup${NC}"
+    CONFIG_STATE="backup"
+    info "Backed up config.toml → config.toml.backup"
+else
+    CONFIG_STATE="created"
 fi
 cp config.test.toml config.toml
-echo -e "${GREEN}✓ Using config.test.toml${NC}"
+ok "Using config.test.toml"
 echo ""
 
-# Step 5: Start zradar server (this will run migrations AND create admin user automatically)
-echo -e "${YELLOW}5️⃣  Starting zradar test server...${NC}"
-echo -e "${BLUE}   → Server will auto-run migrations via MigrationRegistry${NC}"
-echo -e "${BLUE}   → Migrations will create all tables including users${NC}"
-DATABASE_URL=$TEST_DATABASE_URL \
+# ── step 5: start zradar server (auto-runs migrations) ────────────────────────
+echo -e "${YELLOW}5️⃣  Starting zradar test server (migrations run on startup)...${NC}"
+DATABASE_URL="$TEST_DATABASE_URL" \
 QUERY_API_PORT=9015 \
 ZVRADAR_TEST_MODE=1 \
 RUST_LOG=info,zradar=debug \
-./target/release/zradar &
+    ./target/release/zradar &
 SERVER_PID=$!
 
-# Wait for server to be ready (migrations run during startup)
-echo -e "${YELLOW}   Waiting for server to be ready (migrations running)...${NC}"
-timeout=60
-elapsed=0
+timeout=60; elapsed=0
 while [ $elapsed -lt $timeout ]; do
-    if curl -sf $TEST_API_URL/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Server ready at $TEST_API_URL (migrations completed)${NC}"
+    if curl -sf "$TEST_API_URL/health" >/dev/null 2>&1; then
+        ok "Server ready at $TEST_API_URL"
         break
     fi
-    
-    if [ $elapsed -eq $((timeout-1)) ]; then
-        echo -e "${RED}✗ Server didn't start in time${NC}"
-        echo -e "${YELLOW}   Check server logs above for migration errors${NC}"
-        kill $SERVER_PID 2>/dev/null || true
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        err "Server process died during startup"
         exit 1
     fi
-    
-    echo -n "."
-    sleep 1
-    elapsed=$((elapsed + 1))
+    printf '.'; sleep 1; elapsed=$((elapsed+1))
 done
+[ $elapsed -ge $timeout ] && { err "Server didn't start in time"; exit 1; }
+echo ""
+info "Auth: static API key (zk_test_default)"
 echo ""
 
-# Step 6: Admin user creation skipped (using static API key authentication)
-echo -e "${YELLOW}6️⃣  Using static API key authentication (no user creation needed)${NC}"
-echo -e "${GREEN}✓ API key configured: zk_test_default${NC}"
-echo ""
-
-# Step 8: Run functional tests
-echo -e "${YELLOW}8️⃣  Running Rust functional tests...${NC}"
+# ── step 6: run tests ─────────────────────────────────────────────────────────
+echo -e "${YELLOW}6️⃣  Running Rust functional tests...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Handle --list option
+set +e
 if [ "$LIST_TESTS" = true ]; then
-    echo -e "${YELLOW}Available tests:${NC}"
-    TEST_DATABASE_URL=$TEST_DATABASE_URL \
-    TEST_API_URL=$TEST_API_URL \
-    TEST_GRPC_URL=$TEST_GRPC_URL \
-    cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --list
+    TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+    TEST_API_URL="$TEST_API_URL" \
+    TEST_GRPC_URL="$TEST_GRPC_URL" \
+        cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --list
+    TEST_RESULT=$?
+elif [ -n "$TEST_FILTER" ]; then
+    TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+    TEST_API_URL="$TEST_API_URL" \
+    TEST_GRPC_URL="$TEST_GRPC_URL" \
+    TEST_API_KEY=zk_test_default \
+        cargo test --package zradar-functional-tests --test functional_tests "$TEST_FILTER" \
+            -- --include-ignored --nocapture --test-threads=1
     TEST_RESULT=$?
 else
-    # Build the test command
-    if [ -n "$TEST_FILTER" ]; then
-        echo -e "${YELLOW}Running filtered test: ${TEST_FILTER}${NC}"
-        echo ""
-        TEST_DATABASE_URL=$TEST_DATABASE_URL \
-        TEST_API_URL=$TEST_API_URL \
-        TEST_GRPC_URL=$TEST_GRPC_URL \
-        TEST_API_KEY=zk_test_default \
-        cargo test --package zradar-functional-tests --test functional_tests "$TEST_FILTER" -- --include-ignored --nocapture --test-threads=1
-    else
-        echo -e "${YELLOW}Running all tests with ${FUNCTIONAL_TEST_THREADS} test threads...${NC}"
-        echo ""
-        TEST_DATABASE_URL=$TEST_DATABASE_URL \
-        TEST_API_URL=$TEST_API_URL \
-        TEST_GRPC_URL=$TEST_GRPC_URL \
-        TEST_API_KEY=zk_test_default \
-        cargo test --package zradar-functional-tests --test functional_tests -- --include-ignored --nocapture --test-threads="$FUNCTIONAL_TEST_THREADS"
-    fi
+    TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+    TEST_API_URL="$TEST_API_URL" \
+    TEST_GRPC_URL="$TEST_GRPC_URL" \
+    TEST_API_KEY=zk_test_default \
+        cargo test --package zradar-functional-tests --test functional_tests \
+            -- --include-ignored --nocapture --test-threads="$FUNCTIONAL_TEST_THREADS"
     TEST_RESULT=$?
 fi
+set -e
 
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
 if [ $TEST_RESULT -eq 0 ]; then
-    if [ "$LIST_TESTS" = true ]; then
-        echo -e "${GREEN}✅ Test listing complete${NC}"
-    elif [ -n "$TEST_FILTER" ]; then
-        echo -e "${GREEN}✅ Test '${TEST_FILTER}' passed!${NC}"
-    else
-        echo -e "${GREEN}✅ All functional tests passed!${NC}"
-    fi
-    
-    # Show Docker status hint if in reuse mode
-    if [ "$DOCKER_REUSE" = true ]; then
-        echo ""
-        echo -e "${YELLOW}🐳 Docker containers are still running (reuse mode):${NC}"
-        echo -e "${BLUE}   - PostgreSQL: localhost:9011${NC}"
-        echo -e "${BLUE}   To stop: docker-compose -f $COMPOSE_FILE down -v${NC}"
-    fi
+    ok "All functional tests passed"
 else
-    echo -e "${RED}❌ Some tests failed${NC}"
+    err "Some tests failed"
 fi
 
+# Let the EXIT trap perform teardown with this status.
 exit $TEST_RESULT
-
