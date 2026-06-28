@@ -1,32 +1,69 @@
 # zradar
 
-**OpenTelemetry-native observability for AI agents, LLM apps, and multi-step workflows.**
+[![CI](https://github.com/zvectorlabs/zradar/actions/workflows/ci.yml/badge.svg)](https://github.com/zvectorlabs/zradar/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-zradar helps developers understand what their agents are doing, why they fail, how much they cost, and where latency appears. It ingests standard OTLP telemetry and stores high-volume traces, metrics, and logs in a Parquet-first architecture built for fast analytical queries.
+**OpenTelemetry-native observability built specifically for AI agents, LLM applications, and multi-step workflows.**
 
-```mermaid
-flowchart LR
-    app["AI app or agent framework"] --> otel["OpenTelemetry<br/>spans · metrics · logs"]
-    otel --> zradar["zradar"]
-    zradar --> traces["Agent traces<br/>workflow timelines"]
-    zradar --> llm["LLM tokens<br/>cost · latency"]
-    zradar --> tools["Tool calls<br/>retrieval visibility"]
-    zradar --> errors["Error and performance<br/>breakdowns"]
-    zradar --> parquet["Parquet-backed<br/>telemetry storage"]
+zradar helps developers understand what their agents are doing, why they fail, how much they cost, and where latency appears. It ingests standard OTLP telemetry and stores high-volume traces, metrics, and logs in a **Parquet-first architecture** built for fast analytical queries at scale—without the massive cost of standard OLTP databases.
+
+---
+
+## ⚡ Why choose zradar?
+
+Traditional APM tools aren't built for non-deterministic LLM chains. Zradar focuses on the specific pain points of modern AI development:
+
+- **AI-Native Context:** Connect agent sessions, LLM generation, tool usage, RAG retrievers, and evaluations in a unified trace timeline.
+- **Drastically Lower Costs:** Store massive telemetry volumes cheaply in Parquet while PostgreSQL handles lightweight metadata and control-plane state.
+- **Control LLM Spend:** Track prompt tokens, completion tokens, latency, and estimated cost across models, agents, and projects. 
+- **No Vendor Lock-In:** Use the OpenTelemetry standards you already know. Send OTLP data directly from your app—no proprietary zradar SDKs required.
+- **Local First:** Spin up the stack locally in seconds with Docker. Debug locally with Parquet files before moving to S3-compatible object storage.
+
+---
+
+## 🚀 Quick Start
+
+The fastest way to try zradar is via Docker Compose. Create a `docker-compose.yml` file:
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: zradar
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: zradar
+    ports:
+      - "5432:5432"
+
+  zradar:
+    image: ghcr.io/zvectorlabs/zradar:latest
+    environment:
+      DATABASE_URL: postgres://zradar:password@postgres:5432/zradar
+      AUTO_MIGRATE: true
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "8081:8081" # Admin API
+    depends_on:
+      - postgres
 ```
 
-## Why developers try zradar
+Run it with:
+```bash
+docker-compose up -d
+```
 
-- **Use standards you already know:** send OpenTelemetry data instead of adopting a proprietary SDK.
-- **See full agent execution paths:** connect agent spans, LLM calls, tools, retrievers, chains, and evaluations in one trace model.
-- **Debug faster:** inspect latency, errors, status codes, and span metadata across traces, logs, and metrics.
-- **Control LLM cost:** track token usage and estimated cost by model, agent, service, and project.
-- **Keep telemetry affordable:** store high-volume data in Parquet while PostgreSQL handles metadata and control-plane state.
-- **Run locally first:** develop against local PostgreSQL and local Parquet files, then add S3-compatible storage when needed.
+- **OTLP gRPC Ingestion:** `localhost:4317` (Send your traces, metrics, and logs here)
+- **Admin HTTP API:** `http://localhost:8081` (Query analytics and settings)
+- **Swagger / OpenAPI UI:** `http://localhost:8081/swagger-ui/`
 
-## What you can observe
+*Send sample telemetry from the `examples/` directory (see `examples/README.md`), then query traces via the Swagger UI!*
 
-### Agent workflows
+---
+
+## 🧠 What you can observe
+
+zradar correlates logs, metrics, and traces together into the shape of AI applications.
 
 ```mermaid
 flowchart TD
@@ -43,137 +80,66 @@ flowchart TD
     eval --> timeline
 ```
 
-zradar is designed for the shape of AI applications, not just traditional request/response services.
+---
 
-### LLM usage and cost
+## 📐 Design Principles
 
-Track model calls, prompt tokens, completion tokens, total tokens, latency, status, and cost signals so you can answer questions like:
+zradar is built from the ground up to solve the operational headaches of modern AI systems without introducing new ones. Our core engineering principles are:
 
-- Which agents are most expensive?
-- Which models are slowest?
-- Where are token spikes coming from?
-- Which tools or chains fail most often?
+- **Cost-Effective Scaling:** Telemetry data is loud and heavy. By storing high-volume logs, metrics, and traces directly in **Parquet** files (on local disk or S3), you bypass the exorbitant storage costs and write bottlenecks of traditional OLTP databases.
+- **High Throughput for Any Size:** Whether you are a solo developer hacking on a local agent or an enterprise processing billions of spans, zradar's Rust-based ingestion handles extreme scale with low memory allocation and high concurrency.
+- **Zero Vendor Lock-In:** You should own your telemetry. Because zradar speaks standard OpenTelemetry (OTLP), any standard client or SDK can push data to it natively. If you ever want to switch tools, your instrumentation stays exactly the same.
+- **Local-First Developer Experience:** Complex telemetry shouldn't require a cloud deployment to test. zradar can run entirely locally with a single container and simple Parquet files, making local debugging and prototyping frictionless.
 
-### Logs, metrics, and traces together
+---
 
-zradar supports all three telemetry signals through OTLP ingestion and query APIs, making it easier to correlate behavior across your agent stack.
+## 🛠️ Development & Contributing
 
-## Architecture
+Want to contribute or hack on zradar locally? Here is everything you need to build and run the project efficiently.
 
-zradar uses PostgreSQL for metadata and control-plane state, and Parquet for telemetry data.
+### 1. Install Prerequisites
 
-```mermaid
-flowchart TD
-    otlp["OTLP applications<br/>traces · metrics · logs"] --> server["zradar server<br/>auth · rate limits · circuit breakers"]
-    server --> writer["Parquet writer<br/>buffer · bloom filters · atomic writes"]
-    writer --> parquet["Parquet storage<br/>local disk or S3"]
-    writer --> pg["PostgreSQL metadata<br/>file_list · stream_stats · settings"]
-    parquet --> cache["DiskCache / MemoryCache"]
-    pg --> reader["Query service"]
-    cache --> reader
-    reader --> df["DataFusion ListingTable"]
-    df --> api["Analytics and query APIs"]
-    parquet --> jobs["Retention · FileMover · compaction"]
-    jobs --> pg
-```
+We use standard Rust tooling along with specialized tools for fast, reliable builds:
 
-The Parquet path includes batching, atomic writes, bloom filters, DataFusion `ListingTable` queries, memory/disk caching, retention, and compaction for small-file control.
+- **Rust:** `1.93.0` (Use `rustup`)
+- **Docker:** Required for spinning up the local PostgreSQL dev/test databases.
+- **Python 3:** Required for functional test scripts.
+- **just:** A handy command runner. (`cargo install just`)
+- **cargo-nextest:** A faster, more reliable test runner. (`cargo install cargo-nextest`)
+- **sccache & mold** *(Optional but highly recommended)*: Used for blazing-fast cached builds. 
+  - Install via your OS package manager: `sudo apt install mold sccache` or `brew install mold sccache`.
 
-## Core capabilities
+### 2. Local Environment Setup
 
-- **OTLP ingestion:** traces, metrics, and logs.
-- **Agent-aware span model:** agent, generation, tool, chain, retriever, evaluator, embedding, and guardrail spans.
-- **Analytics APIs:** service analytics, top endpoints, error breakdowns, LLM analytics, and agent analytics.
-- **Project settings:** per-project ingestion and storage controls.
-- **Retention controls:** organization defaults with project overrides.
-- **Resilience:** per-project rate limiting, backpressure, health readiness, and circuit breakers.
-- **Storage lifecycle:** local Parquet, optional S3 movement, cache layers, and compaction.
-
-## Quick start
+Spin up the local database and development environment:
 
 ```bash
-make help
-make dev
-make health
+just dev
 ```
 
-After `make dev` is healthy:
+### 3. Build & Test Commands
 
-- **OTLP gRPC:** `localhost:4317` (traces, metrics, logs)
-- **Admin HTTP API:** `http://localhost:8081` (queries, analytics, settings)
-- **OpenAPI / Swagger:** `http://localhost:8081/swagger-ui/`
-
-Send sample telemetry from `examples/` (see `examples/README.md`), then query traces via the API or Swagger.
-
-Run checks:
+We use `just` recipes to standardize workflows:
 
 ```bash
-make fmt
-make check
-make test
+# See all available commands
+just --list
+
+# Format and check code (clippy)
+just fmt
+just check
+
+# Run unit tests
+just test
+
+# Run the full end-to-end Dockerized functional suite
+just functional-tests
 ```
 
-Run functional tests:
+**Fast Builds:** Prefix your commands with `ZRADAR_FAST_BUILD=1` to opt-in to `mold` and `sccache` (e.g., `ZRADAR_FAST_BUILD=1 just test`). This drastically reduces re-compile times.
 
-```bash
-make functional_tests_fast
-```
+### 4. Configuration
 
-## Configuration
+To configure the server locally, copy `config.toml.example` to `config.toml` and review connection strings, retention windows, and OTLP ports.
 
-Start with `config.toml.example` and tune storage settings for your environment.
 
-Common areas to review:
-
-- PostgreSQL connection
-- OTLP ports and API keys
-- local Parquet data directory
-- S3-compatible storage settings
-- retention window
-- write buffering and compaction
-- circuit breaker thresholds
-
-## Project layout
-
-```text
-crates/applications/zradar-server     Server binary
-crates/services/api-optel             OTLP ingestion services
-crates/services/api                   Query and admin APIs
-crates/core/zradar-parquet            Parquet storage and query engine
-crates/core/zradar-models             Shared models and config
-crates/plugins/zradar-plugin-postgres PostgreSQL repositories
-crates/plugins/zradar-plugin-s3       S3 storage plugin
-test_functional                       End-to-end scenarios
-```
-
-## When zradar is a good fit
-
-Try zradar if you are building:
-
-- AI agents with multi-step execution paths
-- LLM applications with token and cost concerns
-- RAG systems where retrieval and generation need correlation
-- tool-using agents where failures happen across many spans
-- observability infrastructure that should stay OpenTelemetry-native
-- telemetry systems where Parquet storage is preferable to keeping everything in an OLTP database
-
-## Deployment
-
-Build and run the server image from this directory:
-
-```bash
-docker build -t zradar .
-```
-
-Expose OTLP on **4317** and the Admin API on **8081**. Configure PostgreSQL, storage, and API keys via `config.toml` (see `config.toml.example`). Any client that speaks HTTP and OpenTelemetry can integrate; zradar does not bundle a web interface.
-
-## Documentation
-
-- `config.toml.example` for configuration
-- `examples/README.md` for instrumentation examples
-- `test_functional/README.md` for functional testing
-- `AGENTS.md` and `CODING_GUIDELINES.md` for repository contribution guidance
-
-## Status
-
-zradar is under active development. The current architecture is Parquet-first for telemetry with PostgreSQL metadata and control-plane state.
