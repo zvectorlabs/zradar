@@ -260,8 +260,12 @@ impl ZradarRuntimeBuilder {
         let pg_client = Arc::new(PostgresClient::from_pool(pg_pool.clone()));
         let file_list_repo = Arc::new(PostgresFileListRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::FileListRepository>;
-        let settings_repo = Arc::new(PostgresSettingsRepository::new(pg_client.clone()))
+        let raw_settings_repo = Arc::new(PostgresSettingsRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::SettingsRepository>;
+        let settings_repo = Arc::new(zradar_traits::CachedSettingsRepository::new(
+            raw_settings_repo,
+            std::time::Duration::from_secs(5),
+        )) as Arc<dyn zradar_traits::SettingsRepository>;
         let storage_usage_repo = Arc::new(PostgresStorageUsageRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::StorageUsageRepository>;
         let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
@@ -568,8 +572,10 @@ impl ZradarRuntimeBuilder {
             .map(|i| i.wal.clone())
             .unwrap_or_default();
 
-        let otlp_writer: Arc<dyn zradar_traits::TelemetryWriter> = if wal_config.enabled {
-            // WAL path is preserved from the original main.rs.
+        // WAL is mandatory: every accepted OTLP request is durably appended
+        // before ack, then drained to Parquet by the background flusher. There
+        // is no direct (non-WAL) ingest path.
+        let otlp_writer: Arc<dyn zradar_traits::TelemetryWriter> = {
             // The WAL writer wraps the Parquet writer and applies backpressure.
             // Inline here to avoid re-exporting WAL internals from this crate.
             use zradar_wal::Wal;
@@ -609,7 +615,7 @@ impl ZradarRuntimeBuilder {
             #[async_trait::async_trait]
             impl FlushSink for TelemetryFlushSink {
                 async fn flush_records(&self, records: &[WalRecord]) -> anyhow::Result<()> {
-                    use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
+                    use zradar_models::{EvaluationScore, IngestBatch, LogRecord, Metric, Span};
 
                     // A `WalRecord` may now carry either a batch envelope (one
                     // append covering many rows) or a legacy single-row JSON
@@ -688,17 +694,25 @@ impl ZradarRuntimeBuilder {
                         }
                     }
 
+                    // Hand ownership to the writer's move-based batch path
+                    // (re-arch Phase B): the flusher already owns these Vecs,
+                    // so `insert_batch` moves rows into the write buffer instead
+                    // of `extend_from_slice`-cloning every row.
                     if !spans.is_empty() {
-                        self.writer.insert_spans(&spans).await?;
+                        self.writer.insert_batch(IngestBatch::spans(spans)).await?;
                     }
                     if !metrics.is_empty() {
-                        self.writer.insert_metrics(&metrics).await?;
+                        self.writer
+                            .insert_batch(IngestBatch::metrics(metrics))
+                            .await?;
                     }
                     if !logs.is_empty() {
-                        self.writer.insert_logs(&logs).await?;
+                        self.writer.insert_batch(IngestBatch::logs(logs)).await?;
                     }
                     if !scores.is_empty() {
-                        self.writer.insert_scores(&scores).await?;
+                        self.writer
+                            .insert_batch(IngestBatch::scores(scores))
+                            .await?;
                     }
                     Ok(())
                 }
@@ -835,11 +849,18 @@ impl ZradarRuntimeBuilder {
             }
 
             Arc::new(WalTelemetryWriter { wal }) as Arc<dyn zradar_traits::TelemetryWriter>
-        } else {
-            parquet_writer.clone()
         };
 
         let wal_metrics = Arc::new(zradar_wal::metrics::WalMetrics::new());
+
+        // End-to-end ingest metrics hub. System-level by default; per-workspace
+        // series are gated by `MetricsPolicy` (swap `ObserveNone` for a
+        // settings-backed policy to track key tenants). Rendered on `/metrics`
+        // alongside the WAL metrics. Ack-path/storage emit sites are wired into
+        // the services/jobs incrementally via this handle.
+        let metrics_hub = Arc::new(zradar_metrics::MetricsHub::new(Arc::new(
+            zradar_metrics::ObserveNone,
+        )));
 
         // =====================================================================
         // OTLP services
@@ -864,15 +885,19 @@ impl ZradarRuntimeBuilder {
         if let Some(buffer) = write_buffer.clone() {
             let breaker = circuit_breaker.clone();
             let cancel = cancel_token.clone();
+            let hub = metrics_hub.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
                         _ = cancel.cancelled() => {
                             breaker.set_queue_depth(0);
+                            hub.set_queue_depth(0);
                             return;
                         }
                         _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                            breaker.set_queue_depth(buffer.record_count() as u64);
+                            let depth = buffer.record_count() as u64;
+                            breaker.set_queue_depth(depth);
+                            hub.set_queue_depth(depth);
                         }
                     }
                 }
@@ -958,12 +983,15 @@ impl ZradarRuntimeBuilder {
 
         let metrics_state = wal_metrics.clone();
         let usage_metrics_state = usage_tracker_metrics.clone();
+        let ingest_metrics_state = metrics_hub.clone();
         let metrics_route = axum::routing::get(move || {
             let m = metrics_state.clone();
             let usage_m = usage_metrics_state.clone();
+            let ingest_m = ingest_metrics_state.clone();
             async move {
                 let mut output = m.render_prometheus();
                 output.push_str(&usage_m.render_prometheus());
+                output.push_str(&ingest_m.render());
                 output
             }
         });

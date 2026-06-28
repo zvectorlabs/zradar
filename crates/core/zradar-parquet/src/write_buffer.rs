@@ -215,6 +215,127 @@ impl WriteBuffer {
     }
 
     // -----------------------------------------------------------------------
+    // Owned push methods (move-based ingest path — re-arch Phase B follow-up)
+    //
+    // Counterparts to the `push_*` methods above that consume an owned `Vec`
+    // instead of `extend_from_slice`-cloning a borrowed slice. Into an empty
+    // slot the allocation is transferred directly; into a warm slot rows are
+    // `Vec::append`-moved. Either way no row's `String` fields are deep-cloned.
+    // -----------------------------------------------------------------------
+
+    /// Move `spans` into the slot identified by `key` (no per-row clone).
+    pub fn push_spans_owned(&self, key: BufferKey, mut spans: Vec<Span>) {
+        let added = rough_size(spans.len(), 512);
+        let max = self.max_slot_bytes;
+
+        let size_after = {
+            let mut slot = self.slots.entry(key).or_insert_with(|| BufferSlot {
+                data: SignalBatch::Spans(Vec::new()),
+                size_bytes: 0,
+                created_at: Instant::now(),
+            });
+
+            if let SignalBatch::Spans(ref mut v) = slot.data {
+                if v.is_empty() {
+                    *v = spans;
+                } else {
+                    v.append(&mut spans);
+                }
+            }
+            slot.size_bytes += added;
+            slot.size_bytes
+        };
+
+        if size_after >= max {
+            self.flush_notify.notify_one();
+        }
+    }
+
+    /// Move `metrics` into the slot identified by `key` (no per-row clone).
+    pub fn push_metrics_owned(&self, key: BufferKey, mut metrics: Vec<Metric>) {
+        let added = rough_size(metrics.len(), 256);
+        let max = self.max_slot_bytes;
+
+        let size_after = {
+            let mut slot = self.slots.entry(key).or_insert_with(|| BufferSlot {
+                data: SignalBatch::Metrics(Vec::new()),
+                size_bytes: 0,
+                created_at: Instant::now(),
+            });
+
+            if let SignalBatch::Metrics(ref mut v) = slot.data {
+                if v.is_empty() {
+                    *v = metrics;
+                } else {
+                    v.append(&mut metrics);
+                }
+            }
+            slot.size_bytes += added;
+            slot.size_bytes
+        };
+
+        if size_after >= max {
+            self.flush_notify.notify_one();
+        }
+    }
+
+    /// Move `logs` into the slot identified by `key` (no per-row clone).
+    pub fn push_logs_owned(&self, key: BufferKey, mut logs: Vec<LogRecord>) {
+        let added = rough_size(logs.len(), 384);
+        let max = self.max_slot_bytes;
+
+        let size_after = {
+            let mut slot = self.slots.entry(key).or_insert_with(|| BufferSlot {
+                data: SignalBatch::Logs(Vec::new()),
+                size_bytes: 0,
+                created_at: Instant::now(),
+            });
+
+            if let SignalBatch::Logs(ref mut v) = slot.data {
+                if v.is_empty() {
+                    *v = logs;
+                } else {
+                    v.append(&mut logs);
+                }
+            }
+            slot.size_bytes += added;
+            slot.size_bytes
+        };
+
+        if size_after >= max {
+            self.flush_notify.notify_one();
+        }
+    }
+
+    /// Move `scores` into the slot identified by `key` (no per-row clone).
+    pub fn push_scores_owned(&self, key: BufferKey, mut scores: Vec<EvaluationScore>) {
+        let added = rough_size(scores.len(), 256);
+        let max = self.max_slot_bytes;
+
+        let size_after = {
+            let mut slot = self.slots.entry(key).or_insert_with(|| BufferSlot {
+                data: SignalBatch::Scores(Vec::new()),
+                size_bytes: 0,
+                created_at: Instant::now(),
+            });
+
+            if let SignalBatch::Scores(ref mut v) = slot.data {
+                if v.is_empty() {
+                    *v = scores;
+                } else {
+                    v.append(&mut scores);
+                }
+            }
+            slot.size_bytes += added;
+            slot.size_bytes
+        };
+
+        if size_after >= max {
+            self.flush_notify.notify_one();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Drain methods (called by FlushWorker)
     // -----------------------------------------------------------------------
 
@@ -343,6 +464,42 @@ mod tests {
             assert_eq!(v.len(), 2);
         } else {
             panic!("expected Spans batch");
+        }
+    }
+
+    #[test]
+    fn test_push_spans_owned_moves_and_accumulates() {
+        let buf = WriteBuffer::new(8 * 1024 * 1024);
+        // Fixed key so all pushes target the same slot (the shared `key()`
+        // helper randomizes the workspace).
+        let k = BufferKey {
+            workspace_id: "ws".to_string(),
+            signal_type: "traces".to_string(),
+            stream_name: "svc".to_string(),
+            hour: "2024/01/15/14".to_string(),
+        };
+
+        let s1 = make_span();
+        let id1 = s1.trace_id.clone();
+        // Empty slot: allocation handed over directly (no deep clone).
+        buf.push_spans_owned(k.clone(), vec![s1]);
+        // Warm slot: appended without deep-cloning.
+        let s2 = make_span();
+        let s3 = make_span();
+        let (id2, id3) = (s2.trace_id.clone(), s3.trace_id.clone());
+        buf.push_spans_owned(k.clone(), vec![s2, s3]);
+
+        assert_eq!(buf.len(), 1, "same key → one slot");
+        let slots = buf.drain_all();
+        match &slots[0].1.data {
+            SignalBatch::Spans(v) => {
+                assert_eq!(v.len(), 3, "empty + warm pushes accumulated");
+                let ids: Vec<&str> = v.iter().map(|s| s.trace_id.as_str()).collect();
+                assert!(ids.contains(&id1.as_str()));
+                assert!(ids.contains(&id2.as_str()));
+                assert!(ids.contains(&id3.as_str()));
+            }
+            _ => panic!("expected Spans batch"),
         }
     }
 

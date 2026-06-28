@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
+use zradar_models::{EvaluationScore, IngestBatch, IngestPayload, LogRecord, Metric, Span};
 use zradar_traits::TelemetryWriter;
 
 use crate::write_buffer::{BufferKey, WriteBuffer};
@@ -131,6 +131,20 @@ impl TelemetryWriter for ParquetTelemetryWriter {
             }
         }
     }
+
+    /// Override the Phase B batch entrypoint with a move-based path. The owned
+    /// `IngestBatch` lets us partition by *moving* rows into their buckets and
+    /// then move them into the write buffer (`Vec::append`) — with no per-row
+    /// clone. The `&[T]` `insert_*` methods above cannot do this: from a borrow
+    /// the buffered path must `extend_from_slice`-clone every row.
+    async fn insert_batch(&self, batch: IngestBatch) -> anyhow::Result<()> {
+        match batch.payload {
+            IngestPayload::Spans(rows) => self.insert_spans_owned(rows).await,
+            IngestPayload::Metrics(rows) => self.insert_metrics_owned(rows).await,
+            IngestPayload::Logs(rows) => self.insert_logs_owned(rows).await,
+            IngestPayload::Scores(rows) => self.insert_scores_owned(rows).await,
+        }
+    }
 }
 
 impl ParquetTelemetryWriter {
@@ -185,6 +199,164 @@ impl ParquetTelemetryWriter {
         } else {
             self.writer
                 .write_scores(&key.workspace_id, &key.stream_name, scores)
+                .await?;
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Owned (move-based) write path — backs `insert_batch`.
+    //
+    // The buffered branch moves rows into the slot via `push_*_owned`
+    // (`Vec::append`), avoiding the `extend_from_slice` deep clone the
+    // borrow-based `write_*_partition` helpers incur. The direct branch
+    // still hands a borrow to `ParquetFileWriter` (it builds Arrow from a
+    // read-only view, so ownership buys nothing there).
+    // ------------------------------------------------------------------
+
+    async fn insert_spans_owned(&self, spans: Vec<Span>) -> anyhow::Result<()> {
+        if spans.is_empty() {
+            return Ok(());
+        }
+        match partition_owned(
+            spans,
+            |s| s.workspace_id.as_str(),
+            |s| s.service_name.as_str(),
+            |s| s.timestamp,
+        ) {
+            PartitionedOwned::Homogeneous(key, rows) => {
+                self.write_span_partition_owned(&key, rows).await
+            }
+            PartitionedOwned::Grouped(groups) => {
+                for (key, rows) in groups {
+                    self.write_span_partition_owned(&key, rows).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn insert_metrics_owned(&self, metrics: Vec<Metric>) -> anyhow::Result<()> {
+        if metrics.is_empty() {
+            return Ok(());
+        }
+        match partition_owned(
+            metrics,
+            |m| m.workspace_id.as_str(),
+            |m| m.service_name.as_str(),
+            |m| m.timestamp,
+        ) {
+            PartitionedOwned::Homogeneous(key, rows) => {
+                self.write_metric_partition_owned(&key, rows).await
+            }
+            PartitionedOwned::Grouped(groups) => {
+                for (key, rows) in groups {
+                    self.write_metric_partition_owned(&key, rows).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn insert_logs_owned(&self, logs: Vec<LogRecord>) -> anyhow::Result<()> {
+        if logs.is_empty() {
+            return Ok(());
+        }
+        match partition_owned(
+            logs,
+            |l| l.workspace_id.as_str(),
+            |l| l.service_name.as_str(),
+            |l| l.timestamp,
+        ) {
+            PartitionedOwned::Homogeneous(key, rows) => {
+                self.write_log_partition_owned(&key, rows).await
+            }
+            PartitionedOwned::Grouped(groups) => {
+                for (key, rows) in groups {
+                    self.write_log_partition_owned(&key, rows).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn insert_scores_owned(&self, scores: Vec<EvaluationScore>) -> anyhow::Result<()> {
+        if scores.is_empty() {
+            return Ok(());
+        }
+        match partition_owned(
+            scores,
+            |s| s.workspace_id.as_str(),
+            |s| s.service_name.as_str(),
+            |s| s.timestamp,
+        ) {
+            PartitionedOwned::Homogeneous(key, rows) => {
+                self.write_score_partition_owned(&key, rows).await
+            }
+            PartitionedOwned::Grouped(groups) => {
+                for (key, rows) in groups {
+                    self.write_score_partition_owned(&key, rows).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn write_span_partition_owned(
+        &self,
+        key: &PartitionKey,
+        spans: Vec<Span>,
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_spans_owned(key.buffer_key("traces"), spans);
+        } else {
+            self.writer
+                .write_spans(&key.workspace_id, &key.stream_name, &spans)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_metric_partition_owned(
+        &self,
+        key: &PartitionKey,
+        metrics: Vec<Metric>,
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_metrics_owned(key.buffer_key("metrics"), metrics);
+        } else {
+            self.writer
+                .write_metrics(&key.workspace_id, &key.stream_name, &metrics)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_log_partition_owned(
+        &self,
+        key: &PartitionKey,
+        logs: Vec<LogRecord>,
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_logs_owned(key.buffer_key("logs"), logs);
+        } else {
+            self.writer
+                .write_logs(&key.workspace_id, &key.stream_name, &logs)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_score_partition_owned(
+        &self,
+        key: &PartitionKey,
+        scores: Vec<EvaluationScore>,
+    ) -> anyhow::Result<()> {
+        if let Some(buf) = &self.buffer {
+            buf.push_scores_owned(key.buffer_key("scores"), scores);
+        } else {
+            self.writer
+                .write_scores(&key.workspace_id, &key.stream_name, &scores)
                 .await?;
         }
         Ok(())
@@ -254,20 +426,8 @@ fn partition_by_storage_key<T: Clone>(
     service_of: impl Fn(&T) -> &str,
     ts_of: impl Fn(&T) -> i64,
 ) -> Partitioned<'_, T> {
-    let first = &rows[0];
-    let d0 = (
-        workspace_of(first),
-        stream_of(service_of(first)),
-        ts_of(first).div_euclid(NANOS_PER_HOUR),
-    );
-    let homogeneous = rows.iter().all(|r| {
-        (
-            workspace_of(r),
-            stream_of(service_of(r)),
-            ts_of(r).div_euclid(NANOS_PER_HOUR),
-        ) == d0
-    });
-    if homogeneous {
+    if is_homogeneous(rows, &workspace_of, &service_of, &ts_of) {
+        let first = &rows[0];
         let key = PartitionKey::of(workspace_of(first), service_of(first), ts_of(first));
         return Partitioned::Homogeneous(key, rows);
     }
@@ -283,6 +443,66 @@ fn partition_by_storage_key<T: Clone>(
         groups[idx].1.push(r.clone());
     }
     Partitioned::Grouped(groups)
+}
+
+/// True when every row in a non-empty `rows` maps to the same partition.
+///
+/// Uses the allocation-free discriminator `(&workspace, &stream, hour_bucket)`
+/// shared by both the borrow- and move-based partitioners.
+fn is_homogeneous<T>(
+    rows: &[T],
+    workspace_of: &impl Fn(&T) -> &str,
+    service_of: &impl Fn(&T) -> &str,
+    ts_of: &impl Fn(&T) -> i64,
+) -> bool {
+    let first = &rows[0];
+    let d0 = (
+        workspace_of(first),
+        stream_of(service_of(first)),
+        ts_of(first).div_euclid(NANOS_PER_HOUR),
+    );
+    rows.iter().all(|r| {
+        (
+            workspace_of(r),
+            stream_of(service_of(r)),
+            ts_of(r).div_euclid(NANOS_PER_HOUR),
+        ) == d0
+    })
+}
+
+/// Owned counterpart of [`Partitioned`]: each bucket owns its rows so the
+/// caller can move them onward (into the write buffer) without cloning.
+enum PartitionedOwned<T> {
+    Homogeneous(PartitionKey, Vec<T>),
+    Grouped(Vec<(PartitionKey, Vec<T>)>),
+}
+
+/// Move-based counterpart to [`partition_by_storage_key`]. Consumes `rows`
+/// (which must be non-empty) and moves each into its partition bucket — no
+/// per-row clone, even for a mixed batch. Backs the owned `insert_batch` path.
+fn partition_owned<T>(
+    rows: Vec<T>,
+    workspace_of: impl Fn(&T) -> &str,
+    service_of: impl Fn(&T) -> &str,
+    ts_of: impl Fn(&T) -> i64,
+) -> PartitionedOwned<T> {
+    if is_homogeneous(&rows, &workspace_of, &service_of, &ts_of) {
+        let first = &rows[0];
+        let key = PartitionKey::of(workspace_of(first), service_of(first), ts_of(first));
+        return PartitionedOwned::Homogeneous(key, rows);
+    }
+
+    let mut index: HashMap<PartitionKey, usize> = HashMap::new();
+    let mut groups: Vec<(PartitionKey, Vec<T>)> = Vec::new();
+    for r in rows {
+        let key = PartitionKey::of(workspace_of(&r), service_of(&r), ts_of(&r));
+        let idx = *index.entry(key.clone()).or_insert_with(|| {
+            groups.push((key.clone(), Vec::new()));
+            groups.len() - 1
+        });
+        groups[idx].1.push(r);
+    }
+    PartitionedOwned::Grouped(groups)
 }
 
 /// Map an OTLP `service.name` to its stream name, defaulting empty to "default".
@@ -687,5 +907,115 @@ mod tests {
             "workspace A's two same-partition spans coalesced"
         );
         assert_eq!(a.stream_name, "api");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Owned (move-based) batch path — `insert_batch` must partition identically
+    // to `insert_spans`, and warm slots must accumulate across calls.
+    // ---------------------------------------------------------------------------
+
+    /// `insert_batch` fans a mixed batch into the same partitions `insert_spans`
+    /// does — no cross-workspace leak — while moving rows instead of cloning.
+    #[tokio::test]
+    async fn test_insert_batch_mixed_tenants_partitioned() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let wa = Uuid::new_v4().to_string();
+        let wb = Uuid::new_v4().to_string();
+        let h10 = 10 * NANOS_PER_HOUR;
+        let h11 = 11 * NANOS_PER_HOUR;
+
+        writer
+            .insert_batch(IngestBatch::spans(vec![
+                span_at(&wa, "api", h10),
+                span_at(&wb, "web", h10),
+                span_at(&wa, "api", h11),
+            ]))
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 3, "three distinct partitions expected");
+
+        let (_, b_slot) = slots
+            .iter()
+            .find(|(k, _)| k.workspace_id == wb)
+            .expect("workspace B partition must exist");
+        match &b_slot.data {
+            SignalBatch::Spans(v) => {
+                assert_eq!(v.len(), 1);
+                assert_eq!(v[0].workspace_id, wb, "no cross-workspace leak");
+            }
+            _ => panic!("expected Spans batch"),
+        }
+        let a_count: usize = slots
+            .iter()
+            .filter(|(k, _)| k.workspace_id == wa)
+            .map(|(_, s)| s.data.len())
+            .sum();
+        assert_eq!(a_count, 2, "workspace A keeps both its spans");
+    }
+
+    /// Homogeneous batch via `insert_batch` lands in one slot with all rows
+    /// (the move transfers the allocation into the empty slot).
+    #[tokio::test]
+    async fn test_insert_batch_homogeneous_single_partition() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let w = Uuid::new_v4().to_string();
+        let h10 = 10 * NANOS_PER_HOUR;
+
+        writer
+            .insert_batch(IngestBatch::spans(vec![
+                span_at(&w, "api", h10),
+                span_at(&w, "api", h10 + 5),
+            ]))
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 1, "one partition for a homogeneous batch");
+        match &slots[0].1.data {
+            SignalBatch::Spans(v) => assert_eq!(v.len(), 2),
+            _ => panic!("expected Spans batch"),
+        }
+    }
+
+    /// Two `insert_batch` calls into the same partition accumulate in one slot —
+    /// the second push hits the warm-slot `Vec::append` branch.
+    #[tokio::test]
+    async fn test_insert_batch_warm_slot_accumulates() {
+        use crate::write_buffer::SignalBatch;
+
+        let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
+        let writer = buffered_writer(buffer.clone());
+
+        let w = Uuid::new_v4().to_string();
+        let h10 = 10 * NANOS_PER_HOUR;
+
+        writer
+            .insert_batch(IngestBatch::spans(vec![span_at(&w, "api", h10)]))
+            .await
+            .unwrap();
+        writer
+            .insert_batch(IngestBatch::spans(vec![
+                span_at(&w, "api", h10 + 1),
+                span_at(&w, "api", h10 + 2),
+            ]))
+            .await
+            .unwrap();
+
+        let slots = buffer.drain_all();
+        assert_eq!(slots.len(), 1, "same partition across both calls");
+        match &slots[0].1.data {
+            SignalBatch::Spans(v) => assert_eq!(v.len(), 3, "warm slot accumulated all rows"),
+            _ => panic!("expected Spans batch"),
+        }
     }
 }

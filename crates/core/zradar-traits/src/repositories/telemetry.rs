@@ -6,7 +6,7 @@ use zradar_models::WorkspaceId;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
+use zradar_models::{EvaluationScore, IngestBatch, IngestPayload, LogRecord, Metric, Span};
 
 // ============================================================================
 // Query types
@@ -175,6 +175,23 @@ pub trait TelemetryWriter: Send + Sync {
     /// WAL + Parquet pipeline as traces/metrics/logs, registered under
     /// `file_list.signal_type = "scores"`.
     async fn insert_scores(&self, scores: &[EvaluationScore]) -> anyhow::Result<()>;
+
+    /// Insert a versioned [`IngestBatch`] — the re-architecture Phase B
+    /// boundary (see `zradar-plans/re-architecture/`).
+    ///
+    /// The default implementation dispatches to the row-oriented `insert_*`
+    /// methods above, so every existing writer accepts batches for free with
+    /// no behavior change. A storage backend may override this to consume
+    /// columnar/Arrow payloads directly once [`IngestPayload`] grows those
+    /// variants, without any change to the calling services.
+    async fn insert_batch(&self, batch: IngestBatch) -> anyhow::Result<()> {
+        match batch.payload {
+            IngestPayload::Spans(spans) => self.insert_spans(&spans).await,
+            IngestPayload::Metrics(metrics) => self.insert_metrics(&metrics).await,
+            IngestPayload::Logs(logs) => self.insert_logs(&logs).await,
+            IngestPayload::Scores(scores) => self.insert_scores(&scores).await,
+        }
+    }
 }
 
 // ============================================================================

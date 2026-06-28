@@ -4,7 +4,46 @@
 //! span attributes using priority-based detection logic.
 
 use serde_json::Value;
-use std::collections::HashMap;
+
+use crate::conventions::AttrView;
+
+/// Read-only attribute lookups needed by span-type detection.
+///
+/// Implemented for both the borrowed [`AttrView`] (the zero-copy ingest path)
+/// and `serde_json::Map` (the unit tests), so `detect_type` runs against either
+/// without building an intermediate map.
+pub(crate) trait AttrSource {
+    /// The string value for `key`, if present and a string.
+    fn lookup_str(&self, key: &str) -> Option<&str>;
+    /// Whether `key` is present (any value kind).
+    fn has_key(&self, key: &str) -> bool;
+    /// Whether any key starts with `prefix`.
+    fn has_key_prefix(&self, prefix: &str) -> bool;
+}
+
+impl AttrSource for AttrView<'_> {
+    fn lookup_str(&self, key: &str) -> Option<&str> {
+        self.get_str(key)
+    }
+    fn has_key(&self, key: &str) -> bool {
+        self.contains(key)
+    }
+    fn has_key_prefix(&self, prefix: &str) -> bool {
+        self.iter().any(|(k, _)| k.starts_with(prefix))
+    }
+}
+
+impl AttrSource for serde_json::Map<String, Value> {
+    fn lookup_str(&self, key: &str) -> Option<&str> {
+        self.get(key).and_then(|v| v.as_str())
+    }
+    fn has_key(&self, key: &str) -> bool {
+        self.contains_key(key)
+    }
+    fn has_key_prefix(&self, prefix: &str) -> bool {
+        self.keys().any(|k| k.starts_with(prefix))
+    }
+}
 
 /// Mapper for detecting span types from OTLP attributes
 pub struct SpanTypeMapper;
@@ -25,16 +64,14 @@ impl SpanTypeMapper {
     /// 9. Zero duration = EVENT
     ///
     /// Default: SPAN
-    pub fn detect_type(
-        attributes: &HashMap<String, Value>,
+    pub(crate) fn detect_type<A: AttrSource>(
+        attributes: &A,
         duration_ns: i64,
         span_name: &str,
         service_name: &str,
     ) -> String {
         // Priority 1: Explicit zradar.span.type
-        if let Some(explicit_type) = attributes.get("zradar.span.type")
-            && let Some(type_str) = explicit_type.as_str()
-        {
+        if let Some(type_str) = attributes.lookup_str("zradar.span.type") {
             return type_str.to_uppercase();
         }
 
@@ -50,9 +87,7 @@ impl SpanTypeMapper {
         }
 
         // Priority 2: openinference.span.kind
-        if let Some(openinf) = attributes.get("openinference.span.kind")
-            && let Some(kind) = openinf.as_str()
-        {
+        if let Some(kind) = attributes.lookup_str("openinference.span.kind") {
             return match kind.to_uppercase().as_str() {
                 "CHAIN" => "CHAIN",
                 "RETRIEVER" => "RETRIEVER",
@@ -69,9 +104,7 @@ impl SpanTypeMapper {
         }
 
         // Priority 3: gen_ai.operation.name
-        if let Some(gen_ai_op) = attributes.get("gen_ai.operation.name")
-            && let Some(op) = gen_ai_op.as_str()
-        {
+        if let Some(op) = attributes.lookup_str("gen_ai.operation.name") {
             return match op {
                 "chat" | "completion" | "generate_content" | "generate" => "GENERATION",
                 "embeddings" => "EMBEDDING",
@@ -83,10 +116,9 @@ impl SpanTypeMapper {
         }
 
         // Priority 4: Vercel AI SDK patterns
-        if let Some(op_name) = attributes
-            .get("operation.name")
-            .or_else(|| attributes.get("ai.operationId"))
-            && let Some(op_str) = op_name.as_str()
+        if let Some(op_str) = attributes
+            .lookup_str("operation.name")
+            .or_else(|| attributes.lookup_str("ai.operationId"))
         {
             if (op_str.starts_with("ai.generateText") || op_str.starts_with("ai.streamText"))
                 && Self::has_model_info(attributes)
@@ -126,21 +158,21 @@ impl SpanTypeMapper {
     }
 
     /// Check if attributes contain model information
-    fn has_model_info(attributes: &HashMap<String, Value>) -> bool {
-        attributes.contains_key("gen_ai.request.model")
-            || attributes.contains_key("gen_ai.response.model")
-            || attributes.contains_key("llm.model")
-            || attributes.contains_key("ai.model.id")
+    fn has_model_info<A: AttrSource>(attributes: &A) -> bool {
+        attributes.has_key("gen_ai.request.model")
+            || attributes.has_key("gen_ai.response.model")
+            || attributes.has_key("llm.model")
+            || attributes.has_key("ai.model.id")
     }
 
     /// Check if attributes contain tool information
-    fn has_tool_info(attributes: &HashMap<String, Value>) -> bool {
-        attributes.contains_key("tool.name") || attributes.contains_key("gen_ai.tool.name")
+    fn has_tool_info<A: AttrSource>(attributes: &A) -> bool {
+        attributes.has_key("tool.name") || attributes.has_key("gen_ai.tool.name")
     }
 
     /// Check if attributes contain agent information
-    fn has_agent_info(attributes: &HashMap<String, Value>) -> bool {
-        attributes.contains_key("agent.name") || attributes.contains_key("agent.type")
+    fn has_agent_info<A: AttrSource>(attributes: &A) -> bool {
+        attributes.has_key("agent.name") || attributes.has_key("agent.type")
     }
 
     /// Detect whether a span is unambiguously emitted by NeMo Guardrails.
@@ -154,24 +186,24 @@ impl SpanTypeMapper {
     ///   attribute is present.
     ///
     /// `action.name` alone is too broad — LangChain and AutoGen also emit it.
-    fn is_guardrails(attrs: &HashMap<String, Value>, span_name: &str, service_name: &str) -> bool {
+    fn is_guardrails<A: AttrSource>(attrs: &A, span_name: &str, service_name: &str) -> bool {
         // Standalone markers (any one suffices per OQ19):
         if span_name.starts_with("guardrails.") {
             return true;
         }
-        if let Some(op) = attrs.get("gen_ai.operation.name").and_then(|v| v.as_str())
+        if let Some(op) = attrs.lookup_str("gen_ai.operation.name")
             && op == "guardrails"
         {
             return true;
         }
-        if attrs.keys().any(|k| k.starts_with("rail.")) {
+        if attrs.has_key_prefix("rail.") {
             return true;
         }
         // OQ19 compound predicate: `action.name` alone is too broad
         // (LangChain/AutoGen also emit it). It needs a Guardrails context
         // marker — the span-name and rail.* markers above already cover
         // two of the three, so only the service marker remains.
-        attrs.contains_key("action.name") && service_name == "nemo_guardrails"
+        attrs.has_key("action.name") && service_name == "nemo_guardrails"
     }
 }
 
@@ -180,7 +212,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_attrs(pairs: Vec<(&str, Value)>) -> HashMap<String, Value> {
+    fn make_attrs(pairs: Vec<(&str, Value)>) -> serde_json::Map<String, Value> {
         pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
     }
 
@@ -321,13 +353,13 @@ mod tests {
 
     #[test]
     fn test_priority_8_zero_duration_event() {
-        let attrs = HashMap::new();
+        let attrs = serde_json::Map::new();
         assert_eq!(SpanTypeMapper::detect_type(&attrs, 0, "", ""), "EVENT");
     }
 
     #[test]
     fn test_default_span_type() {
-        let attrs = HashMap::new();
+        let attrs = serde_json::Map::new();
         assert_eq!(SpanTypeMapper::detect_type(&attrs, 1000, "", ""), "SPAN");
     }
 
@@ -374,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_priority_1_5_guardrails_span_name() {
-        let attrs = HashMap::new();
+        let attrs = serde_json::Map::new();
         assert_eq!(
             SpanTypeMapper::detect_type(&attrs, 1000, "guardrails.request", ""),
             "GUARDRAIL"

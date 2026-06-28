@@ -8,6 +8,7 @@ members = [
     "crates/core/zradar-retention",
     "crates/core/zradar-policy",
     "crates/core/zradar-wal",
+    "crates/core/zradar-metrics",
 
     # Storage backends
     "crates/plugins/zradar-plugin-postgres",

@@ -7,7 +7,10 @@
 //! Both call sites now use [`any_value_to_json`] and [`attrs_to_json`] from
 //! this module, ensuring consistent handling of all OTLP value kinds.
 
+use std::collections::BTreeMap;
+
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value::Value};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 /// Convert an OTLP [`AnyValue`] to a [`serde_json::Value`].
 ///
@@ -39,20 +42,81 @@ pub fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
     }
 }
 
+/// Streams an OTLP [`AnyValue`] to JSON identically to [`any_value_to_json`] +
+/// `serde_json::to_string`, but without materializing an intermediate
+/// `serde_json::Value`. `serde_json` drives this impl, so the bytes are
+/// identical — including sorted nested-object keys (serde_json's `Map` is a
+/// `BTreeMap`; this build has no `preserve_order`) and non-finite floats
+/// serialized as `null`.
+struct AnyValueSer<'a>(&'a AnyValue);
+
+impl Serialize for AnyValueSer<'_> {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        match &self.0.value {
+            Some(Value::StringValue(s)) => ser.serialize_str(s),
+            Some(Value::BoolValue(b)) => ser.serialize_bool(*b),
+            Some(Value::IntValue(i)) => ser.serialize_i64(*i),
+            // serde_json serializes non-finite f64 as `null`, matching
+            // `any_value_to_json`'s `Number::from_f64(..).unwrap_or(Null)`.
+            Some(Value::DoubleValue(d)) => ser.serialize_f64(*d),
+            Some(Value::ArrayValue(arr)) => {
+                let mut seq = ser.serialize_seq(Some(arr.values.len()))?;
+                for v in &arr.values {
+                    seq.serialize_element(&AnyValueSer(v))?;
+                }
+                seq.end()
+            }
+            Some(Value::KvlistValue(kv)) => {
+                // Mirror serde_json::Map (BTreeMap): sorted keys, last-wins.
+                let sorted: BTreeMap<&str, &AnyValue> = kv
+                    .values
+                    .iter()
+                    .filter_map(|item| item.value.as_ref().map(|v| (item.key.as_str(), v)))
+                    .collect();
+                let mut map = ser.serialize_map(Some(sorted.len()))?;
+                for (k, v) in sorted {
+                    map.serialize_entry(k, &AnyValueSer(v))?;
+                }
+                map.end()
+            }
+            Some(Value::BytesValue(b)) => ser.serialize_str(&hex::encode(b)),
+            None => ser.serialize_none(),
+        }
+    }
+}
+
+/// Serialize a `KeyValue` slice to a compact JSON object string, byte-identical
+/// to building a `serde_json::Map` via [`any_value_to_json`] and `to_string` —
+/// but without cloning keys or allocating intermediate `Value`s. `skip(key)`
+/// returns `true` for attributes to omit (used to scrub prompt/completion
+/// content when capture is disabled).
+pub fn attrs_to_json_filtered(attrs: &[KeyValue], skip: impl Fn(&str) -> bool) -> String {
+    struct AttrsSer<'a, F>(&'a [KeyValue], F);
+    impl<F: Fn(&str) -> bool> Serialize for AttrsSer<'_, F> {
+        fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+            // BTreeMap mirrors serde_json::Map ordering (sorted, last-wins).
+            let sorted: BTreeMap<&str, &AnyValue> = self
+                .0
+                .iter()
+                .filter(|kv| !(self.1)(&kv.key))
+                .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
+                .collect();
+            let mut map = ser.serialize_map(Some(sorted.len()))?;
+            for (k, v) in sorted {
+                map.serialize_entry(k, &AnyValueSer(v))?;
+            }
+            map.end()
+        }
+    }
+    serde_json::to_string(&AttrsSer(attrs, skip)).unwrap_or_else(|_| "{}".to_string())
+}
+
 /// Serialize a `KeyValue` slice to a compact JSON object string.
 ///
 /// Replaces the per-module `attrs_to_json` helpers that previously missed
 /// `ArrayValue` and `KvlistValue` (logs_converter.rs, R1.9 fix).
 pub fn attrs_to_json(attrs: &[KeyValue]) -> String {
-    let map: serde_json::Map<String, serde_json::Value> = attrs
-        .iter()
-        .filter_map(|kv| {
-            kv.value
-                .as_ref()
-                .map(|v| (kv.key.clone(), any_value_to_json(v)))
-        })
-        .collect();
-    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+    attrs_to_json_filtered(attrs, |_| false)
 }
 
 #[cfg(test)]
@@ -64,6 +128,99 @@ mod tests {
 
     fn av(v: Value) -> AnyValue {
         AnyValue { value: Some(v) }
+    }
+
+    fn kv(k: &str, v: Value) -> KeyValue {
+        KeyValue {
+            key: k.to_string(),
+            value: Some(av(v)),
+        }
+    }
+
+    /// Pre-optimization reference: build a `serde_json::Map` via
+    /// `any_value_to_json` and stringify. The streaming serializer must match
+    /// this byte-for-byte.
+    fn reference_json(attrs: &[KeyValue]) -> String {
+        let map: serde_json::Map<String, serde_json::Value> = attrs
+            .iter()
+            .filter_map(|kv| {
+                kv.value
+                    .as_ref()
+                    .map(|v| (kv.key.clone(), any_value_to_json(v)))
+            })
+            .collect();
+        serde_json::to_string(&map).unwrap()
+    }
+
+    #[test]
+    fn attrs_to_json_matches_map_reference_byte_for_byte() {
+        let attrs = vec![
+            kv("z.last", Value::StringValue("end".into())),
+            kv(
+                "a.first",
+                Value::StringValue("start \"quoted\" \n newline /\u{1f}".into()),
+            ),
+            kv("m.int", Value::IntValue(-42)),
+            kv("m.double", Value::DoubleValue(1.5)),
+            kv("m.nan", Value::DoubleValue(f64::NAN)),
+            kv("m.bool", Value::BoolValue(true)),
+            kv("m.bytes", Value::BytesValue(vec![0xde, 0xad, 0xbe, 0xef])),
+            kv(
+                "m.array",
+                Value::ArrayValue(ArrayValue {
+                    values: vec![av(Value::StringValue("x".into())), av(Value::IntValue(2))],
+                }),
+            ),
+            // Nested kvlist with out-of-order keys — must sort like serde_json::Map.
+            kv(
+                "m.nested",
+                Value::KvlistValue(KeyValueList {
+                    values: vec![
+                        KeyValue {
+                            key: "b".into(),
+                            value: Some(av(Value::IntValue(2))),
+                        },
+                        KeyValue {
+                            key: "a".into(),
+                            value: Some(av(Value::IntValue(1))),
+                        },
+                    ],
+                }),
+            ),
+            // Duplicate key: last value wins (BTreeMap semantics).
+            kv("dup", Value::IntValue(1)),
+            kv("dup", Value::IntValue(2)),
+            // Null inner value: dropped, matching the old map build.
+            KeyValue {
+                key: "skip.null".into(),
+                value: None,
+            },
+        ];
+        assert_eq!(attrs_to_json(&attrs), reference_json(&attrs));
+    }
+
+    #[test]
+    fn attrs_to_json_empty_is_empty_object() {
+        assert_eq!(attrs_to_json(&[]), "{}");
+    }
+
+    #[test]
+    fn attrs_to_json_filtered_skips_keys_and_matches_reference() {
+        let attrs = vec![
+            kv("keep", Value::StringValue("ok".into())),
+            kv("gen_ai.content.prompt", Value::StringValue("secret".into())),
+            kv("llm.input", Value::StringValue("secret".into())),
+        ];
+        let got = attrs_to_json_filtered(&attrs, |k| {
+            k.starts_with("gen_ai.content.") || k == "llm.input"
+        });
+        let kept: Vec<KeyValue> = attrs
+            .iter()
+            .filter(|kv| !(kv.key.starts_with("gen_ai.content.") || kv.key == "llm.input"))
+            .cloned()
+            .collect();
+        assert_eq!(got, reference_json(&kept));
+        assert!(!got.contains("secret"));
     }
 
     #[test]

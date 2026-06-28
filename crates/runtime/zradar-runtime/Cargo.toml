@@ -14,6 +14,7 @@ zradar-models = { path = "../../core/zradar-models" }
 zradar-traits = { path = "../../core/zradar-traits" }
 zradar-parquet = { path = "../../core/zradar-parquet" }
 zradar-wal = { path = "../../core/zradar-wal" }
+zradar-metrics = { path = "../../core/zradar-metrics" }
 zradar-retention = { path = "../../core/zradar-retention" }
 zradar-policy = { path = "../../core/zradar-policy" }
 

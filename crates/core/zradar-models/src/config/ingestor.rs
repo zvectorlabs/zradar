@@ -18,9 +18,6 @@ pub struct IngestorConfig {
 /// The server converts this to the WAL crate's native config type.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalIngestorConfig {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default = "default_wal_dir")]
     pub wal_dir: String,
 
@@ -40,7 +37,6 @@ pub struct WalIngestorConfig {
 impl Default for WalIngestorConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             wal_dir: default_wal_dir(),
             segment_max_bytes: default_wal_segment_max_bytes(),
             flush_interval_ms: default_wal_flush_interval_ms(),

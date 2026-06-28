@@ -1,0 +1,12 @@
+[package]
+name = "zradar-metrics"
+version.workspace = true
+edition.workspace = true
+description = "Lock-free ingest/storage metrics with policy-gated per-workspace tracking and a Prometheus text encoder"
+
+[dependencies]
+dashmap = { workspace = true }
+zradar-models = { path = "../zradar-models" }
+
+[dev-dependencies]
+uuid = { workspace = true }

@@ -13,6 +13,14 @@ tokio = { workspace = true, features = ["full"] }
 name = "query_bench"
 harness = false
 
+[[bench]]
+name = "write_bench"
+harness = false
+
+[[bench]]
+name = "buffer_bench"
+harness = false
+
 [dependencies]
 # Arrow ecosystem
 arrow = { workspace = true }

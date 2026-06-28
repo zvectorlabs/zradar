@@ -550,19 +550,30 @@ async fn test_r2_9_guardrails_analytics_endpoint_shape() -> Result<()> {
     let workspace_id = env.client.workspace_id();
     let path = format!("/api/v1/analytics/guardrails?workspace_id={workspace_id}");
     let mut data = None;
-    for _ in 0..25 {
+    // 50 × 200ms = 10s: WAL-async ingest + analytics aggregation under the
+    // full parallel suite occasionally needs more than a 5s window.
+    for _ in 0..50 {
         let resp = env.client.get(&path).await?;
         assert!(
             resp.status().is_success(),
             "GET /api/v1/analytics/guardrails must return 2xx"
         );
         let body: serde_json::Value = resp.json().await?;
-        let has_unique_rail = body["top_halting_rails"].as_array().is_some_and(|rails| {
-            rails
-                .iter()
-                .any(|r| r["rail_name"].as_str() == Some(&unique_rail))
+        // Poll until the halted rail is fully aggregated across *all* of the
+        // endpoint's sub-queries — `halted_requests` AND its entry in
+        // `top_halting_rails` (with halts ≥ 1). WAL-async ingest means these
+        // separate aggregations can briefly lag each other while data is still
+        // flushing, so waiting on the exact conditions the assertions below
+        // check makes the test robust under the parallel suite (a weaker
+        // "rail name present" predicate let a halts=0 snapshot through).
+        let halted_requests = body["halted_requests"].as_i64().unwrap_or(0);
+        let our_rail_halted = body["top_halting_rails"].as_array().is_some_and(|rails| {
+            rails.iter().any(|r| {
+                r["rail_name"].as_str() == Some(&unique_rail)
+                    && r["halts"].as_i64().unwrap_or(0) >= 1
+            })
         });
-        if has_unique_rail {
+        if halted_requests >= 1 && our_rail_halted {
             data = Some(body);
             break;
         }
