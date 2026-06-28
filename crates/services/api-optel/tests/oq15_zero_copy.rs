@@ -44,7 +44,6 @@ use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, Key
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
 use zradar_models::RequestContext;
-use zradar_models::WorkspaceId;
 
 fn kv_str(k: &str, v: &str) -> KeyValue {
     KeyValue {
@@ -111,7 +110,7 @@ const OQ15_BASELINE_MAX_ALLOCS: u64 = 55;
 #[test]
 fn convert_one_span_total_alloc_budget_within_baseline() {
     let ctx = RequestContext {
-        workspace_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil().into(),
     };
     let converter = OtlpConverter::new();
     let input = nat_simple_workflow_input();
@@ -158,7 +157,7 @@ fn convert_one_span_alloc_count_is_stable_across_calls() {
     // Catches "lazy init" allocations that would only show up on the first
     // call (e.g. lazy_static, OnceCell, interned strings).
     let ctx = RequestContext {
-        workspace_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil().into(),
     };
     let converter = OtlpConverter::new();
     let input = nat_simple_workflow_input();
