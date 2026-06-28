@@ -9,7 +9,7 @@
  * 4. Instrument LLM calls
  */
 
-import { trace } from '@opentelemetry/api';
+import { trace, context } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { Resource } from '@opentelemetry/resources';
@@ -143,7 +143,7 @@ async function simulateRAGPipeline(tracer) {
     });
 
     // Step 1: Generate query embedding
-    const embedSpan = tracer.startSpan('step.generate_embedding', {}, trace.setSpan(trace.context.active(), rootSpan));
+    const embedSpan = tracer.startSpan('step.generate_embedding', {}, trace.setSpan(context.active(), rootSpan));
     try {
       embedSpan.setAttributes({
         'llm.vendor': 'openai',
@@ -157,7 +157,7 @@ async function simulateRAGPipeline(tracer) {
     }
 
     // Step 2: Vector database search
-    const searchSpan = tracer.startSpan('step.vector_search', {}, trace.setSpan(trace.context.active(), rootSpan));
+    const searchSpan = tracer.startSpan('step.vector_search', {}, trace.setSpan(context.active(), rootSpan));
     try {
       searchSpan.setAttributes({
         'db.system': 'pinecone',
@@ -171,7 +171,7 @@ async function simulateRAGPipeline(tracer) {
     }
 
     // Step 3: LLM completion with context
-    const completionSpan = tracer.startSpan('step.completion', {}, trace.setSpan(trace.context.active(), rootSpan));
+    const completionSpan = tracer.startSpan('step.completion', {}, trace.setSpan(context.active(), rootSpan));
     try {
       completionSpan.setAttributes({
         'llm.vendor': 'openai',
@@ -210,7 +210,7 @@ async function simulateErrorScenario(tracer) {
 
     // Simulate retries
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const retrySpan = tracer.startSpan(`attempt.${attempt}`, {}, trace.setSpan(trace.context.active(), span));
+      const retrySpan = tracer.startSpan(`attempt.${attempt}`, {}, trace.setSpan(context.active(), span));
       
       try {
         retrySpan.setAttribute('retry.attempt', attempt);

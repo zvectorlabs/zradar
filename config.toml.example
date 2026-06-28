@@ -39,6 +39,7 @@ max_connections = 20
 [[api_keys]]
 key        = "zk_live_changeme"
 tenant_id  = "my-org"
+workspace_id = "00000000-0000-0000-0000-000000000000"
 project_id = "my-project"
 name       = "default"
 
