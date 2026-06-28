@@ -72,7 +72,6 @@ async fn test_r1_1_otlp_http_traces_accepted() -> Result<()> {
         .header("content-type", "application/x-protobuf")
         .header("authorization", test_auth_header(&env))
         .header("x-workspace-id", env.workspace_id.to_string())
-        .header("x-workspace-id", env.workspace_id.to_string())
         .body(body)
         .send()
         .await?;
@@ -98,7 +97,6 @@ async fn test_r1_1_otlp_http_json_rejected() -> Result<()> {
         .post(format!("{}/v1/traces", otlp_http_url))
         .header("content-type", "application/json")
         .header("authorization", test_auth_header(&env))
-        .header("x-workspace-id", env.workspace_id.to_string())
         .header("x-workspace-id", env.workspace_id.to_string())
         .body(b"{}".to_vec())
         .send()

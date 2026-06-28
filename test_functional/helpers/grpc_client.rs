@@ -84,11 +84,7 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
-        let _workspace_id_val = self
-            .workspace_id
-            .as_ref()
-            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
-        let _workspace_id_val = self
+        let workspace_id_val = self
             .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
@@ -98,10 +94,7 @@ impl OtlpClient {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
                 }
-                if let Some(val) = &_workspace_id_val {
-                    req.metadata_mut().insert("x-workspace-id", val.clone());
-                }
-                if let Some(val) = &_workspace_id_val {
+                if let Some(val) = &workspace_id_val {
                     req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
                 Ok(req)

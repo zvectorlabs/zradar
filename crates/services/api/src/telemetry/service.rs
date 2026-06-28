@@ -2,7 +2,6 @@
 
 use chrono::DateTime;
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use uuid::Uuid;
 use zradar_models::WorkspaceId;
 
 use super::types::{
@@ -345,11 +344,12 @@ impl QueryService {
     /// Query traces
     pub async fn query_traces(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: TraceQueryFilters,
     ) -> Result<PaginatedResponse<TraceSummary>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
@@ -541,11 +541,12 @@ impl QueryService {
     /// Query spans
     pub async fn query_spans(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: SpanQueryFilters,
     ) -> Result<PaginatedResponse<SpanDetail>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
@@ -755,11 +756,12 @@ impl QueryService {
     /// original `get_daily_trace_counts()` for backward compatibility.
     pub async fn get_analytics(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<AnalyticsResult>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let end = query
             .end
@@ -844,11 +846,12 @@ impl QueryService {
     /// Get metrics summary
     pub async fn get_metrics_summary(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<crate::telemetry::types::MetricsSummary> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let end = query
             .end
@@ -879,11 +882,12 @@ impl QueryService {
     /// Get top endpoints
     pub async fn get_top_endpoints(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: TopNQuery,
     ) -> Result<Vec<TopEndpoint>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let limit = query.n.unwrap_or(10).max(1) as usize;
         let start = query.start_time.timestamp_nanos_opt().unwrap_or(0);
         let end = query.end_time.timestamp_nanos_opt().unwrap_or(0);
@@ -974,11 +978,12 @@ impl QueryService {
     /// Get error breakdown
     pub async fn get_error_breakdown(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: ErrorAnalyticsQuery,
     ) -> Result<Vec<ErrorBreakdown>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let mut filters = HashMap::new();
         filters.insert("status_code".to_string(), "ERROR".to_string());
         if let Some(service_name) = query.service_name {
@@ -1021,11 +1026,12 @@ impl QueryService {
 
     pub async fn get_llm_analytics(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<LlmAnalytics>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let end = query
             .end
             .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
@@ -1114,11 +1120,12 @@ impl QueryService {
 
     pub async fn get_agent_analytics(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<AgentAnalytics>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let end = query
             .end
             .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
@@ -1219,11 +1226,12 @@ impl QueryService {
     /// Return guardrails analytics: halt rate, rail-type breakdown, top halting rails.
     pub async fn get_guardrails_analytics(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<GuardrailsAnalytics> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let end = query
             .end
             .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
@@ -1274,11 +1282,12 @@ impl QueryService {
     /// Return active storage usage grouped by signal type and storage location.
     pub async fn get_storage_usage(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: StorageUsageQuery,
     ) -> Result<Vec<StorageUsage>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let file_list_repo = self.file_list_repo.as_ref().ok_or_else(|| {
             ControlError::Internal(
                 "Storage usage metadata repository is not configured".to_string(),
@@ -1327,11 +1336,12 @@ impl QueryService {
 
     pub async fn get_quota_status(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: QuotaStatusQuery,
     ) -> Result<Vec<QuotaStatus>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let policy_store = self
             .policy_store
             .as_ref()
@@ -1404,11 +1414,12 @@ impl QueryService {
 
     pub async fn get_usage_daily(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: UsageDailyQuery,
     ) -> Result<Vec<UsageDailyRecord>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
         })?;
@@ -1427,11 +1438,12 @@ impl QueryService {
 
     pub async fn get_storage_usage_daily(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: StorageUsageDailyQuery,
     ) -> Result<Vec<StorageUsageDaily>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let storage_usage_repo = self.storage_usage_repo.as_ref().ok_or_else(|| {
             ControlError::Internal("Storage usage repository is not configured".to_string())
         })?;
@@ -1464,11 +1476,12 @@ impl QueryService {
 
     pub async fn get_ingest_rate(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: IngestRateQuery,
     ) -> Result<Vec<IngestRateRecord>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
         })?;
@@ -1488,11 +1501,12 @@ impl QueryService {
 
     pub async fn get_query_usage(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         query: QueryUsageQuery,
     ) -> Result<Vec<QueryUsageRecord>> {
-        let workspace_id = Uuid::parse_str(&query.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
         })?;
@@ -1513,11 +1527,12 @@ impl QueryService {
     /// Query log records
     pub async fn query_logs(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: LogQueryFilters,
     ) -> Result<PaginatedResponse<LogDetail>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
@@ -1664,11 +1679,12 @@ impl QueryService {
     /// Query metrics
     pub async fn query_metrics(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: MetricQueryFilters,
     ) -> Result<PaginatedResponse<MetricDetail>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
@@ -1747,11 +1763,12 @@ impl QueryService {
     /// Query metric time-series (bucketed aggregates)
     pub async fn query_metric_series(
         &self,
-        _workspace_id: WorkspaceId,
+        workspace_id: WorkspaceId,
         filters: MetricSeriesFilters,
     ) -> Result<Vec<MetricSeriesPoint>> {
-        let workspace_id = Uuid::parse_str(&filters.workspace_id)
-            .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied filters (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
