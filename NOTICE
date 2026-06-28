@@ -1,15 +1,5 @@
 zradar
 Copyright 2025 zvectorlabs.com
 
-This project contains code licensed under two different licenses:
-
-1. Apache License, Version 2.0
-   - Applies to all code EXCEPT files in "ee/" directories
-   - See LICENSE file for full terms
-
-2. Enterprise License
-   - Applies to all files in "ee/" directories and subdirectories
-   - See LICENSE-EE file for full terms
-
-Files in "ee/" directories are proprietary and require a separate
-Enterprise License agreement for use.
+This product includes software developed at
+zvectorlabs.com.
