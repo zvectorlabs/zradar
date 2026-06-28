@@ -23,10 +23,34 @@ Traditional APM tools aren't built for non-deterministic LLM chains. Zradar focu
 
 ## 🚀 Quick Start
 
-The fastest way to try zradar is via Docker. Run the server and expose the ingestion (OTLP) and query APIs:
+The fastest way to try zradar is via Docker Compose. Create a `docker-compose.yml` file:
 
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: zradar
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: zradar
+    ports:
+      - "5432:5432"
+
+  zradar:
+    image: ghcr.io/zvectorlabs/zradar:latest
+    environment:
+      DATABASE_URL: postgres://zradar:password@postgres:5432/zradar
+      AUTO_MIGRATE: true
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "8081:8081" # Admin API
+    depends_on:
+      - postgres
+```
+
+Run it with:
 ```bash
-docker run -d -p 4317:4317 -p 8081:8081 --name zradar ghcr.io/zvectorlabs/zradar:latest
+docker-compose up -d
 ```
 
 - **OTLP gRPC Ingestion:** `localhost:4317` (Send your traces, metrics, and logs here)
