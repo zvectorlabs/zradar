@@ -205,10 +205,10 @@ async fn test_span_hierarchy_storage() -> Result<()> {
     Ok(())
 }
 
-/// Test tenant isolation - spans from one project shouldn't be visible to another
+/// Test workspace isolation - spans from one workspace shouldn't be visible to another
 #[tokio::test]
 #[ignore]
-async fn test_telemetry_tenant_isolation() -> Result<()> {
+async fn test_telemetry_workspace_isolation() -> Result<()> {
     let env1 = TestEnv::setup().await?;
     let env2 = TestEnv::setup().await?;
 
@@ -219,14 +219,14 @@ async fn test_telemetry_tenant_isolation() -> Result<()> {
         .send_test_trace("isolated-service", &trace_id, &span_id, "test.isolated")
         .await?;
 
-    println!("✅ Trace sent to project1");
+    println!("✅ Trace sent to workspace1");
 
     let trace_id_hex = hex::encode(trace_id);
 
-    // Poll until project1 can see its trace
+    // Poll until workspace1 can see its trace
     wait_for_trace_default(&env1.client, &trace_id_hex).await?;
 
-    // Project2 must NOT see project1's trace (check immediately after project1 confirms storage)
+    // Project2 must NOT see workspace1's trace (check immediately after workspace1 confirms storage)
     let response2 = env2
         .client
         .get(&format!("/api/v1/traces/{}", trace_id_hex))
@@ -237,7 +237,7 @@ async fn test_telemetry_tenant_isolation() -> Result<()> {
         let spans = data["spans"].as_array();
         assert!(
             spans.is_none() || spans.unwrap().is_empty(),
-            "Project2 should NOT see project1's trace"
+            "Project2 should NOT see workspace1's trace"
         );
     }
 

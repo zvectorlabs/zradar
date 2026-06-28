@@ -8,8 +8,7 @@ use utoipa::ToSchema;
 pub struct EvaluationScore {
     // Identity
     pub id: String,
-    pub tenant_id: String,
-    pub project_id: String,
+    pub workspace_id: String,
 
     // Timing in nanoseconds
     pub timestamp: i64,
@@ -143,8 +142,7 @@ impl Default for EvaluationScore {
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            tenant_id: String::new(),
-            project_id: String::new(),
+            workspace_id: String::new(),
             timestamp: now,
             created_at: now,
             updated_at: now,
@@ -268,8 +266,7 @@ mod tests {
     fn test_evaluation_score_serialization() {
         let score = EvaluationScore {
             id: "eval_123".to_string(),
-            tenant_id: "tenant_1".to_string(),
-            project_id: "proj_1".to_string(),
+            workspace_id: "workspace_1".to_string(),
             trace_id: "trace_abc".to_string(),
             name: "accuracy".to_string(),
             value: 0.95,

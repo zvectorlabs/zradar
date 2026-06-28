@@ -133,6 +133,11 @@ test:
     @echo "🧪 Running unit tests..."
     cargo test
 
+# Run benchmarks
+bench args="":
+    @echo "🚀 Running benchmarks..."
+    cargo bench {{args}}
+
 # Run unit tests + functional tests (fresh Docker environment)
 test-all: test functional-tests
     @echo "✅ All tests passed"
@@ -279,7 +284,7 @@ fmt:
 
 # Check code
 check:
-    cargo check
+    cargo check --all-targets
 
 # Lint code
 lint:

@@ -186,10 +186,10 @@ async fn test_metric_series_query() -> Result<()> {
     Ok(())
 }
 
-/// Metrics from different projects are isolated (tenant isolation)
+/// Metrics from different workspaces are isolated (workspace isolation)
 #[tokio::test]
 #[ignore]
-async fn test_metrics_tenant_isolation() -> Result<()> {
+async fn test_metrics_workspace_isolation() -> Result<()> {
     // Provision two independent environments
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
@@ -199,7 +199,7 @@ async fn test_metrics_tenant_isolation() -> Result<()> {
         .build_gauge_metric("svc", "isolated.metric", 99.0);
     env_a.otlp.export_metrics(request).await?;
 
-    // Wait for project A's metric to land
+    // Wait for workspace A's metric to land
     let url_a = "/api/v1/metrics?metric_name=isolated.metric";
     wait_for_items_default(&env_a.client, url_a).await?;
 
@@ -214,7 +214,7 @@ async fn test_metrics_tenant_isolation() -> Result<()> {
         "Project B must not see Project A's metrics"
     );
 
-    println!("✅ Metrics tenant isolation verified");
+    println!("✅ Metrics workspace isolation verified");
     Ok(())
 }
 

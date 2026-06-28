@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Policy enforcement and usage tracking primitives for zradar"
 
 [dependencies]
+zradar-models = { path = "../zradar-models" }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 dashmap = { workspace = true }

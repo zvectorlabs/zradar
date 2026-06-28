@@ -4,8 +4,7 @@ use zradar_models::{AuditLog, NewAuditLog};
 
 #[derive(Debug, Clone, Default)]
 pub struct AuditLogFilters {
-    pub org_id: Option<Uuid>,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub action: Option<String>,
     pub resource_type: Option<String>,
     pub resource_id: Option<String>,

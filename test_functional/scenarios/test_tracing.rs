@@ -152,20 +152,21 @@ async fn test_trace_with_invalid_api_key_rejected() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_trace_for_blocked_project_rejected() -> Result<()> {
+async fn test_trace_for_blocked_workspace_rejected() -> Result<()> {
     let mut env = TestEnv::setup().await?;
-    let blocked_project_id = Uuid::new_v4();
+    let blocked_workspace_id = Uuid::new_v4();
 
-    env.client.set_project_id(blocked_project_id.to_string());
+    env.client
+        .set_workspace_id(blocked_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(blocked_project_id.to_string());
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(blocked_workspace_id.to_string());
 
     let settings_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{}/settings", blocked_project_id),
+            &format!("/api/v1/workspaces/{}/settings", blocked_workspace_id),
             &serde_json::json!({
                 "traces_retention_days": 90,
                 "metrics_retention_days": 30,
@@ -183,36 +184,36 @@ async fn test_trace_for_blocked_project_rejected() -> Result<()> {
     let result = env
         .otlp
         .send_test_trace(
-            "blocked-project-service",
+            "blocked-workspace-service",
             &trace_id,
             &span_id,
             "test.operation",
         )
         .await;
 
-    assert!(result.is_err(), "Should reject trace for blocked project");
+    assert!(result.is_err(), "Should reject trace for blocked workspace");
 
-    println!("✅ Trace for blocked project rejected");
+    println!("✅ Trace for blocked workspace rejected");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_trace_project_ingestion_rate_limited() -> Result<()> {
+async fn test_trace_workspace_ingestion_rate_limited() -> Result<()> {
     let mut env = TestEnv::setup().await?;
-    let rate_limited_project_id = Uuid::new_v4();
+    let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
-        .set_project_id(rate_limited_project_id.to_string());
+        .set_workspace_id(rate_limited_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(rate_limited_project_id.to_string());
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(rate_limited_workspace_id.to_string());
 
     let settings_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &format!("/api/v1/workspaces/{}/settings", rate_limited_workspace_id),
             &serde_json::json!({
                 "traces_retention_days": 90,
                 "metrics_retention_days": 30,
@@ -245,27 +246,27 @@ async fn test_trace_project_ingestion_rate_limited() -> Result<()> {
         "Should reject trace request over max_ingestion_rate"
     );
 
-    println!("✅ Trace over project ingestion rate rejected");
+    println!("✅ Trace over workspace ingestion rate rejected");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_metrics_project_ingestion_rate_limited() -> Result<()> {
+async fn test_metrics_workspace_ingestion_rate_limited() -> Result<()> {
     let mut env = TestEnv::setup().await?;
-    let rate_limited_project_id = Uuid::new_v4();
+    let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
-        .set_project_id(rate_limited_project_id.to_string());
+        .set_workspace_id(rate_limited_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(rate_limited_project_id.to_string());
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(rate_limited_workspace_id.to_string());
 
     let settings_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &format!("/api/v1/workspaces/{}/settings", rate_limited_workspace_id),
             &serde_json::json!({
                 "traces_retention_days": 90,
                 "metrics_retention_days": 30,
@@ -288,27 +289,27 @@ async fn test_metrics_project_ingestion_rate_limited() -> Result<()> {
         "Should reject metrics request over max_ingestion_rate"
     );
 
-    println!("✅ Metrics over project ingestion rate rejected");
+    println!("✅ Metrics over workspace ingestion rate rejected");
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_logs_project_ingestion_rate_limited() -> Result<()> {
+async fn test_logs_workspace_ingestion_rate_limited() -> Result<()> {
     let mut env = TestEnv::setup().await?;
-    let rate_limited_project_id = Uuid::new_v4();
+    let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
-        .set_project_id(rate_limited_project_id.to_string());
+        .set_workspace_id(rate_limited_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(rate_limited_project_id.to_string());
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(rate_limited_workspace_id.to_string());
 
     let settings_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{}/settings", rate_limited_project_id),
+            &format!("/api/v1/workspaces/{}/settings", rate_limited_workspace_id),
             &serde_json::json!({
                 "traces_retention_days": 90,
                 "metrics_retention_days": 30,
@@ -331,7 +332,7 @@ async fn test_logs_project_ingestion_rate_limited() -> Result<()> {
         "Should reject logs request over max_ingestion_rate"
     );
 
-    println!("✅ Logs over project ingestion rate rejected");
+    println!("✅ Logs over workspace ingestion rate rejected");
     Ok(())
 }
 
@@ -460,9 +461,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
-    let tenant_id = env.tenant_id;
-    let project_id = env.project_id;
-
+    let workspace_id = env.workspace_id;
     let mut handles = vec![];
     let mut trace_ids = vec![];
 
@@ -470,8 +469,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
         let key = api_key.clone();
         let url = grpc_url.clone();
         let svc = service_name.clone();
-        let tid_ctx = tenant_id;
-        let pid = project_id;
+        let tid_ctx = workspace_id;
         let trace_id = TestDataGenerator::trace_id();
         trace_ids.push(trace_id);
         let tid = trace_id;
@@ -479,8 +477,7 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
         let handle = tokio::spawn(async move {
             let otlp_client = OtlpClient::new(url)
                 .with_api_key(key)
-                .with_tenant_id(tid_ctx.to_string())
-                .with_project_id(pid.to_string());
+                .with_workspace_id(tid_ctx.to_string());
             let span_id = TestDataGenerator::span_id();
             let span_name = format!("concurrent.{}", i);
             otlp_client

@@ -137,7 +137,7 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
 /// AC4.1 negative-path: a span with no links surfaces an empty array — not
 /// AC4.1 neg / PR8 follow-up: a span with no links must surface as `null` on
 /// the wire (matching the `model_parameters` precedent), NOT as the literal
-/// empty array. The storage column stays non-null `"[]"`; the projection
+/// empty array. The storage column stays non-null `"[]"`; the workspaceion
 /// layer (`parse_json_array`) maps the default to `None` so consumers can
 /// treat "no data" uniformly across links / events / model_parameters.
 #[tokio::test]
@@ -407,7 +407,7 @@ async fn test_ac4_3_llm_cache_hit_absent_returns_null() -> Result<()> {
 
 /// AC4.3 explicit-miss: `llm.cache.hit=false` must surface as `false`
 /// (NOT null) so cache-hit-rate analytics can count explicit misses. This is
-/// the case the old non-zero projection collapsed into null.
+/// the case the old non-zero workspaceion collapsed into null.
 #[tokio::test]
 #[ignore]
 async fn test_ac4_3_llm_cache_hit_false_populates_field() -> Result<()> {
@@ -632,13 +632,13 @@ async fn test_ac4_6_environment_filter_returns_only_matching() -> Result<()> {
     wait_for_trace_default(&env.client, &hex::encode(prod_trace)).await?;
     wait_for_trace_default(&env.client, &hex::encode(staging_trace)).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
 
     // Positive: ?environment=production must return ≥ 1 row and never any staging row.
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&environment=production"
+            "/api/v1/spans?workspace_id={workspace_id}&environment=production"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -659,7 +659,7 @@ async fn test_ac4_6_environment_filter_returns_only_matching() -> Result<()> {
     let resp_none = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&environment=does_not_exist_zzz"
+            "/api/v1/spans?workspace_id={workspace_id}&environment=does_not_exist_zzz"
         ))
         .await?;
     let data_none: serde_json::Value = resp_none.json().await?;

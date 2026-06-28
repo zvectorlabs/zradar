@@ -108,8 +108,7 @@ pub fn render_collector_config(
     dcgm_addr: &str,
     zradar_otlp_http_url: &str,
     api_key: &str,
-    tenant_id: &str,
-    project_id: &str,
+    workspace_id: &str,
 ) -> String {
     format!(
         r#"# Rendered at test time — not for production use.
@@ -141,8 +140,7 @@ exporters:
       insecure: true
     headers:
       authorization: "Bearer {api_key}"
-      x-tenant-id: "{tenant}"
-      x-project-id: "{project}"
+      x-workspace-id: "{workspace}"
 
 service:
   pipelines:
@@ -158,8 +156,7 @@ service:
         dcgm = dcgm_addr,
         zradar = zradar_otlp_http_url,
         api_key = api_key,
-        tenant = tenant_id,
-        project = project_id,
+        workspace = workspace_id,
     )
 }
 
@@ -253,8 +250,7 @@ mod tests {
             "dcgm.mock:9400",
             "http://zradar:4318",
             "test-api-key",
-            "tenant-1",
-            "project-1",
+            "workspace-1",
         );
 
         // Receivers
@@ -275,7 +271,7 @@ mod tests {
             "pipeline must reference batch processor"
         );
 
-        // Exporter target + auth + tenant context
+        // Exporter target + auth + workspace context
         assert!(
             yaml.contains("http://zradar:4318"),
             "zradar OTLP HTTP endpoint not templated in"
@@ -285,12 +281,12 @@ mod tests {
             "Bearer auth header not formed correctly"
         );
         assert!(
-            yaml.contains("x-tenant-id: \"tenant-1\""),
-            "tenant header missing"
+            yaml.contains("x-workspace-id: \"workspace-1\""),
+            "workspace header missing"
         );
         assert!(
-            yaml.contains("x-project-id: \"project-1\""),
-            "project header missing"
+            yaml.contains("x-workspace-id: \"workspace-1\""),
+            "workspace header missing"
         );
 
         // Pipeline service block
@@ -301,7 +297,7 @@ mod tests {
     #[test]
     fn rendered_config_uses_distinct_scrape_jobs() {
         // Both jobs must be present and distinguishable by job_name.
-        let yaml = render_collector_config("n:1", "d:2", "http://z:4318", "k", "t", "p");
+        let yaml = render_collector_config("n:1", "d:2", "http://z:4318", "k", "t");
         assert!(yaml.contains("job_name: nim-llm"));
         assert!(yaml.contains("job_name: dcgm"));
     }

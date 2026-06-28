@@ -1,18 +1,18 @@
-//! FileReclaimer — the single lease-aware physical-deletion chokepoint.
-//!
-//! Every path that retires a Parquet file (`CleanupJob` for retention expiry,
-//! `Compactor` for merged originals) only *soft-deletes* it (`deleted=true` in
-//! `file_list`). This job is the **only** component that:
-//!
-//! 1. Lists `deleted=true` rows,
-//! 2. Skips any file with an active read lease,
-//! 3. Removes the bytes from local disk or S3,
-//! 4. Atomically records storage-usage deltas and hard-deletes the metadata row.
-//!
-//! Centralizing physical removal here eliminates the delete-while-reading race
-//! that existed when `CleanupJob` unlinked files without consulting the lease
-//! registry, and it reclaims compactor orphans that were previously never
-//! unlinked.
+// FileReclaimer — the single lease-aware physical-deletion chokepoint.
+//
+// Every path that retires a Parquet file (`CleanupJob` for retention expiry,
+// `Compactor` for merged originals) only *soft-deletes* it (`deleted=true` in
+// `file_list`). This job is the **only** component that:
+//
+// 1. Lists `deleted=true` rows,
+// 2. Skips any file with an active read lease,
+// 3. Removes the bytes from local disk or S3,
+// 4. Atomically records storage-usage deltas and hard-deletes the metadata row.
+//
+// Centralizing physical removal here eliminates the delete-while-reading race
+// that existed when `CleanupJob` unlinked files without consulting the lease
+// registry, and it reclaims compactor orphans that were previously never
+// unlinked.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -89,14 +89,13 @@ impl FileReclaimer {
 
     /// Execute one reclaim cycle for all tenants/projects.
     pub async fn run_now(&self) -> anyhow::Result<ReclaimStats> {
-        self.run_now_scoped(None, None).await
+        self.run_now_scoped(None).await
     }
 
     /// Execute one reclaim cycle for an optional tenant/project scope.
     pub async fn run_now_scoped(
         &self,
-        tenant_id: Option<uuid::Uuid>,
-        project_id: Option<uuid::Uuid>,
+        workspace_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<ReclaimStats> {
         let started = Instant::now();
         let mut stats = ReclaimStats::default();
@@ -104,8 +103,7 @@ impl FileReclaimer {
         let deleted_files = self
             .file_list_repo
             .query_files(FileListFilter {
-                tenant_id,
-                project_id,
+                workspace_id,
                 deleted: Some(true),
                 ..FileListFilter::default()
             })
@@ -121,18 +119,18 @@ impl FileReclaimer {
         );
 
         let reclaim_day = chrono::Utc::now().date_naive();
-        let mut by_project: HashMap<(uuid::Uuid, uuid::Uuid), Vec<_>> = HashMap::new();
+        let mut by_project: HashMap<uuid::Uuid, Vec<_>> = HashMap::new();
         for file in deleted_files {
             by_project
-                .entry((file.tenant_id, file.project_id))
+                .entry(file.workspace_id.into())
                 .or_default()
                 .push(file);
         }
 
-        for ((tenant_id, project_id), files) in &by_project {
+        for (workspace_id, files) in &by_project {
             let mut ids_to_delete: Vec<i64> = Vec::new();
             let mut cleanup_deltas: HashMap<
-                (uuid::Uuid, uuid::Uuid, String, chrono::NaiveDate),
+                (uuid::Uuid, String, chrono::NaiveDate),
                 StorageUsageDelta,
             > = HashMap::new();
 
@@ -161,17 +159,11 @@ impl FileReclaimer {
                 stats.files_reclaimed += 1;
                 ids_to_delete.push(file.id);
 
-                let key = (
-                    file.tenant_id,
-                    file.project_id,
-                    file.signal_type.clone(),
-                    reclaim_day,
-                );
+                let key = (file.workspace_id, file.signal_type.clone(), reclaim_day);
                 let delta = cleanup_deltas
-                    .entry(key)
+                    .entry((key.0.into(), key.1.clone(), key.2))
                     .or_insert_with(|| StorageUsageDelta {
-                        tenant_id: file.tenant_id,
-                        project_id: file.project_id,
+                        workspace_id: file.workspace_id,
                         signal_kind: file.signal_type.clone(),
                         day: reclaim_day,
                         compressed_bytes: 0,
@@ -191,9 +183,8 @@ impl FileReclaimer {
                     .record_cleanup_and_delete(&deltas, &ids_to_delete)
                     .await
                 {
-                    let msg = format!(
-                        "atomic reclaim commit failed for project {tenant_id}/{project_id}: {e}"
-                    );
+                    let msg =
+                        format!("atomic reclaim commit failed for workspace {workspace_id}: {e}");
                     error!("{}", msg);
                     stats.errors.push(msg);
                     continue;
@@ -300,15 +291,20 @@ fn extract_s3_key(s3_url: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use std::sync::Mutex;
-    use uuid::Uuid;
+
     use zradar_models::{FileListEntry, NewFileListEntry, StreamStats, StreamStatsUpdate};
 
+    #[allow(dead_code)]
     struct MockBlockStorage {
         deleted: Mutex<Vec<String>>,
     }
 
+    #[allow(dead_code)]
     impl MockBlockStorage {
         fn new() -> Self {
             Self {
@@ -365,7 +361,10 @@ mod tests {
             self.deleted_ids.lock().unwrap().extend_from_slice(ids);
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -378,8 +377,7 @@ mod tests {
         std::fs::write(&path, b"parquet").unwrap();
         FileListEntry {
             id,
-            tenant_id: Uuid::nil(),
-            project_id: Uuid::nil(),
+            workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
             signal_type: "traces".to_string(),
             stream_name: "default".to_string(),
             date: "2026/06/26/00".to_string(),

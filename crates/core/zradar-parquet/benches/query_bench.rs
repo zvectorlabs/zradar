@@ -24,7 +24,6 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use parquet::arrow::ArrowWriter;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
-use uuid::Uuid;
 
 use zradar_models::{
     FileListEntry, FileListFilter, NewFileListEntry, Span, StreamStats, StreamStatsUpdate,
@@ -34,8 +33,6 @@ use zradar_parquet::{
 };
 use zradar_traits::{FileListRepository, Pagination, TelemetryReader, TraceQueryFilters};
 
-const TENANT_ID: Uuid = Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111);
-const PROJECT_ID: Uuid = Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
 const ROWS_PER_FILE: usize = 1_000;
 
 /// In-memory file_list backing the bench. Returns the canned list verbatim;
@@ -67,7 +64,10 @@ impl FileListRepository for InMemoryFileList {
     async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
         Ok(())
     }
-    async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+    async fn get_stream_stats(
+        &self,
+        _: zradar_models::WorkspaceId,
+    ) -> anyhow::Result<Vec<StreamStats>> {
         Ok(vec![])
     }
     async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -93,8 +93,7 @@ fn synth_spans(file_index: usize, rows_per_file: usize) -> Vec<Span> {
             parent_span_id: String::new(),
             timestamp: base_ts + (i as i64 * 1_000),
             duration_ns: 1_000_000,
-            tenant_id: TENANT_ID.to_string(),
-            project_id: PROJECT_ID.to_string(),
+            workspace_id: uuid::Uuid::nil().to_string(),
             service_name: "bench-svc".to_string(),
             span_name: "bench.op".to_string(),
             span_type: "LLM".to_string(),
@@ -121,8 +120,7 @@ fn write_parquet_file(dir: &std::path::Path, file_index: usize, spans: &[Span]) 
 
     FileListEntry {
         id: file_index as i64,
-        tenant_id: TENANT_ID,
-        project_id: PROJECT_ID,
+        workspace_id: uuid::Uuid::nil().into(),
         signal_type: "traces".to_string(),
         stream_name: "default".to_string(),
         date: "2026/06/26/00".to_string(),
@@ -179,8 +177,7 @@ fn bench_query_traces(c: &mut Criterion) {
             |b, _| {
                 b.to_async(&rt).iter(|| async {
                     let filters = TraceQueryFilters {
-                        tenant_id: Some(TENANT_ID),
-                        project_id: Some(PROJECT_ID),
+                        workspace_id: Some(uuid::Uuid::nil()),
                         pagination: Pagination {
                             limit: Some(50),
                             offset: Some(0),

@@ -3,7 +3,7 @@
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
 use crate::converter::OtlpConverter;
-use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings_and_get};
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings_and_get};
 use crate::parser_caps::validate_trace_request;
 use crate::rate_limiter::ProjectRateLimiter;
 use opentelemetry_proto::tonic::collector::trace::v1::{
@@ -128,7 +128,7 @@ impl TraceService for OtlpTraceService {
             )
             .await?;
         }
-        let settings = enforce_project_settings_and_get(
+        let settings = enforce_workspace_settings_and_get(
             &self.settings_repo,
             &self.rate_limiter,
             &context,
@@ -141,8 +141,7 @@ impl TraceService for OtlpTraceService {
             .unwrap_or(true);
 
         tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
+            workspace_id = %context.workspace_id,
             resource_spans = req.resource_spans.len(),
             "Received trace export request"
         );
@@ -163,8 +162,7 @@ impl TraceService for OtlpTraceService {
                 .map_err(|e| Status::internal(format!("Failed to insert spans: {}", e)))?;
 
             tracing::info!(
-                tenant_id = %context.tenant_id,
-                project_id = %context.project_id,
+                workspace_id = %context.workspace_id,
                 spans = all_spans.len(),
                 "Persisted spans"
             );

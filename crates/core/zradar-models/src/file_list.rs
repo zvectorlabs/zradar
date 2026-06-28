@@ -3,6 +3,7 @@
 //! These models track every Parquet file written to local disk or S3, and
 //! maintain per-stream aggregate statistics for fast overview queries.
 
+use crate::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -11,10 +12,8 @@ use uuid::Uuid;
 pub struct FileListEntry {
     /// Auto-increment primary key.
     pub id: i64,
-    /// Organization/team identifier.
-    pub tenant_id: Uuid,
-    /// Project identifier.
-    pub project_id: Uuid,
+    /// Workspace identifier.
+    pub workspace_id: WorkspaceId,
     /// Signal type: "traces", "metrics", or "logs".
     pub signal_type: String,
     /// Stream name (derived from service_name for traces).
@@ -46,8 +45,7 @@ pub struct FileListEntry {
 /// Input for registering a new Parquet file (id is auto-generated).
 #[derive(Debug, Clone)]
 pub struct NewFileListEntry {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_type: String,
     pub stream_name: String,
     /// Date partition: "YYYY/MM/DD/HH"
@@ -71,8 +69,7 @@ pub struct NewFileListEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct StreamStats {
     pub id: i64,
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_type: String,
     pub stream_name: String,
     pub file_count: i64,
@@ -89,8 +86,7 @@ pub struct StreamStats {
 /// Input for upserting stream stats after writing a new Parquet file.
 #[derive(Debug, Clone)]
 pub struct StreamStatsUpdate {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_type: String,
     pub stream_name: String,
     /// Minimum timestamp of the newly written file (microseconds).
@@ -105,8 +101,7 @@ pub struct StreamStatsUpdate {
 /// Filter for querying the file list.
 #[derive(Debug, Clone, Default)]
 pub struct FileListFilter {
-    pub tenant_id: Option<Uuid>,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     /// Signal type: "traces", "metrics", or "logs".
     pub signal_type: Option<String>,
     pub stream_name: Option<String>,
@@ -127,8 +122,7 @@ mod tests {
     #[test]
     fn test_file_list_filter_default() {
         let f = FileListFilter::default();
-        assert!(f.tenant_id.is_none());
-        assert!(f.project_id.is_none());
+        assert!(f.workspace_id.is_none());
         assert!(f.signal_type.is_none());
         assert!(f.deleted.is_none());
     }
@@ -136,8 +130,7 @@ mod tests {
     #[test]
     fn test_stream_stats_update_fields() {
         let u = StreamStatsUpdate {
-            tenant_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             signal_type: "traces".to_string(),
             stream_name: "my-service".to_string(),
             min_ts: 1_000_000,

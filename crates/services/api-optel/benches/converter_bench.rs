@@ -64,8 +64,7 @@ fn kv_bool(k: &str, v: bool) -> KeyValue {
 
 fn bench_context() -> RequestContext {
     RequestContext {
-        tenant_id: "11111111-1111-1111-1111-111111111111".to_string(),
-        project_id: "22222222-2222-2222-2222-222222222222".to_string(),
+        workspace_id: uuid::Uuid::nil().into(),
     }
 }
 

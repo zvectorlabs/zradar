@@ -2,7 +2,7 @@
 
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
-use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings};
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings};
 use crate::metrics_converter::OtlpMetricsConverter;
 use crate::parser_caps::validate_metrics_request;
 use crate::rate_limiter::ProjectRateLimiter;
@@ -115,8 +115,7 @@ impl MetricsService for OtlpMetricsService {
         validate_metrics_request(&req).map_err(|e| e.into_status())?;
 
         tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
+            workspace_id = %context.workspace_id,
             resource_metrics = req.resource_metrics.len(),
             "Received metrics export request"
         );
@@ -132,7 +131,7 @@ impl MetricsService for OtlpMetricsService {
             )
             .await?;
         }
-        enforce_project_settings(
+        enforce_workspace_settings(
             &self.settings_repo,
             &self.rate_limiter,
             &context,
@@ -147,8 +146,7 @@ impl MetricsService for OtlpMetricsService {
                 .map_err(|e| Status::internal(format!("Failed to insert metrics: {}", e)))?;
 
             tracing::info!(
-                tenant_id = %context.tenant_id,
-                project_id = %context.project_id,
+                workspace_id = %context.workspace_id,
                 metrics = metrics.len(),
                 "Persisted metrics"
             );

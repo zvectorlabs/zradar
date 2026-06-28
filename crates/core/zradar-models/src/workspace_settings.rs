@@ -1,10 +1,10 @@
+use crate::WorkspaceId;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct ProjectSettings {
+pub struct WorkspaceSettings {
     pub id: i64,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub traces_retention_days: i32,
     pub metrics_retention_days: i32,
     pub logs_retention_days: i32,
@@ -18,8 +18,8 @@ pub struct ProjectSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewProjectSettings {
-    pub project_id: Uuid,
+pub struct NewWorkspaceSettings {
+    pub workspace_id: WorkspaceId,
     pub traces_retention_days: i32,
     pub metrics_retention_days: i32,
     pub logs_retention_days: i32,
@@ -29,10 +29,10 @@ pub struct NewProjectSettings {
     pub capture_llm_content_enabled: bool,
 }
 
-impl NewProjectSettings {
-    pub fn defaults_for(project_id: Uuid) -> Self {
+impl NewWorkspaceSettings {
+    pub fn defaults_for(workspace_id: WorkspaceId) -> Self {
         Self {
-            project_id,
+            workspace_id,
             traces_retention_days: 90,
             metrics_retention_days: 30,
             logs_retention_days: 30,

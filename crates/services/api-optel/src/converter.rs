@@ -12,6 +12,7 @@
 use anyhow::Result;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span as OtlpSpan};
 use std::sync::Arc;
+use zradar_models::WorkspaceId;
 use zradar_models::{RequestContext, Span};
 use zradar_traits::{ContentCapturePolicy, NoopContentCapturePolicy};
 
@@ -35,7 +36,7 @@ pub struct OtlpConverter {
 struct FixedContentCapturePolicy(bool);
 
 impl ContentCapturePolicy for FixedContentCapturePolicy {
-    fn capture_enabled(&self, _project_id: uuid::Uuid) -> bool {
+    fn capture_enabled(&self, _workspace_id: WorkspaceId) -> bool {
         self.0
     }
 }
@@ -159,8 +160,7 @@ impl OtlpConverter {
             parent_span_id,
             timestamp,
             duration_ns,
-            tenant_id: context.tenant_id.clone(),
-            project_id: context.project_id.clone(),
+            workspace_id: context.workspace_id.to_string(),
             service_name: service_name.to_string(),
             span_name: otlp_span.name.clone(),
             environment: environment.to_string(),
@@ -248,8 +248,10 @@ impl OtlpConverter {
 
         // Apply content capture policy: when disabled, strip all prompt/completion
         // content from every storage location so it cannot leak via any column.
-        if let Ok(project_id) = span_data.project_id.parse::<uuid::Uuid>()
-            && !self.content_capture_policy.capture_enabled(project_id)
+        if let Ok(workspace_id) = span_data.workspace_id.parse::<uuid::Uuid>()
+            && !self
+                .content_capture_policy
+                .capture_enabled(workspace_id.into())
         {
             // Clear first-class columns.
             span_data.llm_input = String::new();
@@ -344,7 +346,7 @@ mod tests {
 
     struct AlwaysDisableCapture;
     impl ContentCapturePolicy for AlwaysDisableCapture {
-        fn capture_enabled(&self, _project_id: Uuid) -> bool {
+        fn capture_enabled(&self, _workspace_id: WorkspaceId) -> bool {
             false
         }
     }
@@ -352,7 +354,7 @@ mod tests {
     #[test]
     fn test_content_capture_disabled_clears_llm_fields() {
         let mut span = Span {
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             llm_input: "secret prompt".to_string(),
             llm_output: "secret completion".to_string(),
             attributes: r#"{"gen_ai.content.prompt":"secret","other":"keep"}"#.to_string(),
@@ -364,8 +366,10 @@ mod tests {
             OtlpConverter::new().with_content_capture_policy(Arc::new(AlwaysDisableCapture));
 
         // Simulate the content-capture block from convert_span.
-        if let Ok(project_id) = span.project_id.parse::<Uuid>()
-            && !converter.content_capture_policy.capture_enabled(project_id)
+        if let Ok(workspace_id) = span.workspace_id.parse::<Uuid>()
+            && !converter
+                .content_capture_policy
+                .capture_enabled(workspace_id.into())
         {
             span.llm_input = String::new();
             span.llm_output = String::new();
@@ -468,8 +472,7 @@ mod tests {
 
     fn ctx() -> RequestContext {
         RequestContext {
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new(),
         }
     }
 

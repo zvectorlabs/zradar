@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use zradar_models::WorkspaceId;
 
 use async_trait::async_trait;
 
@@ -48,8 +49,7 @@ impl DefaultPolicyEnforcer {
         let _ = self
             .decision_audit_sink
             .record(DecisionAuditEvent {
-                tenant_id: ctx.tenant_id,
-                project_id: ctx.project_id,
+                workspace_id: ctx.workspace_id,
                 signal: ctx.signal,
                 operation: ctx.operation,
                 decision: DecisionSummary::from(decision),
@@ -66,9 +66,9 @@ impl DefaultPolicyEnforcer {
 #[async_trait]
 impl PolicyEnforcer for DefaultPolicyEnforcer {
     async fn check_ingest(&self, ctx: IngestCtx) -> Decision {
-        let resolved =
-            self.store
-                .resolve(ctx.tenant_id, ctx.project_id, ctx.signal, Operation::Ingest);
+        let resolved = self
+            .store
+            .resolve(ctx.workspace_id, ctx.signal, Operation::Ingest);
 
         if resolved.blocked {
             let decision = Decision::Block {
@@ -142,9 +142,9 @@ impl PolicyEnforcer for DefaultPolicyEnforcer {
     }
 
     async fn check_query(&self, ctx: QueryCtx) -> Decision {
-        let resolved =
-            self.store
-                .resolve(ctx.tenant_id, ctx.project_id, ctx.signal, Operation::Query);
+        let resolved = self
+            .store
+            .resolve(ctx.workspace_id, ctx.signal, Operation::Query);
 
         if let Some(decision) = check_query_range(&ctx, &resolved.retention, &resolved.query_window)
         {
@@ -207,7 +207,7 @@ async fn check_rate(
     };
 
     let sample = usage
-        .current_rate(ctx.tenant_id, ctx.project_id, ctx.signal, operation)
+        .current_rate(ctx.workspace_id, ctx.signal, operation)
         .await
         .ok()?;
 
@@ -285,8 +285,7 @@ async fn check_quota(
 
     let used = usage
         .period_used_bytes(
-            ctx.tenant_id,
-            ctx.project_id,
+            ctx.workspace_id,
             ctx.signal,
             operation,
             *period_start,
@@ -332,7 +331,7 @@ async fn check_size(
     }
 
     let stored = usage
-        .stored_compressed_bytes(ctx.tenant_id, ctx.project_id, ctx.signal)
+        .stored_compressed_bytes(ctx.workspace_id, ctx.signal)
         .await
         .ok()?;
     emit_thresholds(
@@ -404,7 +403,7 @@ async fn check_query_rate(
     let limit = (*bytes_per_sec)?;
 
     let sample = usage
-        .current_rate(ctx.tenant_id, ctx.project_id, ctx.signal, Operation::Query)
+        .current_rate(ctx.workspace_id, ctx.signal, Operation::Query)
         .await
         .ok()?;
     let observed = sample
@@ -454,8 +453,7 @@ async fn check_query_quota(
 
     let used = usage
         .period_used_bytes(
-            ctx.tenant_id,
-            ctx.project_id,
+            ctx.workspace_id,
             ctx.signal,
             Operation::Query,
             *period_start,
@@ -539,8 +537,7 @@ fn compare_limit_i64(
 }
 
 struct AuditContext {
-    tenant_id: uuid::Uuid,
-    project_id: uuid::Uuid,
+    workspace_id: WorkspaceId,
     signal: crate::types::SignalKind,
     operation: Operation,
     created_at: i64,
@@ -549,8 +546,7 @@ struct AuditContext {
 impl AuditContext {
     fn from_ingest(ctx: &IngestCtx, operation: Operation) -> Self {
         Self {
-            tenant_id: ctx.tenant_id,
-            project_id: ctx.project_id,
+            workspace_id: ctx.workspace_id,
             signal: ctx.signal,
             operation,
             created_at: ctx.now_micros,
@@ -559,8 +555,7 @@ impl AuditContext {
 
     fn from_query(ctx: &QueryCtx, operation: Operation) -> Self {
         Self {
-            tenant_id: ctx.tenant_id,
-            project_id: ctx.project_id,
+            workspace_id: ctx.workspace_id,
             signal: ctx.signal,
             operation,
             created_at: ctx.now_micros,
@@ -585,8 +580,7 @@ fn decision_block_code(decision: &Decision) -> Option<BlockCode> {
 }
 
 struct ThresholdContext<'a> {
-    tenant_id: uuid::Uuid,
-    project_id: uuid::Uuid,
+    workspace_id: WorkspaceId,
     signal: crate::types::SignalKind,
     operation: Operation,
     limit_kind: &'a str,
@@ -596,8 +590,7 @@ struct ThresholdContext<'a> {
 impl<'a> ThresholdContext<'a> {
     fn from_ingest(ctx: &IngestCtx, operation: Operation, limit_kind: &'a str) -> Self {
         Self {
-            tenant_id: ctx.tenant_id,
-            project_id: ctx.project_id,
+            workspace_id: ctx.workspace_id,
             signal: ctx.signal,
             operation,
             limit_kind,
@@ -607,8 +600,7 @@ impl<'a> ThresholdContext<'a> {
 
     fn from_query(ctx: &QueryCtx, operation: Operation, limit_kind: &'a str) -> Self {
         Self {
-            tenant_id: ctx.tenant_id,
-            project_id: ctx.project_id,
+            workspace_id: ctx.workspace_id,
             signal: ctx.signal,
             operation,
             limit_kind,
@@ -637,8 +629,7 @@ async fn emit_thresholds(
         if observed.saturating_mul(100) >= limit.saturating_mul(i64::from(threshold_pct)) {
             let _ = threshold_sink
                 .emit(ThresholdEvent {
-                    tenant_id: ctx.tenant_id,
-                    project_id: ctx.project_id,
+                    workspace_id: ctx.workspace_id,
                     signal: ctx.signal,
                     operation: ctx.operation,
                     limit_kind: ctx.limit_kind.to_string(),
@@ -696,14 +687,13 @@ mod tests {
             Ok(())
         }
 
-        async fn list(&self, _tenant_id: uuid::Uuid) -> Result<Vec<Policy>, PolicyError> {
+        async fn list(&self, _workspace_id: WorkspaceId) -> Result<Vec<Policy>, PolicyError> {
             Ok(Vec::new())
         }
 
         fn resolve(
             &self,
-            _tenant_id: uuid::Uuid,
-            _project_id: uuid::Uuid,
+            _workspace_id: WorkspaceId,
             _signal: SignalKind,
             operation: Operation,
         ) -> ResolvedPolicy {
@@ -781,8 +771,7 @@ mod tests {
     #[test]
     fn huge_day_limits_do_not_overflow_query_range_math() {
         let ctx = QueryCtx {
-            tenant_id: uuid::Uuid::new_v4(),
-            project_id: uuid::Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             signal: SignalKind::Traces,
             start_micros: Some(i64::MIN),
             end_micros: Some(i64::MAX),
@@ -813,8 +802,7 @@ mod tests {
         let enforcer = DefaultPolicyEnforcer::new(store, usage, threshold_sink);
         let decision = enforcer
             .check_ingest(IngestCtx {
-                tenant_id: uuid::Uuid::new_v4(),
-                project_id: uuid::Uuid::new_v4(),
+                workspace_id: WorkspaceId::new(),
                 signal: SignalKind::Logs,
                 records: 1,
                 estimated_bytes: None,
@@ -826,8 +814,7 @@ mod tests {
 
     #[tokio::test]
     async fn recorded_query_usage_drives_scanned_byte_quota_block() {
-        let tenant_id = uuid::Uuid::new_v4();
-        let project_id = uuid::Uuid::new_v4();
+        let workspace_id = uuid::Uuid::new_v4();
         let compressed_size = 1_000_i64;
         let quota_limit = compressed_size.saturating_mul(3) / 2;
         let usage = Arc::new(InMemoryUsageTracker::new());
@@ -842,8 +829,7 @@ mod tests {
 
         let first_decision = enforcer
             .check_query(QueryCtx {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal: SignalKind::Traces,
                 start_micros: Some(0),
                 end_micros: Some(1_000_000),
@@ -855,8 +841,7 @@ mod tests {
 
         usage
             .record_query(QuerySample {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal: SignalKind::Traces,
                 bytes_scanned: compressed_size,
                 rows_scanned: Some(1),
@@ -868,8 +853,7 @@ mod tests {
 
         let second_decision = enforcer
             .check_query(QueryCtx {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal: SignalKind::Traces,
                 start_micros: Some(0),
                 end_micros: Some(1_000_000),
@@ -888,8 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn block_decision_is_written_to_decision_audit_sink() {
-        let tenant_id = uuid::Uuid::new_v4();
-        let project_id = uuid::Uuid::new_v4();
+        let workspace_id = uuid::Uuid::new_v4();
         let store: Arc<dyn PolicyStore> = Arc::new(QueryQuotaPolicyStore {
             max_bytes: 1,
             grace_pct: 101,
@@ -903,8 +886,7 @@ mod tests {
 
         let decision = enforcer
             .check_query(QueryCtx {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal: SignalKind::Traces,
                 start_micros: Some(0),
                 end_micros: Some(1),
@@ -922,8 +904,7 @@ mod tests {
         );
         let events = audit_sink.events.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].tenant_id, tenant_id);
-        assert_eq!(events[0].project_id, project_id);
+        assert_eq!(events[0].workspace_id, workspace_id.into());
         assert_eq!(events[0].operation, Operation::Query);
         assert_eq!(events[0].decision, DecisionSummary::Block);
         assert_eq!(events[0].reason, "query_quota_exceeded");

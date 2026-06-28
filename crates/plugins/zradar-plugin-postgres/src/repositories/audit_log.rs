@@ -22,18 +22,16 @@ impl AuditLogRepository for PostgresAuditLogRepository {
         let saved = sqlx::query_as::<_, AuditLog>(
             r#"
             INSERT INTO audit_logs (
-                actor_tenant_id, actor_project_id, org_id, project_id, action,
+                actor_workspace_id, resource_workspace_id, action,
                 resource_type, resource_id, metadata, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
-                id, actor_tenant_id, actor_project_id, org_id, project_id, action,
+                id, actor_workspace_id, resource_workspace_id, action,
                 resource_type, resource_id, metadata, created_at
             "#,
         )
-        .bind(log.actor_tenant_id)
-        .bind(log.actor_project_id)
-        .bind(log.org_id)
-        .bind(log.project_id)
+        .bind(log.actor_workspace_id)
+        .bind(log.resource_workspace_id)
         .bind(log.action)
         .bind(log.resource_type)
         .bind(log.resource_id)
@@ -53,22 +51,20 @@ impl AuditLogRepository for PostgresAuditLogRepository {
         let items = sqlx::query_as::<_, AuditLog>(
             r#"
             SELECT
-                id, actor_tenant_id, actor_project_id, org_id, project_id, action,
+                id, actor_workspace_id, resource_workspace_id, action,
                 resource_type, resource_id, metadata, created_at
             FROM audit_logs
-            WHERE ($1::uuid IS NULL OR org_id = $1)
-              AND ($2::uuid IS NULL OR project_id = $2)
-              AND ($3::text IS NULL OR action = $3)
-              AND ($4::text IS NULL OR resource_type = $4)
-              AND ($5::text IS NULL OR resource_id = $5)
-              AND ($6::bigint IS NULL OR created_at >= $6)
-              AND ($7::bigint IS NULL OR created_at <= $7)
+            WHERE ($1::uuid IS NULL OR resource_workspace_id = $1)
+              AND ($2::text IS NULL OR action = $2)
+              AND ($3::text IS NULL OR resource_type = $3)
+              AND ($4::text IS NULL OR resource_id = $4)
+              AND ($5::bigint IS NULL OR created_at >= $5)
+              AND ($6::bigint IS NULL OR created_at <= $6)
             ORDER BY created_at DESC, id DESC
-            LIMIT $8 OFFSET $9
+            LIMIT $7 OFFSET $8
             "#,
         )
-        .bind(filters.org_id)
-        .bind(filters.project_id)
+        .bind(filters.workspace_id)
         .bind(filters.action.clone())
         .bind(filters.resource_type.clone())
         .bind(filters.resource_id.clone())
@@ -84,17 +80,15 @@ impl AuditLogRepository for PostgresAuditLogRepository {
             r#"
             SELECT COUNT(*)
             FROM audit_logs
-            WHERE ($1::uuid IS NULL OR org_id = $1)
-              AND ($2::uuid IS NULL OR project_id = $2)
-              AND ($3::text IS NULL OR action = $3)
-              AND ($4::text IS NULL OR resource_type = $4)
-              AND ($5::text IS NULL OR resource_id = $5)
-              AND ($6::bigint IS NULL OR created_at >= $6)
-              AND ($7::bigint IS NULL OR created_at <= $7)
+            WHERE ($1::uuid IS NULL OR resource_workspace_id = $1)
+              AND ($2::text IS NULL OR action = $2)
+              AND ($3::text IS NULL OR resource_type = $3)
+              AND ($4::text IS NULL OR resource_id = $4)
+              AND ($5::bigint IS NULL OR created_at >= $5)
+              AND ($6::bigint IS NULL OR created_at <= $6)
             "#,
         )
-        .bind(filters.org_id)
-        .bind(filters.project_id)
+        .bind(filters.workspace_id)
         .bind(filters.action)
         .bind(filters.resource_type)
         .bind(filters.resource_id)

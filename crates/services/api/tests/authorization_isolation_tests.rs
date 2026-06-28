@@ -6,17 +6,16 @@
 //! - Empty capabilities list (standalone): all capability checks pass.
 //! - Settings path project mismatch returns 403 when capabilities are set.
 //! - Retention org_id override is rejected when capabilities are set.
-//! - Query params cannot override `project_id` (context always wins when capabilities set).
+//! - Query params cannot override `workspace_id` (context always wins when capabilities set).
 
 use api::errors::ControlError;
 use api::http::{AuthContext, AuthMode, Capability, parse_ctx_uuid};
 use uuid::Uuid;
 use zradar_models::RequestContext;
 
-fn request_ctx(tenant: Uuid, project: Uuid) -> RequestContext {
+fn request_ctx(workspace: Uuid) -> RequestContext {
     RequestContext {
-        tenant_id: tenant.to_string(),
-        project_id: project.to_string(),
+        workspace_id: workspace.into(),
     }
 }
 
@@ -24,7 +23,7 @@ fn request_ctx(tenant: Uuid, project: Uuid) -> RequestContext {
 /// by a gateway-wrapper authorizer after resolving trusted headers.
 fn auth_with_capabilities(capabilities: Vec<Capability>) -> AuthContext {
     AuthContext::from_context(
-        request_ctx(Uuid::new_v4(), Uuid::new_v4()),
+        request_ctx(Uuid::new_v4()),
         AuthMode::Standalone,
         capabilities,
     )
@@ -92,7 +91,7 @@ fn test_admin_permission_missing_returns_forbidden() {
 
 #[test]
 fn test_standalone_no_permissions_passes_all_checks() {
-    let ctx = request_ctx(Uuid::new_v4(), Uuid::new_v4());
+    let ctx = request_ctx(Uuid::new_v4());
     let auth = auth_context(ctx, Vec::new());
     assert!(auth.require(Capability::ReadTraces).is_ok());
     assert!(auth.require(Capability::ReadDashboards).is_ok());
@@ -106,68 +105,67 @@ fn test_standalone_no_permissions_passes_all_checks() {
 #[test]
 fn test_parse_ctx_uuid_valid_round_trips() {
     let id = Uuid::new_v4();
-    let parsed = parse_ctx_uuid(&id.to_string(), "tenant_id").unwrap();
+    let parsed = parse_ctx_uuid(&id.to_string(), "workspace_id").unwrap();
     assert_eq!(parsed, id);
 }
 
 #[test]
 fn test_parse_ctx_uuid_rejects_nil_string() {
-    let err = parse_ctx_uuid("not-a-uuid", "tenant_id").unwrap_err();
+    let err = parse_ctx_uuid("not-a-uuid", "workspace_id").unwrap_err();
     assert!(matches!(err, ControlError::InvalidInput(_)));
 }
 
 #[test]
 fn test_parse_ctx_uuid_rejects_empty_string() {
-    let err = parse_ctx_uuid("", "project_id").unwrap_err();
+    let err = parse_ctx_uuid("", "workspace_id").unwrap_err();
     assert!(matches!(err, ControlError::InvalidInput(_)));
 }
 
 #[test]
-fn test_ctx_project_must_match_path_project_when_capabilities_set() {
-    let tenant = Uuid::new_v4();
-    let ctx_project = Uuid::new_v4();
-    let path_project = Uuid::new_v4();
+fn test_ctx_workspace_must_match_path_workspace_when_capabilities_set() {
+    let workspace = Uuid::new_v4();
+    let path_workspace = Uuid::new_v4();
 
-    let ctx = request_ctx(tenant, ctx_project);
+    let ctx = request_ctx(workspace);
     let auth = auth_context(ctx, vec![Capability::WriteSettings]);
 
     assert!(auth.require(Capability::WriteSettings).is_ok());
 
-    let err = auth.enforce_path_project(path_project).unwrap_err();
+    let err = auth.enforce_path_workspace(path_workspace).unwrap_err();
     assert!(matches!(err, ControlError::Forbidden(_)));
 }
 
 #[test]
-fn test_ctx_project_mismatch_ignored_when_no_capabilities() {
-    let ctx = request_ctx(Uuid::new_v4(), Uuid::new_v4());
+fn test_ctx_workspace_mismatch_ignored_when_no_capabilities() {
+    let ctx = request_ctx(Uuid::new_v4());
     let auth = auth_context(ctx, Vec::new());
     assert!(auth.require(Capability::WriteSettings).is_ok());
-    assert!(auth.enforce_path_project(Uuid::new_v4()).is_ok());
+    assert!(auth.enforce_path_workspace(Uuid::new_v4()).is_ok());
 }
 
 #[test]
-fn test_org_id_override_rejected_when_capabilities_differ() {
-    let ctx_tenant = Uuid::new_v4();
-    let override_org = Uuid::new_v4();
-    let ctx = request_ctx(ctx_tenant, Uuid::new_v4());
+fn test_workspace_id_override_rejected_when_capabilities_differ() {
+    let ctx_workspace = Uuid::new_v4();
+    let override_workspace = Uuid::new_v4();
+    let ctx = request_ctx(ctx_workspace);
     let auth = auth_context(ctx, vec![Capability::Admin]);
 
     assert!(auth.require(Capability::Admin).is_ok());
 
     let err = auth
-        .tenant_or_reject_platform_override(Some(override_org))
+        .workspace_or_reject_platform_override(Some(override_workspace))
         .unwrap_err();
     assert!(matches!(err, ControlError::Forbidden(_)));
 }
 
 #[test]
-fn test_same_org_id_allowed_even_with_capabilities() {
-    let tenant = Uuid::new_v4();
-    let ctx = request_ctx(tenant, Uuid::new_v4());
+fn test_same_workspace_id_allowed_even_with_capabilities() {
+    let workspace = Uuid::new_v4();
+    let ctx = request_ctx(workspace);
     let auth = auth_context(ctx, vec![Capability::Admin]);
     assert!(auth.require(Capability::Admin).is_ok());
-    let ctx_org = auth
-        .tenant_or_reject_platform_override(Some(tenant))
+    let ctx_workspace = auth
+        .workspace_or_reject_platform_override(Some(workspace))
         .unwrap();
-    assert_eq!(ctx_org, tenant);
+    assert_eq!(ctx_workspace, workspace);
 }

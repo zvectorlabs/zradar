@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 /// Database client for test verification
 pub struct DbClient {
@@ -37,23 +38,21 @@ impl DbClient {
     // PostgreSQL - Parquet Metadata
     // ========================================================================
 
-    /// List file metadata rows for a project and signal.
+    /// List file metadata rows for a workspace and signal.
     pub async fn file_list_entries(
         &self,
-        tenant_id: &Uuid,
-        project_id: &Uuid,
+        workspace_id: &WorkspaceId,
         signal_type: &str,
     ) -> Result<Vec<FileListEntry>> {
         let rows = sqlx::query_as::<_, FileListEntry>(
-            "SELECT id, tenant_id, project_id, signal_type, stream_name, date, file_path,
+            "SELECT id, workspace_id, signal_type, stream_name, date, file_path,
                     location, min_ts, max_ts, records, original_size, compressed_size,
                     deleted, created_at, updated_at
              FROM file_list
-             WHERE tenant_id = $1 AND project_id = $2 AND signal_type = $3
+             WHERE workspace_id = $1 AND signal_type = $2
              ORDER BY id",
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_type)
         .fetch_all(&self.pg_pool)
         .await?;
@@ -61,23 +60,21 @@ impl DbClient {
         Ok(rows)
     }
 
-    /// List stream statistics rows for a project and signal.
+    /// List stream statistics rows for a workspace and signal.
     pub async fn stream_stats(
         &self,
-        tenant_id: &Uuid,
-        project_id: &Uuid,
+        workspace_id: &WorkspaceId,
         signal_type: &str,
     ) -> Result<Vec<StreamStatsEntry>> {
         let rows = sqlx::query_as::<_, StreamStatsEntry>(
-            "SELECT id, tenant_id, project_id, signal_type, stream_name, file_count,
+            "SELECT id, workspace_id, signal_type, stream_name, file_count,
                     min_ts, max_ts, total_records, total_original_size,
                     total_compressed_size, updated_at
              FROM stream_stats
-             WHERE tenant_id = $1 AND project_id = $2 AND signal_type = $3
+             WHERE workspace_id = $1 AND signal_type = $2
              ORDER BY id",
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_type)
         .fetch_all(&self.pg_pool)
         .await?;
@@ -158,43 +155,44 @@ impl DbClient {
     // PostgreSQL - Projects
     // ========================================================================
 
-    /// Count total projects
-    pub async fn count_projects(&self) -> Result<i64> {
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM projects")
+    /// Count total workspaces
+    pub async fn count_workspaces(&self) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM workspaces")
             .fetch_one(&self.pg_pool)
             .await?;
         Ok(row.0)
     }
 
-    /// Count projects for an organization
-    pub async fn count_projects_for_org(&self, org_id: &Uuid) -> Result<i64> {
+    /// Count workspaces for an organization
+    pub async fn count_workspaces_for_org(&self, org_id: &Uuid) -> Result<i64> {
         let row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM projects WHERE organization_id = $1")
+            sqlx::query_as("SELECT COUNT(*) FROM workspaces WHERE organization_id = $1")
                 .bind(org_id)
                 .fetch_one(&self.pg_pool)
                 .await?;
         Ok(row.0)
     }
 
-    /// Get project by ID
-    pub async fn get_project(&self, project_id: &Uuid) -> Result<Option<Project>> {
-        let project = sqlx::query_as::<_, Project>(
+    /// Get workspace by ID
+    pub async fn get_workspace(&self, workspace_id: &WorkspaceId) -> Result<Option<Workspace>> {
+        let workspace = sqlx::query_as::<_, Workspace>(
             "SELECT id, organization_id, name, display_name, created_at, updated_at 
-             FROM projects WHERE id = $1",
+             FROM workspaces WHERE id = $1",
         )
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .fetch_optional(&self.pg_pool)
         .await?;
 
-        Ok(project)
+        Ok(workspace)
     }
 
     /// Project exists
-    pub async fn project_exists(&self, name: &str) -> Result<bool> {
-        let row: (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM projects WHERE name = $1)")
-            .bind(name)
-            .fetch_one(&self.pg_pool)
-            .await?;
+    pub async fn workspace_exists(&self, name: &str) -> Result<bool> {
+        let row: (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM workspaces WHERE name = $1)")
+                .bind(name)
+                .fetch_one(&self.pg_pool)
+                .await?;
         Ok(row.0)
     }
 
@@ -210,10 +208,10 @@ impl DbClient {
         Ok(row.0)
     }
 
-    /// Count API keys for a project
-    pub async fn count_api_keys_for_project(&self, project_id: &Uuid) -> Result<i64> {
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api_keys WHERE project_id = $1")
-            .bind(project_id)
+    /// Count API keys for a workspace
+    pub async fn count_api_keys_for_workspace(&self, workspace_id: &WorkspaceId) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api_keys WHERE workspace_id = $1")
+            .bind(workspace_id.into_inner())
             .fetch_one(&self.pg_pool)
             .await?;
         Ok(row.0)
@@ -222,7 +220,7 @@ impl DbClient {
     /// Get API key by ID
     pub async fn get_api_key(&self, key_id: &Uuid) -> Result<Option<ApiKey>> {
         let key = sqlx::query_as::<_, ApiKey>(
-            "SELECT id, project_id, name, key_hash, is_revoked, created_at, revoked_at 
+            "SELECT id, workspace_id, name, key_hash, is_revoked, created_at, revoked_at 
              FROM api_keys WHERE id = $1",
         )
         .bind(key_id)
@@ -255,7 +253,7 @@ impl DbClient {
             .execute(&self.pg_pool)
             .await?;
 
-        sqlx::query("DELETE FROM projects WHERE name LIKE $1")
+        sqlx::query("DELETE FROM workspaces WHERE name LIKE $1")
             .bind(&pattern)
             .execute(&self.pg_pool)
             .await?;
@@ -279,7 +277,7 @@ impl DbClient {
             .execute(&self.pg_pool)
             .await?;
 
-        sqlx::query("TRUNCATE TABLE projects CASCADE")
+        sqlx::query("TRUNCATE TABLE workspaces CASCADE")
             .execute(&self.pg_pool)
             .await?;
 
@@ -317,7 +315,7 @@ pub struct Organization {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct Project {
+pub struct Workspace {
     pub id: Uuid,
     pub organization_id: Uuid,
     pub name: String,
@@ -329,7 +327,7 @@ pub struct Project {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ApiKey {
     pub id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub name: String,
     pub key_hash: String,
     pub is_revoked: bool,
@@ -340,8 +338,7 @@ pub struct ApiKey {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct FileListEntry {
     pub id: i64,
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_type: String,
     pub stream_name: String,
     pub date: String,
@@ -360,8 +357,7 @@ pub struct FileListEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct StreamStatsEntry {
     pub id: i64,
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_type: String,
     pub stream_name: String,
     pub file_count: i64,

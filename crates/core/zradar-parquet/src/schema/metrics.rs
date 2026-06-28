@@ -19,8 +19,7 @@ pub fn metric_arrow_schema() -> Schema {
         // Timing (nanoseconds)
         Field::new("timestamp", DataType::Int64, false),
         // Multi-tenancy
-        Field::new("tenant_id", DataType::Utf8, false),
-        Field::new("project_id", DataType::Utf8, false),
+        Field::new("workspace_id", DataType::Utf8, false),
         // Values
         Field::new("value", DataType::Float64, false),
         Field::new("count", DataType::Int64, false),
@@ -43,8 +42,8 @@ pub fn metrics_to_record_batch(metrics: &[Metric]) -> anyhow::Result<RecordBatch
     let metric_name = StringArray::from_iter_values(metrics.iter().map(|m| m.metric_name.as_str()));
     let metric_type = StringArray::from_iter_values(metrics.iter().map(|m| m.metric_type.as_str()));
     let timestamp: Int64Array = metrics.iter().map(|m| m.timestamp).collect();
-    let tenant_id = StringArray::from_iter_values(metrics.iter().map(|m| m.tenant_id.as_str()));
-    let project_id = StringArray::from_iter_values(metrics.iter().map(|m| m.project_id.as_str()));
+    let workspace_id =
+        StringArray::from_iter_values(metrics.iter().map(|m| m.workspace_id.as_str()));
     let value: Float64Array = metrics.iter().map(|m| m.value).collect();
     let count: Int64Array = metrics.iter().map(|m| m.count).collect();
     let sum: Float64Array = metrics.iter().map(|m| m.sum).collect();
@@ -61,8 +60,7 @@ pub fn metrics_to_record_batch(metrics: &[Metric]) -> anyhow::Result<RecordBatch
         Arc::new(metric_name),
         Arc::new(metric_type),
         Arc::new(timestamp),
-        Arc::new(tenant_id),
-        Arc::new(project_id),
+        Arc::new(workspace_id),
         Arc::new(value),
         Arc::new(count),
         Arc::new(sum),
@@ -119,8 +117,7 @@ pub fn record_batch_to_metrics(batch: &RecordBatch) -> anyhow::Result<Vec<Metric
     let metric_name_col = str_col!("metric_name");
     let metric_type_col = str_col!("metric_type");
     let timestamp_col = i64_col!("timestamp");
-    let tenant_id_col = str_col!("tenant_id");
-    let project_id_col = str_col!("project_id");
+    let workspace_id_col = str_col!("workspace_id");
     let value_col = f64_col!("value");
     let count_col = i64_col!("count");
     let sum_col = f64_col!("sum");
@@ -138,8 +135,7 @@ pub fn record_batch_to_metrics(batch: &RecordBatch) -> anyhow::Result<Vec<Metric
             metric_name: metric_name_col.value(i).to_string(),
             metric_type: metric_type_col.value(i).to_string(),
             timestamp: timestamp_col.value(i),
-            tenant_id: tenant_id_col.value(i).to_string(),
-            project_id: project_id_col.value(i).to_string(),
+            workspace_id: workspace_id_col.value(i).to_string(),
             value: value_col.value(i),
             count: count_col.value(i),
             sum: sum_col.value(i),
@@ -159,10 +155,10 @@ pub fn record_batch_to_metrics(batch: &RecordBatch) -> anyhow::Result<Vec<Metric
 mod tests {
     use super::*;
 
-    fn make_metric(name: &str, project_id: &str) -> Metric {
+    fn make_metric(name: &str, workspace_id: &str) -> Metric {
         Metric {
             metric_name: name.to_string(),
-            project_id: project_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             ..Metric::default()
         }
     }
@@ -170,14 +166,14 @@ mod tests {
     #[test]
     fn test_metric_arrow_schema_field_count() {
         let schema = metric_arrow_schema();
-        assert_eq!(schema.fields().len(), 15);
+        assert_eq!(schema.fields().len(), 14);
     }
 
     #[test]
     fn test_metrics_to_record_batch_empty() {
         let batch = metrics_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 15);
+        assert_eq!(batch.num_columns(), 14);
     }
 
     #[test]

@@ -2,17 +2,17 @@
 
 echo "Running pre-commit checks..."
 
-# Check formatting
-echo "Checking formatting..."
-cargo fmt -- --check
+# Formatting
+echo "Formatting code..."
+just fmt
 if [ $? -ne 0 ]; then
-  echo "Formatting check failed. Run 'cargo fmt' to fix."
+  echo "Formatting failed."
   exit 1
 fi
 
 # Check clippy
 echo "Checking clippy..."
-cargo clippy -- -D warnings
+just lint
 if [ $? -ne 0 ]; then
   echo "Clippy check failed."
   exit 1
@@ -20,7 +20,7 @@ fi
 
 # Check compilation
 echo "Checking compilation..."
-cargo check
+just check
 if [ $? -ne 0 ]; then
   echo "Compilation check failed."
   exit 1

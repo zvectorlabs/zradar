@@ -1,6 +1,6 @@
 //! CleanupJob — retention *policy* enforcement (soft-delete only).
 //!
-//! The job queries `file_list` grouped by `(tenant_id, project_id)` and uses
+//! The job queries `file_list` grouped by `(workspace_id)` and uses
 //! `RetentionConfigStore` to determine the per-project cutoff. Files whose
 //! `max_ts` falls before the cutoff are marked `deleted=true` in metadata.
 //!
@@ -96,14 +96,13 @@ impl CleanupJob {
 
     /// Execute one cleanup cycle and return statistics.
     pub async fn run_now(&self) -> anyhow::Result<CleanupStats> {
-        self.run_now_scoped(None, None).await
+        self.run_now_scoped(None).await
     }
 
     /// Execute one cleanup cycle for an optional tenant/project scope.
     pub async fn run_now_scoped(
         &self,
-        tenant_id: Option<uuid::Uuid>,
-        project_id: Option<uuid::Uuid>,
+        workspace_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<CleanupStats> {
         let started = Instant::now();
         let mut stats = CleanupStats::default();
@@ -113,8 +112,7 @@ impl CleanupJob {
         let all_files = self
             .file_list_repo
             .query_files(FileListFilter {
-                tenant_id,
-                project_id,
+                workspace_id,
                 deleted: Some(false),
                 ..FileListFilter::default()
             })
@@ -124,18 +122,18 @@ impl CleanupJob {
             return Ok(stats);
         }
 
-        let mut by_project: HashMap<(uuid::Uuid, uuid::Uuid), Vec<_>> = HashMap::new();
+        let mut by_workspace: HashMap<uuid::Uuid, Vec<_>> = HashMap::new();
         for file in all_files {
-            by_project
-                .entry((file.tenant_id, file.project_id))
+            by_workspace
+                .entry(file.workspace_id.into())
                 .or_default()
                 .push(file);
         }
 
-        stats.projects_processed = by_project.len() as u32;
+        stats.projects_processed = by_workspace.len() as u32;
 
-        for ((tenant_id, project_id), files) in &by_project {
-            let cutoff_us = self.config_store.get_cutoff_us(*tenant_id, *project_id);
+        for (workspace_id, files) in &by_workspace {
+            let cutoff_us = self.config_store.get_cutoff_us((*workspace_id).into());
 
             let expired: Vec<_> = files.iter().filter(|f| f.max_ts <= cutoff_us).collect();
 
@@ -144,8 +142,7 @@ impl CleanupJob {
             }
 
             info!(
-                tenant_id = %tenant_id,
-                project_id = %project_id,
+                workspace_id = %workspace_id,
                 count = expired.len(),
                 cutoff_us,
                 "CleanupJob: marking expired files deleted=true"
@@ -153,7 +150,7 @@ impl CleanupJob {
 
             let ids: Vec<i64> = expired.iter().map(|f| f.id).collect();
             if let Err(e) = self.file_list_repo.mark_deleted(&ids).await {
-                let msg = format!("mark_deleted failed for project {tenant_id}/{project_id}: {e}");
+                let msg = format!("mark_deleted failed for workspace {workspace_id}: {e}");
                 error!("{}", msg);
                 stats.errors.push(msg);
                 continue;
@@ -224,7 +221,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -260,7 +260,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -280,13 +283,11 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_marks_expired_without_physical_delete() {
         let store = Arc::new(RetentionConfigStore::new(7));
-        let tenant = Uuid::new_v4();
-        let project = Uuid::new_v4();
+        let workspace = Uuid::new_v4();
         let repo = Arc::new(MarkRepo {
             files: vec![FileListEntry {
                 id: 5,
-                tenant_id: tenant,
-                project_id: project,
+                workspace_id: workspace.into(),
                 signal_type: "traces".to_string(),
                 stream_name: "svc".to_string(),
                 date: "2020/01/01/00".to_string(),

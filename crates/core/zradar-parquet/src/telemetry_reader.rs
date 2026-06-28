@@ -5,13 +5,13 @@
 //! search, and accurate pagination totals.
 
 use std::sync::Arc;
+use zradar_models::WorkspaceId;
 
 use anyhow::{Context, anyhow};
 use arrow::array::{Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use uuid::Uuid;
 use zradar_models::{FileListFilter, LogRecord, Metric, Span};
 
 use zradar_traits::{
@@ -43,14 +43,12 @@ impl ParquetTelemetryReader {
 impl AnalyticsReader for ParquetTelemetryReader {
     async fn get_daily_trace_counts(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         start: i64,
         end: i64,
     ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(start / 1_000),
             time_range_end: Some(end / 1_000),
@@ -65,7 +63,7 @@ impl AnalyticsReader for ParquetTelemetryReader {
                 (MIN(timestamp) / {day_ns}) * {day_ns} AS day_bucket,
                 COUNT(DISTINCT trace_id) AS cnt
             FROM spans
-            WHERE project_id = '{project_id}'
+            WHERE workspace_id = '{workspace_id}'
               AND timestamp >= {start}
               AND timestamp <= {end}
             GROUP BY (timestamp / {day_ns})
@@ -110,14 +108,12 @@ impl AnalyticsReader for ParquetTelemetryReader {
 
     async fn get_metrics_summary(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         start: i64,
         end: i64,
     ) -> anyhow::Result<MetricsSummary> {
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(start / 1_000),
             time_range_end: Some(end / 1_000),
@@ -133,7 +129,7 @@ impl AnalyticsReader for ParquetTelemetryReader {
                 approx_percentile_cont(CAST(duration_ns AS DOUBLE), 0.90) / 1000000.0 AS p90_ms,
                 approx_percentile_cont(CAST(duration_ns AS DOUBLE), 0.99) / 1000000.0 AS p99_ms
             FROM spans
-            WHERE project_id = '{project_id}'
+            WHERE workspace_id = '{workspace_id}'
               AND parent_span_id = ''
               AND timestamp >= {start}
               AND timestamp <= {end}"#
@@ -198,7 +194,7 @@ impl AnalyticsReader for ParquetTelemetryReader {
 
     async fn query_analytics(
         &self,
-        tenant_id: Uuid,
+        workspace_id: WorkspaceId,
         filters: AnalyticsQueryFilters,
     ) -> anyhow::Result<Vec<AnalyticsDataPoint>> {
         // Whitelisted metric names and their SQL aggregation expressions.
@@ -250,8 +246,7 @@ impl AnalyticsReader for ParquetTelemetryReader {
 
         // 3. Build file filter
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(filters.project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(filters.start / 1_000),
             time_range_end: Some(filters.end / 1_000),
@@ -262,7 +257,7 @@ impl AnalyticsReader for ParquetTelemetryReader {
         // 4. Build WHERE conditions
         let day_ns: i64 = 86_400_000_000_000;
         let mut conditions = vec![
-            format!("project_id = '{}'", filters.project_id),
+            format!("workspace_id = '{}'", workspace_id),
             format!("timestamp >= {}", filters.start),
             format!("timestamp <= {}", filters.end),
         ];
@@ -373,11 +368,9 @@ impl AnalyticsReader for ParquetTelemetryReader {
         &self,
         filters: GuardrailsAnalyticsFilters,
     ) -> anyhow::Result<GuardrailsAnalyticsResult> {
-        let tenant_id = filters.tenant_id;
-        let project_id = filters.project_id;
+        let workspace_id = filters.workspace_id;
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             time_range_start: Some(filters.start / 1_000),
             time_range_end: Some(filters.end / 1_000),
@@ -386,9 +379,9 @@ impl AnalyticsReader for ParquetTelemetryReader {
         };
 
         let base_where = format!(
-            "tenant_id = '{}' AND project_id = '{}' AND span_type = 'GUARDRAIL' \
+            "workspace_id = '{}' AND span_type = 'GUARDRAIL' \
              AND timestamp >= {} AND timestamp <= {}",
-            tenant_id, project_id, filters.start, filters.end
+            workspace_id, filters.start, filters.end
         );
 
         // total_requests: COUNT spans WHERE span_name = 'guardrails.request'
@@ -541,23 +534,17 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: TraceQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<TraceSummary>> {
-        let tenant_id = filters
-            .tenant_id
-            .ok_or_else(|| anyhow!("tenant_id is required for query_traces"))?;
-        let project_id = filters
-            .project_id
-            .ok_or_else(|| anyhow!("project_id is required for query_traces"))?;
+        let workspace_id = filters
+            .workspace_id
+            .ok_or_else(|| anyhow!("workspace_id is required for query_traces"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
-        let file_filter = trace_file_filter(tenant_id, project_id, &filters);
+        let file_filter = trace_file_filter(workspace_id.into(), &filters);
 
         // ------------------------------------------------------------------
         // Inner aggregate query: group spans into trace summaries.
         // ------------------------------------------------------------------
-        let mut inner_where = format!(
-            "tenant_id = '{}' AND project_id = '{}'",
-            tenant_id, project_id
-        );
+        let mut inner_where = format!("workspace_id = '{}'", workspace_id);
         if let Some(ref svc) = filters.service_name {
             inner_where.push_str(&format!(" AND service_name = '{}'", escape_sql_str(svc)));
         }
@@ -568,9 +555,8 @@ impl TelemetryReader for ParquetTelemetryReader {
             // all spans in matching traces, preserving summary counts/duration.
             inner_where.push_str(&format!(
                 " AND trace_id IN (SELECT DISTINCT trace_id FROM spans \
-                 WHERE tenant_id = '{}' AND project_id = '{}' AND span_name LIKE '%{}%')",
-                tenant_id,
-                project_id,
+                 WHERE workspace_id = '{}' AND span_name LIKE '%{}%')",
+                workspace_id,
                 escape_sql_str(name)
             ));
         }
@@ -720,22 +706,19 @@ impl TelemetryReader for ParquetTelemetryReader {
 
     async fn get_trace_detail(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         trace_id: &str,
     ) -> anyhow::Result<Option<Vec<Span>>> {
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             deleted: Some(false),
             ..Default::default()
         };
 
         let sql = format!(
-            "SELECT * FROM spans WHERE tenant_id = '{}' AND project_id = '{}' AND trace_id = '{}' ORDER BY timestamp",
-            tenant_id,
-            project_id,
+            "SELECT * FROM spans WHERE workspace_id = '{}' AND trace_id = '{}' ORDER BY timestamp",
+            workspace_id,
             escape_sql_str(trace_id)
         );
 
@@ -765,22 +748,16 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: SpanQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<Span>> {
-        let tenant_id = filters
-            .tenant_id
-            .ok_or_else(|| anyhow!("tenant_id is required for query_spans"))?;
-        let project_id = filters
-            .project_id
-            .ok_or_else(|| anyhow!("project_id is required for query_spans"))?;
+        let workspace_id = filters
+            .workspace_id
+            .ok_or_else(|| anyhow!("workspace_id is required for query_spans"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
 
-        let file_filter = span_file_filter(tenant_id, project_id, &filters);
+        let file_filter = span_file_filter(workspace_id.into(), &filters);
 
         // Build WHERE clause.
-        let mut conditions = vec![
-            format!("tenant_id = '{tenant_id}'"),
-            format!("project_id = '{project_id}'"),
-        ];
+        let mut conditions = vec![format!("workspace_id = '{workspace_id}'")];
 
         if let Some(ref tr) = filters.trace_id {
             conditions.push(format!("trace_id = '{}'", escape_sql_str(tr)));
@@ -893,22 +870,19 @@ impl TelemetryReader for ParquetTelemetryReader {
 
     async fn get_span(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         span_id: &str,
     ) -> anyhow::Result<Option<Span>> {
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("traces".to_string()),
             deleted: Some(false),
             ..Default::default()
         };
 
         let sql = format!(
-            "SELECT * FROM spans WHERE tenant_id = '{}' AND project_id = '{}' AND span_id = '{}' LIMIT 1",
-            tenant_id,
-            project_id,
+            "SELECT * FROM spans WHERE workspace_id = '{}' AND span_id = '{}' LIMIT 1",
+            workspace_id,
             escape_sql_str(span_id)
         );
 
@@ -935,14 +909,14 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: LogQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<LogRecord>> {
-        let project_id = filters
-            .project_id
-            .ok_or_else(|| anyhow!("project_id is required for query_logs"))?;
+        let workspace_id = filters
+            .workspace_id
+            .ok_or_else(|| anyhow!("workspace_id is required for query_logs"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
 
         let file_filter = FileListFilter {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             signal_type: Some("logs".to_string()),
             time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
             time_range_end: filters.time_range.as_ref().map(|tr| tr.end / 1_000),
@@ -950,7 +924,7 @@ impl TelemetryReader for ParquetTelemetryReader {
             ..Default::default()
         };
 
-        let mut conditions = vec![format!("project_id = '{project_id}'")];
+        let mut conditions = vec![format!("workspace_id = '{workspace_id}'")];
 
         if let Some(ref sev) = filters.severity {
             conditions.push(format!("severity = '{}'", escape_sql_str(sev)));
@@ -1013,22 +987,19 @@ impl TelemetryReader for ParquetTelemetryReader {
 
     async fn get_log(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         log_id: &str,
     ) -> anyhow::Result<Option<LogRecord>> {
         let file_filter = FileListFilter {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id.into()),
             signal_type: Some("logs".to_string()),
             deleted: Some(false),
             ..Default::default()
         };
 
         let sql = format!(
-            "SELECT * FROM logs WHERE tenant_id = '{}' AND project_id = '{}' AND id = '{}' LIMIT 1",
-            tenant_id,
-            project_id,
+            "SELECT * FROM logs WHERE workspace_id = '{}' AND id = '{}' LIMIT 1",
+            workspace_id,
             escape_sql_str(log_id)
         );
 
@@ -1055,14 +1026,14 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: MetricQueryFilters,
     ) -> anyhow::Result<PaginatedResponse<Metric>> {
-        let project_id = filters
-            .project_id
-            .ok_or_else(|| anyhow!("project_id is required for query_metrics"))?;
+        let workspace_id = filters
+            .workspace_id
+            .ok_or_else(|| anyhow!("workspace_id is required for query_metrics"))?;
 
         let (limit, offset) = pagination_values(&filters.pagination);
 
         let file_filter = FileListFilter {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             signal_type: Some("metrics".to_string()),
             time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
             time_range_end: filters.time_range.as_ref().map(|tr| tr.end / 1_000),
@@ -1070,7 +1041,7 @@ impl TelemetryReader for ParquetTelemetryReader {
             ..Default::default()
         };
 
-        let mut conditions = vec![format!("project_id = '{project_id}'")];
+        let mut conditions = vec![format!("workspace_id = '{workspace_id}'")];
 
         if let Some(ref name) = filters.metric_name {
             conditions.push(format!("metric_name = '{}'", escape_sql_str(name)));
@@ -1126,12 +1097,12 @@ impl TelemetryReader for ParquetTelemetryReader {
         &self,
         filters: MetricSeriesFilters,
     ) -> anyhow::Result<Vec<MetricPoint>> {
-        let project_id = filters
-            .project_id
-            .ok_or_else(|| anyhow!("project_id is required for query_metric_series"))?;
+        let workspace_id = filters
+            .workspace_id
+            .ok_or_else(|| anyhow!("workspace_id is required for query_metric_series"))?;
 
         let file_filter = FileListFilter {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             signal_type: Some("metrics".to_string()),
             time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
             time_range_end: filters.time_range.as_ref().map(|tr| tr.end / 1_000),
@@ -1151,7 +1122,7 @@ impl TelemetryReader for ParquetTelemetryReader {
         };
 
         let mut conditions = vec![
-            format!("project_id = '{project_id}'"),
+            format!("workspace_id = '{workspace_id}'"),
             format!("metric_name = '{}'", escape_sql_str(&filters.metric_name)),
         ];
         if let Some(ref svc) = filters.service_name {
@@ -1220,14 +1191,9 @@ fn pagination_values(p: &Pagination) -> (u32, u32) {
 }
 
 /// Build a `FileListFilter` for trace queries.
-fn trace_file_filter(
-    tenant_id: Uuid,
-    project_id: Uuid,
-    filters: &TraceQueryFilters,
-) -> FileListFilter {
+fn trace_file_filter(workspace_id: WorkspaceId, filters: &TraceQueryFilters) -> FileListFilter {
     FileListFilter {
-        tenant_id: Some(tenant_id),
-        project_id: Some(project_id),
+        workspace_id: Some(workspace_id.into()),
         signal_type: Some("traces".to_string()),
         time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
         time_range_end: filters.time_range.as_ref().map(|tr| tr.end / 1_000),
@@ -1237,14 +1203,9 @@ fn trace_file_filter(
 }
 
 /// Build a `FileListFilter` for span queries.
-fn span_file_filter(
-    tenant_id: Uuid,
-    project_id: Uuid,
-    filters: &SpanQueryFilters,
-) -> FileListFilter {
+fn span_file_filter(workspace_id: WorkspaceId, filters: &SpanQueryFilters) -> FileListFilter {
     FileListFilter {
-        tenant_id: Some(tenant_id),
-        project_id: Some(project_id),
+        workspace_id: Some(workspace_id.into()),
         signal_type: Some("traces".to_string()),
         time_range_start: filters.time_range.as_ref().map(|tr| tr.start / 1_000),
         time_range_end: filters.time_range.as_ref().map(|tr| tr.end / 1_000),
@@ -1353,6 +1314,11 @@ fn escape_sql_str(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
 
     #[test]
@@ -1385,16 +1351,15 @@ mod tests {
     fn test_trace_file_filter_converts_ns_to_us() {
         use zradar_traits::TimeRange;
         let filters = TraceQueryFilters {
-            tenant_id: Some(Uuid::nil()),
-            project_id: Some(Uuid::nil()),
+            workspace_id: Some(Uuid::nil()),
             time_range: Some(TimeRange {
                 start: 1_000_000_000,
                 end: 2_000_000_000,
             }),
             ..Default::default()
         };
-        let f = trace_file_filter(Uuid::nil(), Uuid::nil(), &filters);
-        assert_eq!(f.tenant_id, Some(Uuid::nil()));
+        let f = trace_file_filter(Uuid::nil().into(), &filters);
+        assert_eq!(f.workspace_id, Some(Uuid::nil()));
         assert_eq!(f.time_range_start, Some(1_000_000));
         assert_eq!(f.time_range_end, Some(2_000_000));
     }

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use zradar_traits::AdminAuthorizer;
 
 use super::handlers::{
-    RetentionState, get_project_retention, get_retention_config, list_retention_configs,
-    run_cleanup, set_project_retention, set_retention_config,
+    RetentionState, get_retention_config, get_workspace_retention, list_retention_configs,
+    run_cleanup, set_retention_config, set_workspace_retention,
 };
 use crate::http::AuthMode;
 
@@ -29,12 +29,12 @@ pub fn retention_router(
             routing::get(list_retention_configs).put(set_retention_config),
         )
         .route(
-            "/api/v1/admin/retention/config/:org_id",
+            "/api/v1/admin/retention/config/:workspace_id",
             routing::get(get_retention_config),
         )
         .route(
-            "/api/v1/projects/:id/retention",
-            routing::get(get_project_retention).put(set_project_retention),
+            "/api/v1/workspaces/:id/retention",
+            routing::get(get_workspace_retention).put(set_workspace_retention),
         )
         .layer(Extension(auth_mode))
         .layer(Extension(auth))

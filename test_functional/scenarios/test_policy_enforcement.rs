@@ -28,9 +28,9 @@ async fn test_policy_rate_block_rejects_trace_ingest() -> Result<()> {
         .put(
             "/api/v1/admin/policies/config",
             &serde_json::json!({
-                "tenant_id": env.tenant_id,
+                "workspace_id": env.workspace_id,
                 "policies": [{
-                    "project_id": env.project_id,
+                    "workspace_id": env.workspace_id,
                     "signal": "traces",
                     "operation": "ingest",
                     "limit": {
@@ -79,9 +79,9 @@ async fn test_usage_tracking_drives_ingest_quota_block() -> Result<()> {
         .put(
             "/api/v1/admin/policies/config",
             &serde_json::json!({
-                "tenant_id": env.tenant_id,
+                "workspace_id": env.workspace_id,
                 "policies": [{
-                    "project_id": env.project_id,
+                    "workspace_id": env.workspace_id,
                     "signal": "traces",
                     "operation": "ingest",
                     "limit": {
@@ -140,9 +140,9 @@ async fn test_policy_query_window_rejects_trace_query() -> Result<()> {
         .put(
             "/api/v1/admin/policies/config",
             &serde_json::json!({
-                "tenant_id": env.tenant_id,
+                "workspace_id": env.workspace_id,
                 "policies": [{
-                    "project_id": env.project_id,
+                    "workspace_id": env.workspace_id,
                     "signal": "traces",
                     "operation": "query",
                     "limit": {

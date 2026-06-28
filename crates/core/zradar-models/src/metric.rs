@@ -12,9 +12,8 @@ pub struct Metric {
     // Timing
     pub timestamp: i64,
 
-    // Hierarchy
-    pub tenant_id: String,
-    pub project_id: String,
+    // Workspace Scope
+    pub workspace_id: String,
 
     // Values
     pub value: f64,

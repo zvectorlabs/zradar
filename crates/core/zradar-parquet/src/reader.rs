@@ -302,9 +302,12 @@ fn extract_s3_key(s3_url: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use std::sync::Arc;
-    use uuid::Uuid;
+
     use zradar_models::{
         FileListEntry, FileListFilter, NewFileListEntry, StreamStats, StreamStatsUpdate,
     };
@@ -328,7 +331,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -374,13 +380,13 @@ mod tests {
 
         let s1 = Span {
             trace_id: "trace-001".to_string(),
-            project_id: "proj-001".to_string(),
+            workspace_id: "proj-001".to_string(),
             status_code: "OK".to_string(),
             ..Span::default()
         };
         let s2 = Span {
             trace_id: "trace-002".to_string(),
-            project_id: "proj-001".to_string(),
+            workspace_id: "proj-001".to_string(),
             status_code: "ERROR".to_string(),
             ..Span::default()
         };
@@ -394,8 +400,7 @@ mod tests {
 
         let entry = FileListEntry {
             id: 1,
-            tenant_id: Uuid::nil(),
-            project_id: Uuid::nil(),
+            workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
             signal_type: "traces".to_string(),
             stream_name: "default".to_string(),
             date: "2024/01/01/00".to_string(),
@@ -430,7 +435,10 @@ mod tests {
             async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
                 Ok(())
             }
-            async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            async fn get_stream_stats(
+                &self,
+                _: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Vec<StreamStats>> {
                 Ok(vec![])
             }
             async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -467,7 +475,7 @@ mod tests {
         let make_file = |name: &str, trace_id: &str| -> FileListEntry {
             let span = Span {
                 trace_id: trace_id.to_string(),
-                project_id: "proj-001".to_string(),
+                workspace_id: "proj-001".to_string(),
                 ..Span::default()
             };
             let path = dir.path().join(name);
@@ -479,8 +487,7 @@ mod tests {
             w.close().unwrap();
             FileListEntry {
                 id: 1,
-                tenant_id: Uuid::nil(),
-                project_id: Uuid::nil(),
+                workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
                 signal_type: "traces".to_string(),
                 stream_name: "default".to_string(),
                 date: "2024/01/01/00".to_string(),
@@ -518,7 +525,10 @@ mod tests {
             async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
                 Ok(())
             }
-            async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            async fn get_stream_stats(
+                &self,
+                _: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Vec<StreamStats>> {
                 Ok(vec![])
             }
             async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -565,7 +575,7 @@ mod tests {
         let file_path = dir.path().join("cached.parquet");
         let span = Span {
             trace_id: "trace-cached".to_string(),
-            project_id: "proj-001".to_string(),
+            workspace_id: "proj-001".to_string(),
             ..Span::default()
         };
         let batch = spans_to_record_batch(&[span]).unwrap();
@@ -578,8 +588,7 @@ mod tests {
         let file_path_string = file_path.to_string_lossy().into_owned();
         let entry = FileListEntry {
             id: 1,
-            tenant_id: Uuid::nil(),
-            project_id: Uuid::nil(),
+            workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
             signal_type: "traces".to_string(),
             stream_name: "default".to_string(),
             date: "2024/01/01/00".to_string(),
@@ -613,7 +622,10 @@ mod tests {
             async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
                 Ok(())
             }
-            async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            async fn get_stream_stats(
+                &self,
+                _: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Vec<StreamStats>> {
                 Ok(vec![])
             }
             async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {

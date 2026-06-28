@@ -14,6 +14,7 @@ use axum::http::{HeaderMap, Request, header::AUTHORIZATION};
 use std::sync::Arc;
 use uuid::Uuid;
 use zradar_models::RequestContext;
+use zradar_models::WorkspaceId;
 use zradar_traits::{AdminAuth, AdminAuthorizer};
 
 // ---------------------------------------------------------------------------
@@ -24,25 +25,22 @@ use zradar_traits::{AdminAuth, AdminAuthorizer};
 /// returns a fixed tenant/project context with no capabilities (standalone).
 struct MockApiKeyAuthorizer {
     expected_token: &'static str,
-    tenant_id: String,
-    project_id: String,
+    workspace_id: WorkspaceId,
 }
 
 impl MockApiKeyAuthorizer {
     fn new(token: &'static str) -> Self {
         Self {
             expected_token: token,
-            tenant_id: Uuid::nil().to_string(),
-            project_id: Uuid::nil().to_string(),
+            workspace_id: uuid::Uuid::nil().into(),
         }
     }
 
     #[allow(dead_code)]
-    fn with_context(token: &'static str, tenant_id: &str, project_id: &str) -> Self {
+    fn with_context(token: &'static str, workspace_id: WorkspaceId) -> Self {
         Self {
             expected_token: token,
-            tenant_id: tenant_id.to_string(),
-            project_id: project_id.to_string(),
+            workspace_id,
         }
     }
 }
@@ -62,8 +60,7 @@ impl AdminAuthorizer for MockApiKeyAuthorizer {
 
         Ok(AdminAuth {
             context: RequestContext {
-                tenant_id: self.tenant_id.clone(),
-                project_id: self.project_id.clone(),
+                workspace_id: self.workspace_id,
             },
             capability_keys: Vec::new(),
         })
@@ -88,22 +85,14 @@ impl MockGatewayAuthorizer {
 #[async_trait]
 impl AdminAuthorizer for MockGatewayAuthorizer {
     async fn authorize(&self, headers: &HeaderMap) -> anyhow::Result<AdminAuth> {
-        let tenant_id = headers
-            .get("x-tenant-id")
+        let workspace_id = headers
+            .get("x-workspace-id")
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| anyhow::anyhow!("Missing x-tenant-id"))?
-            .to_string();
-        let project_id = headers
-            .get("x-project-id")
-            .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| anyhow::anyhow!("Missing x-project-id"))?
-            .to_string();
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| anyhow::anyhow!("Missing x-workspace-id"))?;
 
         Ok(AdminAuth {
-            context: RequestContext {
-                tenant_id,
-                project_id,
-            },
+            context: RequestContext { workspace_id },
             capability_keys: self.capability_keys.clone(),
         })
     }
@@ -140,8 +129,7 @@ async fn test_standalone_accepts_valid_bearer_token() {
     assert!(result.is_ok());
     let auth = result.unwrap();
     assert_eq!(auth.mode(), AuthMode::Standalone);
-    assert_eq!(auth.context().tenant_id, Uuid::nil().to_string());
-    assert_eq!(auth.context().project_id, Uuid::nil().to_string());
+    assert_eq!(auth.context().workspace_id, Uuid::nil().into());
 }
 
 #[tokio::test]
@@ -182,11 +170,9 @@ async fn test_standalone_rejects_missing_authorization_header() {
 
 #[tokio::test]
 async fn test_gateway_injects_tenant_project_from_trusted_headers() {
-    let tenant_id = Uuid::new_v4().to_string();
-    let project_id = Uuid::new_v4().to_string();
+    let workspace_id = Uuid::new_v4();
     let request = Request::builder()
-        .header("x-tenant-id", &tenant_id)
-        .header("x-project-id", &project_id)
+        .header("x-workspace-id", &workspace_id.to_string())
         .body(())
         .unwrap();
     let mut parts = make_parts(
@@ -198,15 +184,13 @@ async fn test_gateway_injects_tenant_project_from_trusted_headers() {
     let result = AuthContext::from_request_parts(&mut parts, &()).await;
     assert!(result.is_ok());
     let auth = result.unwrap();
-    assert_eq!(auth.context().tenant_id, tenant_id);
-    assert_eq!(auth.context().project_id, project_id);
+    assert_eq!(auth.context().workspace_id, workspace_id.into());
 }
 
 #[tokio::test]
 async fn test_gateway_injects_capabilities_from_trusted_headers() {
     let request = Request::builder()
-        .header("x-tenant-id", Uuid::nil().to_string())
-        .header("x-project-id", Uuid::nil().to_string())
+        .header("x-workspace-id", Uuid::nil().to_string())
         .body(())
         .unwrap();
     let mut parts = make_parts(
@@ -231,15 +215,11 @@ async fn test_gateway_injects_capabilities_from_trusted_headers() {
 // ---------------------------------------------------------------------------
 
 fn auth_context_with_capabilities(
-    tenant_id: &str,
-    project_id: &str,
+    workspace_id: WorkspaceId,
     capabilities: Vec<Capability>,
 ) -> AuthContext {
     AuthContext::from_context(
-        RequestContext {
-            tenant_id: tenant_id.to_string(),
-            project_id: project_id.to_string(),
-        },
+        RequestContext { workspace_id },
         AuthMode::Standalone,
         capabilities,
     )
@@ -247,11 +227,7 @@ fn auth_context_with_capabilities(
 
 #[test]
 fn test_capability_require_empty_list_always_passes() {
-    let auth = auth_context_with_capabilities(
-        &Uuid::nil().to_string(),
-        &Uuid::nil().to_string(),
-        Vec::new(),
-    );
+    let auth = auth_context_with_capabilities(Uuid::nil().into(), Vec::new());
     assert!(auth.require(Capability::ReadTraces).is_ok());
     assert!(auth.require(Capability::Admin).is_ok());
 }
@@ -259,8 +235,7 @@ fn test_capability_require_empty_list_always_passes() {
 #[test]
 fn test_capability_require_grants_present_capability() {
     let auth = auth_context_with_capabilities(
-        &Uuid::nil().to_string(),
-        &Uuid::nil().to_string(),
+        Uuid::nil().into(),
         vec![Capability::ReadTraces, Capability::ReadDashboards],
     );
     assert!(auth.require(Capability::ReadTraces).is_ok());
@@ -269,11 +244,7 @@ fn test_capability_require_grants_present_capability() {
 
 #[test]
 fn test_capability_require_denies_absent_capability() {
-    let auth = auth_context_with_capabilities(
-        &Uuid::nil().to_string(),
-        &Uuid::nil().to_string(),
-        vec![Capability::ReadTraces],
-    );
+    let auth = auth_context_with_capabilities(Uuid::nil().into(), vec![Capability::ReadTraces]);
     let result = auth.require(Capability::Admin);
     assert!(
         matches!(result, Err(ControlError::Forbidden(_))),
@@ -283,25 +254,17 @@ fn test_capability_require_denies_absent_capability() {
 
 #[test]
 fn test_enforce_path_project_no_capabilities_is_noop() {
-    let project_id = Uuid::new_v4();
-    let auth = auth_context_with_capabilities(
-        &Uuid::nil().to_string(),
-        &Uuid::nil().to_string(),
-        Vec::new(),
-    );
-    assert!(auth.enforce_path_project(project_id).is_ok());
+    let workspace_id = Uuid::new_v4();
+    let auth = auth_context_with_capabilities(Uuid::nil().into(), Vec::new());
+    assert!(auth.enforce_path_workspace(workspace_id).is_ok());
 }
 
 #[test]
 fn test_enforce_path_project_with_capabilities_rejects_mismatch() {
-    let project_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
     let other = Uuid::new_v4();
-    let auth = auth_context_with_capabilities(
-        &Uuid::nil().to_string(),
-        &project_id.to_string(),
-        vec![Capability::ReadTraces],
-    );
-    let result = auth.enforce_path_project(other);
+    let auth = auth_context_with_capabilities(workspace_id.into(), vec![Capability::ReadTraces]);
+    let result = auth.enforce_path_workspace(other);
     assert!(
         matches!(result, Err(ControlError::Forbidden(_))),
         "Expected Forbidden when path project doesn't match authenticated project"
@@ -310,26 +273,18 @@ fn test_enforce_path_project_with_capabilities_rejects_mismatch() {
 
 #[test]
 fn test_tenant_override_allowed_without_capabilities() {
-    let tenant_id = Uuid::new_v4();
-    let override_org = Uuid::new_v4();
-    let auth = auth_context_with_capabilities(
-        &tenant_id.to_string(),
-        &Uuid::nil().to_string(),
-        Vec::new(),
-    );
-    let result = auth.tenant_or_standalone_override(Some(override_org));
-    assert_eq!(result.unwrap(), override_org);
+    let workspace_id = Uuid::new_v4();
+    let override_workspace = Uuid::new_v4();
+    let auth = auth_context_with_capabilities(workspace_id.into(), Vec::new());
+    let result = auth.workspace_or_standalone_override(Some(override_workspace));
+    assert_eq!(result.unwrap(), override_workspace);
 }
 
 #[test]
 fn test_tenant_override_ignored_with_capabilities() {
-    let tenant_id = Uuid::new_v4();
-    let override_org = Uuid::new_v4();
-    let auth = auth_context_with_capabilities(
-        &tenant_id.to_string(),
-        &Uuid::nil().to_string(),
-        vec![Capability::Admin],
-    );
-    let result = auth.tenant_or_standalone_override(Some(override_org));
-    assert_eq!(result.unwrap(), tenant_id);
+    let workspace_id = Uuid::new_v4();
+    let override_workspace = Uuid::new_v4();
+    let auth = auth_context_with_capabilities(workspace_id.into(), vec![Capability::Admin]);
+    let result = auth.workspace_or_standalone_override(Some(override_workspace));
+    assert_eq!(result.unwrap(), workspace_id);
 }

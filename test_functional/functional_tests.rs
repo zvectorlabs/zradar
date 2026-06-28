@@ -67,8 +67,8 @@ mod test_nemo_phase4;
 #[path = "scenarios/test_e2e_fixtures.rs"]
 mod test_e2e_fixtures;
 
-#[path = "scenarios/test_e2e_multi_tenant.rs"]
-mod test_e2e_multi_tenant;
+#[path = "scenarios/test_e2e_multi_workspace.rs"]
+mod test_e2e_multi_workspace;
 
 #[path = "scenarios/test_nemo_gap_fixes.rs"]
 mod test_nemo_gap_fixes;

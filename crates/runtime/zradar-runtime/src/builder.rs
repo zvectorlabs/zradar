@@ -39,9 +39,9 @@ use zradar_parquet::{
 };
 use zradar_plugin_postgres::{
     PostgresAuditLogRepository, PostgresClient, PostgresDecisionAuditSink,
-    PostgresFileListRepository, PostgresPolicyStore, PostgresRetentionPolicyRepository,
-    PostgresSettingsRepository, PostgresStorageUsageRepository, PostgresThresholdSink,
-    PostgresUsageReader, PostgresUsageTracker, UsageTrackerMetrics, migrations::MIGRATIONS,
+    PostgresFileListRepository, PostgresPolicyStore, PostgresSettingsRepository,
+    PostgresStorageUsageRepository, PostgresThresholdSink, PostgresUsageReader,
+    PostgresUsageTracker, UsageTrackerMetrics, migrations::MIGRATIONS,
 };
 use zradar_plugin_s3::S3BlockStorage;
 use zradar_policy::{
@@ -49,8 +49,8 @@ use zradar_policy::{
     PolicyStore, ThresholdSink, UsageAnalyticsReader, UsageReader, UsageTracker,
 };
 use zradar_retention::{
-    CleanupJob, EnforcementStrategy, FileReclaimer, OrgRetentionConfig, QueryEnforcer,
-    RetentionConfigStore, StorageUsageDailyJob,
+    CleanupJob, EnforcementStrategy, FileReclaimer, QueryEnforcer, RetentionConfigStore,
+    StorageUsageDailyJob, WorkspaceRetentionConfig,
 };
 use zradar_traits::{AdminAuthorizer, Authenticator};
 
@@ -262,9 +262,6 @@ impl ZradarRuntimeBuilder {
             as Arc<dyn zradar_traits::FileListRepository>;
         let settings_repo = Arc::new(PostgresSettingsRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::SettingsRepository>;
-        let retention_policy_repo =
-            Arc::new(PostgresRetentionPolicyRepository::new(pg_client.clone()))
-                as Arc<dyn zradar_traits::RetentionPolicyRepository>;
         let storage_usage_repo = Arc::new(PostgresStorageUsageRepository::new(pg_client.clone()))
             as Arc<dyn zradar_traits::StorageUsageRepository>;
         let audit_log_repo = Arc::new(PostgresAuditLogRepository::new(pg_client.clone()))
@@ -461,11 +458,10 @@ impl ZradarRuntimeBuilder {
 
         let global_retention_days = parquet_lifecycle_config.retention_days;
         let retention_config_store = Arc::new(RetentionConfigStore::new(global_retention_days));
-        for policy in retention_policy_repo.list_policies().await? {
-            retention_config_store.upsert(OrgRetentionConfig {
-                org_id: policy.org_id,
-                default_days: policy.default_days as u32,
-                project_overrides: policy.project_overrides_map()?,
+        for policy in settings_repo.list_all_settings().await? {
+            retention_config_store.upsert(WorkspaceRetentionConfig {
+                workspace_id: policy.workspace_id,
+                retention_days: policy.traces_retention_days as u32,
             });
         }
         info!(
@@ -525,7 +521,7 @@ impl ZradarRuntimeBuilder {
             cleanup_job: cleanup_job.clone(),
             file_reclaimer: file_reclaimer.clone(),
             config_store: retention_config_store.clone(),
-            policy_repo: retention_policy_repo.clone(),
+            settings_repo: settings_repo.clone(),
             audit_log_repo: Some(audit_log_repo.clone()),
         });
 
@@ -746,7 +742,7 @@ impl ZradarRuntimeBuilder {
             }
 
             impl WalTelemetryWriter {
-                /// Group `rows` by `(tenant_id, project_id)`, serialize each row to
+                /// Group `rows` by `(workspace_id)`, serialize each row to
                 /// JSON, frame each group into one batch envelope, and append +
                 /// fsync once per group. The result is one durable wait per group
                 /// rather than per row — the contract widening behind R-arch P0-3.
@@ -754,8 +750,7 @@ impl ZradarRuntimeBuilder {
                     &self,
                     signal: SignalType,
                     rows: &[T],
-                    tenant_of: impl Fn(&T) -> &str,
-                    project_of: impl Fn(&T) -> &str,
+                    workspace_of: impl Fn(&T) -> &str,
                 ) -> anyhow::Result<()>
                 where
                     T: serde::Serialize,
@@ -765,34 +760,26 @@ impl ZradarRuntimeBuilder {
                     }
 
                     // Group while preserving the order rows arrived in for each
-                    // (tenant, project) — the WAL replay path relies on offset
-                    // ordering to preserve causal order per tenant.
-                    let mut groups: std::collections::BTreeMap<
-                        (uuid::Uuid, uuid::Uuid),
-                        Vec<Vec<u8>>,
-                    > = std::collections::BTreeMap::new();
+                    // (workspace) — the WAL replay path relies on offset
+                    // ordering to preserve causal order per workspace.
+                    let mut groups: std::collections::BTreeMap<uuid::Uuid, Vec<Vec<u8>>> =
+                        std::collections::BTreeMap::new();
                     for row in rows {
-                        let tenant_id =
-                            uuid::Uuid::parse_str(tenant_of(row)).unwrap_or(uuid::Uuid::nil());
-                        let project_id =
-                            uuid::Uuid::parse_str(project_of(row)).unwrap_or(uuid::Uuid::nil());
+                        let workspace_id =
+                            uuid::Uuid::parse_str(workspace_of(row)).unwrap_or(uuid::Uuid::nil());
                         let bytes = serde_json::to_vec(row)
                             .map_err(|e| anyhow::anyhow!("WAL row serialize: {}", e))?;
-                        groups
-                            .entry((tenant_id, project_id))
-                            .or_default()
-                            .push(bytes);
+                        groups.entry(workspace_id).or_default().push(bytes);
                     }
 
                     let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
                     let mut handles = Vec::with_capacity(groups.len());
 
-                    for ((tenant_id, project_id), payloads) in groups {
+                    for (workspace_id, payloads) in groups {
                         let envelope = encode_json_rows(payloads.iter().map(|v| v.as_slice()));
                         let record = WalRecord {
                             signal_type: signal,
-                            tenant_id,
-                            project_id,
+                            workspace_id: workspace_id.into(),
                             arrival_timestamp_ns: now_ns,
                             assigned_offset: 0,
                             payload: envelope,
@@ -818,52 +805,32 @@ impl ZradarRuntimeBuilder {
             #[async_trait::async_trait]
             impl zradar_traits::TelemetryWriter for WalTelemetryWriter {
                 async fn insert_spans(&self, spans: &[zradar_models::Span]) -> anyhow::Result<()> {
-                    self.append_batches(
-                        SignalType::Trace,
-                        spans,
-                        |s| s.tenant_id.as_str(),
-                        |s| s.project_id.as_str(),
-                    )
-                    .await
+                    self.append_batches(SignalType::Trace, spans, |s| s.workspace_id.as_str())
+                        .await
                 }
 
                 async fn insert_metrics(
                     &self,
                     metrics: &[zradar_models::Metric],
                 ) -> anyhow::Result<()> {
-                    self.append_batches(
-                        SignalType::Metric,
-                        metrics,
-                        |m| m.tenant_id.as_str(),
-                        |m| m.project_id.as_str(),
-                    )
-                    .await
+                    self.append_batches(SignalType::Metric, metrics, |m| m.workspace_id.as_str())
+                        .await
                 }
 
                 async fn insert_logs(
                     &self,
                     logs: &[zradar_models::LogRecord],
                 ) -> anyhow::Result<()> {
-                    self.append_batches(
-                        SignalType::Log,
-                        logs,
-                        |l| l.tenant_id.as_str(),
-                        |l| l.project_id.as_str(),
-                    )
-                    .await
+                    self.append_batches(SignalType::Log, logs, |l| l.workspace_id.as_str())
+                        .await
                 }
 
                 async fn insert_scores(
                     &self,
                     scores: &[zradar_models::EvaluationScore],
                 ) -> anyhow::Result<()> {
-                    self.append_batches(
-                        SignalType::Score,
-                        scores,
-                        |s| s.tenant_id.as_str(),
-                        |s| s.project_id.as_str(),
-                    )
-                    .await
+                    self.append_batches(SignalType::Score, scores, |s| s.workspace_id.as_str())
+                        .await
                 }
             }
 

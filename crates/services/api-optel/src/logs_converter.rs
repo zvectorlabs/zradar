@@ -101,8 +101,7 @@ fn convert_log_record(
     LogRecord {
         id: Uuid::new_v4().to_string(),
         timestamp,
-        tenant_id: context.tenant_id.clone(),
-        project_id: context.project_id.clone(),
+        workspace_id: context.workspace_id.to_string(),
         trace_id,
         span_id,
         severity,

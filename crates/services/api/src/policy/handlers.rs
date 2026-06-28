@@ -19,20 +19,20 @@ pub struct PolicyState {
 
 #[derive(Debug, Deserialize)]
 pub struct ListPoliciesQuery {
-    pub tenant_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpsertPoliciesRequest {
     #[serde(default)]
-    pub tenant_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub policies: Vec<PolicyConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PolicyConfig {
     #[serde(default)]
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub signal: SignalKind,
     pub operation: Operation,
     pub limit: PolicyLimit,
@@ -57,8 +57,8 @@ pub async fn upsert_policies(
         return e.into_response();
     }
 
-    let tenant_id = match auth.tenant_or_reject_platform_override(body.tenant_id) {
-        Ok(tenant_id) => tenant_id,
+    let workspace_id = match auth.workspace_or_reject_platform_override(body.workspace_id) {
+        Ok(workspace_id) => workspace_id,
         Err(e) => return e.into_response(),
     };
     let now = chrono::Utc::now().timestamp_micros();
@@ -68,8 +68,8 @@ pub async fn upsert_policies(
         .into_iter()
         .map(|policy_config| Policy {
             id: None,
-            tenant_id,
-            project_id: policy_config.project_id,
+            workspace_id: workspace_id.into(),
+
             signal: policy_config.signal,
             operation: policy_config.operation,
             limit: policy_config.limit,
@@ -101,12 +101,12 @@ pub async fn list_policies(
         return e.into_response();
     }
 
-    let tenant_id = match auth.tenant_or_standalone_override(query.tenant_id) {
-        Ok(tenant_id) => tenant_id,
+    let workspace_id = match auth.workspace_or_standalone_override(query.workspace_id) {
+        Ok(workspace_id) => workspace_id,
         Err(e) => return e.into_response(),
     };
 
-    match state.store.list(tenant_id).await {
+    match state.store.list(workspace_id.into()).await {
         Ok(policies) => (StatusCode::OK, Json(serde_json::json!(policies))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -119,24 +119,24 @@ pub async fn list_policies(
 pub async fn get_effective_policy(
     State(state): State<Arc<PolicyState>>,
     auth: AuthContext,
-    Path(project_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> impl IntoResponse {
     if let Err(e) = auth.require(Capability::Admin) {
         return e.into_response();
     }
-    if let Err(e) = auth.enforce_path_project(project_id) {
+    if let Err(e) = auth.enforce_path_workspace(workspace_id) {
         return e.into_response();
     }
 
-    let tenant_id = match auth.tenant_uuid() {
-        Ok(tenant_id) => tenant_id,
+    let workspace_id = match auth.workspace_uuid() {
+        Ok(workspace_id) => workspace_id,
         Err(e) => return e.into_response(),
     };
 
     let policies = serde_json::json!({
-        "ingest": state.store.resolve(tenant_id, project_id, SignalKind::All, Operation::Ingest),
-        "query": state.store.resolve(tenant_id, project_id, SignalKind::All, Operation::Query),
-        "store": state.store.resolve(tenant_id, project_id, SignalKind::All, Operation::Store),
+        "ingest": state.store.resolve(workspace_id.into(), SignalKind::All, Operation::Ingest),
+        "query": state.store.resolve(workspace_id.into(), SignalKind::All, Operation::Query),
+        "store": state.store.resolve(workspace_id.into(), SignalKind::All, Operation::Store),
     });
 
     (StatusCode::OK, Json(policies)).into_response()
@@ -152,12 +152,12 @@ pub async fn delete_policy(
         return e.into_response();
     }
 
-    let tenant_id = match auth.tenant_or_standalone_override(query.tenant_id) {
-        Ok(tenant_id) => tenant_id,
+    let workspace_id = match auth.workspace_or_standalone_override(query.workspace_id) {
+        Ok(workspace_id) => workspace_id,
         Err(e) => return e.into_response(),
     };
 
-    match state.store.list(tenant_id).await {
+    match state.store.list(workspace_id.into()).await {
         Ok(policies) => {
             if !policies
                 .iter()

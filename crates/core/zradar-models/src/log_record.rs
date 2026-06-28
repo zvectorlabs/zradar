@@ -14,9 +14,8 @@ pub struct LogRecord {
     // Timing (nanoseconds since epoch)
     pub timestamp: i64,
 
-    // Multi-tenancy
-    pub tenant_id: String,
-    pub project_id: String,
+    // Workspace Scope
+    pub workspace_id: String,
 
     // Correlation with traces
     pub trace_id: String, // empty string if no correlation
@@ -48,12 +47,11 @@ pub struct LogRecord {
 
 impl LogRecord {
     /// Create a new LogRecord with a generated UUID.
-    pub fn new(tenant_id: impl Into<String>, project_id: impl Into<String>) -> Self {
+    pub fn new(workspace_id: impl Into<String>) -> Self {
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         Self {
             id: Uuid::new_v4().to_string(),
-            tenant_id: tenant_id.into(),
-            project_id: project_id.into(),
+            workspace_id: workspace_id.into(),
             created_at: now,
             ..Default::default()
         }

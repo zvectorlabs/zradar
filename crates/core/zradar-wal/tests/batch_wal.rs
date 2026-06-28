@@ -1,5 +1,5 @@
 //! End-to-end tests for the batch-WAL contract: one envelope per
-//! `(signal_type, tenant, project)` group, decoded on replay back into the
+//! `(signal_type, workspace)` group, decoded on replay back into the
 //! original row payloads.
 //!
 //! These tests exercise the on-disk shape rather than the [`WalTelemetryWriter`]
@@ -45,12 +45,10 @@ async fn one_batch_append_carries_many_rows_in_one_record() {
     ];
     let envelope = encode_json_rows(rows.iter().copied());
 
-    let tenant = uuid::Uuid::new_v4();
-    let project = uuid::Uuid::new_v4();
+    let workspace = uuid::Uuid::new_v4();
     let rec = WalRecord {
         signal_type: SignalType::Trace,
-        tenant_id: tenant,
-        project_id: project,
+        workspace_id: workspace.into(),
         arrival_timestamp_ns: 1_700_000_000_000_000_000,
         assigned_offset: 0,
         payload: envelope,
@@ -77,10 +75,9 @@ async fn one_batch_append_carries_many_rows_in_one_record() {
     assert_eq!(&decoded.rows[1][..], rows[1]);
     assert_eq!(&decoded.rows[2][..], rows[2]);
 
-    // Tenant/project/signal carried on the outer WalRecord (so flushed rows
+    // Workspace/signal carried on the outer WalRecord (so flushed rows
     // can be attributed without re-parsing the JSON payloads).
-    assert_eq!(stored.tenant_id, tenant);
-    assert_eq!(stored.project_id, project);
+    assert_eq!(stored.workspace_id, workspace.into());
     assert_eq!(stored.signal_type, SignalType::Trace);
 
     cancel.cancel();
@@ -96,8 +93,7 @@ async fn batch_envelope_replays_correctly_through_segment_reader() {
     let wal = Arc::new(open_wal_default(&tmp, cancel.clone()).await);
 
     // 5 envelopes, each carrying 4 rows = 20 rows total over 5 records.
-    let tenant = uuid::Uuid::new_v4();
-    let project = uuid::Uuid::new_v4();
+    let workspace = uuid::Uuid::new_v4();
     let mut expected_rows: Vec<String> = Vec::new();
 
     for envelope_idx in 0..5 {
@@ -111,8 +107,7 @@ async fn batch_envelope_replays_correctly_through_segment_reader() {
         let envelope = encode_json_rows(group.iter().map(|v| v.as_slice()));
         let rec = WalRecord {
             signal_type: SignalType::Trace,
-            tenant_id: tenant,
-            project_id: project,
+            workspace_id: workspace.into(),
             arrival_timestamp_ns: envelope_idx,
             assigned_offset: 0,
             payload: envelope,
@@ -147,16 +142,14 @@ async fn flush_sink_handles_legacy_single_row_and_batch_records_in_same_segment(
     let cancel = CancellationToken::new();
     let wal = Arc::new(open_wal_default(&tmp, cancel.clone()).await);
 
-    let tenant = uuid::Uuid::new_v4();
-    let project = uuid::Uuid::new_v4();
+    let workspace = uuid::Uuid::new_v4();
 
     // Two legacy single-row records (each one JSON document, no magic prefix).
     for legacy_idx in 0..2 {
         let legacy_payload = format!(r#"{{"legacy":true,"idx":{legacy_idx}}}"#);
         let rec = WalRecord {
             signal_type: SignalType::Trace,
-            tenant_id: tenant,
-            project_id: project,
+            workspace_id: workspace.into(),
             arrival_timestamp_ns: 0,
             assigned_offset: 0,
             payload: Bytes::from(legacy_payload),
@@ -173,8 +166,7 @@ async fn flush_sink_handles_legacy_single_row_and_batch_records_in_same_segment(
     let envelope = encode_json_rows(new_rows.iter().copied());
     let rec = WalRecord {
         signal_type: SignalType::Trace,
-        tenant_id: tenant,
-        project_id: project,
+        workspace_id: workspace.into(),
         arrival_timestamp_ns: 0,
         assigned_offset: 0,
         payload: envelope,
@@ -223,8 +215,7 @@ async fn empty_batch_envelope_is_valid_and_decodes_to_zero_rows() {
     let empty_envelope = encode_json_rows::<_, &[u8]>(Vec::<&[u8]>::new());
     let rec = WalRecord {
         signal_type: SignalType::Score,
-        tenant_id: uuid::Uuid::nil(),
-        project_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil().into(),
         arrival_timestamp_ns: 0,
         assigned_offset: 0,
         payload: empty_envelope,
@@ -260,8 +251,7 @@ async fn batched_appends_coalesce_into_few_fsyncs() {
         ));
         let rec = WalRecord {
             signal_type: SignalType::Trace,
-            tenant_id: uuid::Uuid::nil(),
-            project_id: uuid::Uuid::nil(),
+            workspace_id: uuid::Uuid::nil().into(),
             arrival_timestamp_ns: 0,
             assigned_offset: 0,
             payload: envelope,
@@ -282,17 +272,16 @@ async fn batched_appends_coalesce_into_few_fsyncs() {
 }
 
 #[tokio::test]
-async fn batch_envelope_groups_separate_tenants_into_separate_records() {
-    // The runtime writer groups rows by (tenant, project) before batching. We
-    // simulate that contract: two tenants → two records, each with its own
-    // tenant_id on the outer WalRecord.
+async fn batch_envelope_groups_separate_workspaces_into_separate_records() {
+    // The runtime writer groups rows by workspace before batching. We
+    // simulate that contract: two workspaces → two records, each with its own
+    // workspace_id on the outer WalRecord.
     let tmp = TempDir::new().unwrap();
     let cancel = CancellationToken::new();
     let wal = Arc::new(open_wal_default(&tmp, cancel.clone()).await);
 
-    let tenant_a = uuid::Uuid::new_v4();
-    let tenant_b = uuid::Uuid::new_v4();
-    let project = uuid::Uuid::new_v4();
+    let workspace_a = uuid::Uuid::new_v4();
+    let workspace_b = uuid::Uuid::new_v4();
 
     let envelope_a = encode_json_rows(vec![
         br#"{"t":"a","i":0}"#.as_slice(),
@@ -302,8 +291,7 @@ async fn batch_envelope_groups_separate_tenants_into_separate_records() {
 
     wal.append(WalRecord {
         signal_type: SignalType::Trace,
-        tenant_id: tenant_a,
-        project_id: project,
+        workspace_id: workspace_a.into(),
         arrival_timestamp_ns: 0,
         assigned_offset: 0,
         payload: envelope_a,
@@ -316,8 +304,7 @@ async fn batch_envelope_groups_separate_tenants_into_separate_records() {
 
     wal.append(WalRecord {
         signal_type: SignalType::Trace,
-        tenant_id: tenant_b,
-        project_id: project,
+        workspace_id: workspace_b.into(),
         arrival_timestamp_ns: 0,
         assigned_offset: 0,
         payload: envelope_b,
@@ -335,11 +322,11 @@ async fn batch_envelope_groups_separate_tenants_into_separate_records() {
     let mut reader = SegmentReader::open(tmp.path(), segments[0]).unwrap();
 
     let r0 = reader.next_record().unwrap().unwrap();
-    assert_eq!(r0.tenant_id, tenant_a);
+    assert_eq!(r0.workspace_id, workspace_a.into());
     assert_eq!(decode_batch(&r0.payload).unwrap().unwrap().rows.len(), 2);
 
     let r1 = reader.next_record().unwrap().unwrap();
-    assert_eq!(r1.tenant_id, tenant_b);
+    assert_eq!(r1.workspace_id, workspace_b.into());
     assert_eq!(decode_batch(&r1.payload).unwrap().unwrap().rows.len(), 1);
 
     assert!(reader.next_record().unwrap().is_none());

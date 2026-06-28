@@ -1,11 +1,12 @@
 //! Shared test environment — server is ready and API key is configured.
 //!
-//! With config-based auth there is no login/org/project provisioning.
+//! With config-based auth there is no login/org/workspace provisioning.
 //! Tests use the API key from `TEST_API_KEY` environment variable (or the
 //! default `zk_test_default`).
 
 use anyhow::Result;
 use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 use crate::TestContext;
 use crate::helpers::{ApiClient, OtlpClient};
@@ -16,9 +17,7 @@ pub struct TestEnv {
     /// REST client with API key already set.
     pub client: ApiClient,
     /// Tenant ID — unique per test when test header context is enabled.
-    pub tenant_id: Uuid,
-    /// Project ID — unique per test for idempotent isolation.
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     /// Raw API key string.
     pub api_key: String,
     /// OTLP gRPC client pre-configured with `api_key`.
@@ -36,26 +35,22 @@ impl TestEnv {
 
         // config.test.toml enables test-only header context, so the static API
         // key is validated first and these headers simulate per-test API-key
-        // tenant/project context for full E2E isolation.
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        // workspace/workspace context for full E2E isolation.
+        let workspace_id = Uuid::new_v4();
 
         let api_key = ctx.config.api_key.clone();
         let mut client = ApiClient::new(ctx.config.api_url.clone());
         client.set_token(api_key.clone());
-        client.set_tenant_id(tenant_id.to_string());
-        client.set_project_id(project_id.to_string());
+        client.set_workspace_id(workspace_id.to_string());
 
         let otlp = OtlpClient::new(ctx.config.grpc_url.clone())
             .with_api_key(api_key.clone())
-            .with_tenant_id(tenant_id.to_string())
-            .with_project_id(project_id.to_string());
+            .with_workspace_id(workspace_id.to_string());
 
         Ok(Self {
             ctx,
             client,
-            tenant_id,
-            project_id,
+            workspace_id: workspace_id.into(),
             api_key,
             otlp,
         })

@@ -26,8 +26,7 @@ impl ConfigAuthenticator {
                 (
                     k.key.clone(),
                     RequestContext {
-                        tenant_id: k.tenant_id.clone(),
-                        project_id: k.project_id.clone(),
+                        workspace_id: k.workspace_id,
                     },
                 )
             })

@@ -24,26 +24,21 @@ struct CleanupStats {
     errors: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct RetentionConfigResponse {
-    org_id: Uuid,
-    default_days: u32,
-}
-
 #[tokio::test]
 #[ignore]
 async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
-    // Use a dedicated project_id so this destructive test is idempotent in
-    // reuse mode and does not affect other projects running in parallel.
+    // Use a dedicated workspace_id so this destructive test is idempotent in
+    // reuse mode and does not affect other workspaces running in parallel.
     let mut env = TestEnv::setup().await?;
-    let retention_project_id = Uuid::new_v4();
+    let retention_workspace_id = Uuid::new_v4();
 
-    env.client.set_project_id(retention_project_id.to_string());
+    env.client
+        .set_workspace_id(retention_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(retention_project_id.to_string());
-    env.project_id = retention_project_id;
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(retention_workspace_id.to_string());
+    env.workspace_id = retention_workspace_id.into();
 
     for i in 0..3 {
         let trace_id = TestDataGenerator::trace_id();
@@ -69,7 +64,7 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
         .client
         .post(
             &format!(
-                "/api/v1/admin/retention/run?retention_days=0&project_id={retention_project_id}"
+                "/api/v1/admin/retention/run?retention_days=0&workspace_id={retention_workspace_id}"
             ),
             &serde_json::Value::Null,
         )
@@ -95,16 +90,17 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_cleanup_preserves_recent_data() -> Result<()> {
-    // Use a dedicated project_id so cleanup is scoped and parallel-safe.
+    // Use a dedicated workspace_id so cleanup is scoped and parallel-safe.
     let mut env = TestEnv::setup().await?;
-    let retention_project_id = Uuid::new_v4();
+    let retention_workspace_id = Uuid::new_v4();
 
-    env.client.set_project_id(retention_project_id.to_string());
+    env.client
+        .set_workspace_id(retention_workspace_id.to_string());
     env.otlp = OtlpClient::new(env.ctx.config.grpc_url.clone())
         .with_api_key(env.api_key.clone())
-        .with_tenant_id(env.tenant_id.to_string())
-        .with_project_id(retention_project_id.to_string());
-    env.project_id = retention_project_id;
+        .with_workspace_id(env.workspace_id.to_string())
+        .with_workspace_id(retention_workspace_id.to_string());
+    env.workspace_id = retention_workspace_id.into();
 
     // Create old data (15 days ago - should be deleted with 7-day retention)
     let old_start_ns = days_ago_ns(15);
@@ -144,7 +140,7 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
         .client
         .post(
             &format!(
-                "/api/v1/admin/retention/run?retention_days=7&project_id={retention_project_id}"
+                "/api/v1/admin/retention/run?retention_days=7&workspace_id={retention_workspace_id}"
             ),
             &serde_json::Value::Null,
         )
@@ -164,49 +160,6 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
         "✅ Cleanup with 7-day retention preserved {} recent traces",
         total_after
     );
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_set_retention_config() -> Result<()> {
-    let env = TestEnv::setup().await?;
-    let org_id = env.tenant_id;
-
-    let set_resp = env
-        .client
-        .put(
-            "/api/v1/admin/retention/config",
-            &serde_json::json!({
-                "org_id": org_id,
-                "default_days": 14,
-                "project_overrides": {}
-            }),
-        )
-        .await?;
-    assert_eq!(
-        set_resp.status(),
-        200,
-        "Retention config update should return 200"
-    );
-    let set_config: RetentionConfigResponse = set_resp.json().await?;
-    assert_eq!(set_config.org_id, org_id);
-    assert_eq!(set_config.default_days, 14);
-
-    let get_resp = env
-        .client
-        .get(&format!("/api/v1/admin/retention/config/{}", org_id))
-        .await?;
-    assert_eq!(
-        get_resp.status(),
-        200,
-        "Retention config get should return 200"
-    );
-    let get_config: RetentionConfigResponse = get_resp.json().await?;
-    assert_eq!(get_config.org_id, org_id);
-    assert_eq!(get_config.default_days, 14);
-
-    println!("Retention config set via API");
     Ok(())
 }
 

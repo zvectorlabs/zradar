@@ -55,8 +55,7 @@ impl TelemetryWriter for ParquetTelemetryWriter {
         }
         match partition_by_storage_key(
             spans,
-            |s| s.tenant_id.as_str(),
-            |s| s.project_id.as_str(),
+            |s| s.workspace_id.as_str(),
             |s| s.service_name.as_str(),
             |s| s.timestamp,
         ) {
@@ -76,8 +75,7 @@ impl TelemetryWriter for ParquetTelemetryWriter {
         }
         match partition_by_storage_key(
             metrics,
-            |m| m.tenant_id.as_str(),
-            |m| m.project_id.as_str(),
+            |m| m.workspace_id.as_str(),
             |m| m.service_name.as_str(),
             |m| m.timestamp,
         ) {
@@ -97,8 +95,7 @@ impl TelemetryWriter for ParquetTelemetryWriter {
         }
         match partition_by_storage_key(
             logs,
-            |l| l.tenant_id.as_str(),
-            |l| l.project_id.as_str(),
+            |l| l.workspace_id.as_str(),
             |l| l.service_name.as_str(),
             |l| l.timestamp,
         ) {
@@ -121,8 +118,7 @@ impl TelemetryWriter for ParquetTelemetryWriter {
         // traces they evaluate.
         match partition_by_storage_key(
             scores,
-            |s| s.tenant_id.as_str(),
-            |s| s.project_id.as_str(),
+            |s| s.workspace_id.as_str(),
             |s| s.service_name.as_str(),
             |s| s.timestamp,
         ) {
@@ -143,7 +139,7 @@ impl ParquetTelemetryWriter {
             buf.push_spans(key.buffer_key("traces"), spans);
         } else {
             self.writer
-                .write_spans(&key.tenant_id, &key.project_id, &key.stream_name, spans)
+                .write_spans(&key.workspace_id, &key.stream_name, spans)
                 .await?;
         }
         Ok(())
@@ -158,7 +154,7 @@ impl ParquetTelemetryWriter {
             buf.push_metrics(key.buffer_key("metrics"), metrics);
         } else {
             self.writer
-                .write_metrics(&key.tenant_id, &key.project_id, &key.stream_name, metrics)
+                .write_metrics(&key.workspace_id, &key.stream_name, metrics)
                 .await?;
         }
         Ok(())
@@ -173,7 +169,7 @@ impl ParquetTelemetryWriter {
             buf.push_logs(key.buffer_key("logs"), logs);
         } else {
             self.writer
-                .write_logs(&key.tenant_id, &key.project_id, &key.stream_name, logs)
+                .write_logs(&key.workspace_id, &key.stream_name, logs)
                 .await?;
         }
         Ok(())
@@ -188,7 +184,7 @@ impl ParquetTelemetryWriter {
             buf.push_scores(key.buffer_key("scores"), scores);
         } else {
             self.writer
-                .write_scores(&key.tenant_id, &key.project_id, &key.stream_name, scores)
+                .write_scores(&key.workspace_id, &key.stream_name, scores)
                 .await?;
         }
         Ok(())
@@ -209,17 +205,15 @@ const NANOS_PER_HOUR: i64 = 3_600_000_000_000;
 /// mis-binning.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PartitionKey {
-    tenant_id: String,
-    project_id: String,
+    workspace_id: String,
     stream_name: String,
     hour: String,
 }
 
 impl PartitionKey {
-    fn of(tenant_id: &str, project_id: &str, service_name: &str, ts_ns: i64) -> Self {
+    fn of(workspace_id: &str, service_name: &str, ts_ns: i64) -> Self {
         Self {
-            tenant_id: tenant_id.to_string(),
-            project_id: project_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             stream_name: stream_of(service_name).to_string(),
             hour: ts_ns_to_date_path(ts_ns),
         }
@@ -227,8 +221,7 @@ impl PartitionKey {
 
     fn buffer_key(&self, signal_type: &str) -> BufferKey {
         BufferKey {
-            tenant_id: self.tenant_id.clone(),
-            project_id: self.project_id.clone(),
+            workspace_id: self.workspace_id.clone(),
             signal_type: signal_type.to_string(),
             stream_name: self.stream_name.clone(),
             hour: self.hour.clone(),
@@ -257,40 +250,32 @@ enum Partitioned<'a, T> {
 /// buckets ⇔ equal `"%Y/%m/%d/%H"`.
 fn partition_by_storage_key<T: Clone>(
     rows: &[T],
-    tenant_of: impl Fn(&T) -> &str,
-    project_of: impl Fn(&T) -> &str,
+    workspace_of: impl Fn(&T) -> &str,
     service_of: impl Fn(&T) -> &str,
     ts_of: impl Fn(&T) -> i64,
 ) -> Partitioned<'_, T> {
     let first = &rows[0];
     let d0 = (
-        tenant_of(first),
-        project_of(first),
+        workspace_of(first),
         stream_of(service_of(first)),
         ts_of(first).div_euclid(NANOS_PER_HOUR),
     );
     let homogeneous = rows.iter().all(|r| {
         (
-            tenant_of(r),
-            project_of(r),
+            workspace_of(r),
             stream_of(service_of(r)),
             ts_of(r).div_euclid(NANOS_PER_HOUR),
         ) == d0
     });
     if homogeneous {
-        let key = PartitionKey::of(
-            tenant_of(first),
-            project_of(first),
-            service_of(first),
-            ts_of(first),
-        );
+        let key = PartitionKey::of(workspace_of(first), service_of(first), ts_of(first));
         return Partitioned::Homogeneous(key, rows);
     }
 
     let mut index: HashMap<PartitionKey, usize> = HashMap::new();
     let mut groups: Vec<(PartitionKey, Vec<T>)> = Vec::new();
     for r in rows {
-        let key = PartitionKey::of(tenant_of(r), project_of(r), service_of(r), ts_of(r));
+        let key = PartitionKey::of(workspace_of(r), service_of(r), ts_of(r));
         let idx = *index.entry(key.clone()).or_insert_with(|| {
             groups.push((key.clone(), Vec::new()));
             groups.len() - 1
@@ -311,6 +296,9 @@ fn stream_of(service_name: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -348,7 +336,10 @@ mod tests {
             Ok(())
         }
 
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
 
@@ -400,8 +391,7 @@ mod tests {
 
         let span = Span {
             service_name: "my-agent".to_string(),
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             ..Span::default()
         };
 
@@ -419,8 +409,7 @@ mod tests {
 
         // service_name is empty string (the Span default)
         let span = Span {
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             ..Span::default()
         };
 
@@ -446,8 +435,7 @@ mod tests {
 
         let span = Span {
             service_name: "my-svc".to_string(),
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             timestamp: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
             ..Span::default()
         };
@@ -503,7 +491,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -520,10 +511,9 @@ mod tests {
         ParquetTelemetryWriter::with_buffer(fw, buffer)
     }
 
-    fn span_at(tenant: &str, project: &str, svc: &str, ts: i64) -> Span {
+    fn span_at(workspace: &str, svc: &str, ts: i64) -> Span {
         Span {
-            tenant_id: tenant.to_string(),
-            project_id: project.to_string(),
+            workspace_id: workspace.to_string(),
             service_name: svc.to_string(),
             timestamp: ts,
             ..Span::default()
@@ -540,16 +530,16 @@ mod tests {
         let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
         let writer = buffered_writer(buffer.clone());
 
-        let (ta, pa) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
-        let (tb, pb) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let wa = Uuid::new_v4().to_string();
+        let wb = Uuid::new_v4().to_string();
         let h10 = 10 * NANOS_PER_HOUR;
         let h11 = 11 * NANOS_PER_HOUR;
 
         writer
             .insert_spans(&[
-                span_at(&ta, &pa, "api", h10),
-                span_at(&tb, &pb, "web", h10),
-                span_at(&ta, &pa, "api", h11),
+                span_at(&wa, "api", h10),
+                span_at(&wb, "web", h10),
+                span_at(&wa, "api", h11),
             ])
             .await
             .unwrap();
@@ -557,30 +547,32 @@ mod tests {
         let slots = buffer.drain_all();
         assert_eq!(slots.len(), 3, "three distinct partitions expected");
 
-        // Tenant B's span must live in its OWN slot — never merged into A.
         let (b_key, b_slot) = slots
             .iter()
-            .find(|(k, _)| k.tenant_id == tb)
-            .expect("tenant B partition must exist");
-        assert_eq!(b_key.project_id, pb);
+            .find(|(k, _)| k.workspace_id == wb)
+            .expect("workspace B partition must exist");
         assert_eq!(b_key.stream_name, "web");
         match &b_slot.data {
             SignalBatch::Spans(v) => {
                 assert_eq!(v.len(), 1);
                 assert_eq!(
-                    v[0].tenant_id, tb,
-                    "no cross-tenant leak into tenant B's slot"
+                    v[0].workspace_id, wb,
+                    "no cross-workspace leak into workspace B's slot"
                 );
             }
             _ => panic!("expected Spans batch"),
         }
 
-        // Tenant A has two slots, same tenant/stream but different hour.
-        let a_slots: Vec<_> = slots.iter().filter(|(k, _)| k.tenant_id == ta).collect();
-        assert_eq!(a_slots.len(), 2, "tenant A split across two hours");
+        // Workspace A has two slots, same workspace/stream but different hour.
+        let a_slots: Vec<_> = slots.iter().filter(|(k, _)| k.workspace_id == wa).collect();
+        assert_eq!(a_slots.len(), 2, "workspace A split across two hours");
         let hours: std::collections::HashSet<_> =
             a_slots.iter().map(|(k, _)| k.hour.clone()).collect();
-        assert_eq!(hours.len(), 2, "two distinct hour partitions for tenant A");
+        assert_eq!(
+            hours.len(),
+            2,
+            "two distinct hour partitions for workspace A"
+        );
     }
 
     /// Scores were the originally flagged signal — verify they bin per tenant.
@@ -591,18 +583,17 @@ mod tests {
         let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
         let writer = buffered_writer(buffer.clone());
 
-        let ta = Uuid::new_v4().to_string();
-        let tb = Uuid::new_v4().to_string();
-        let score = |tenant: &str| EvaluationScore {
-            tenant_id: tenant.to_string(),
-            project_id: Uuid::new_v4().to_string(),
+        let wa = Uuid::new_v4().to_string();
+        let wb = Uuid::new_v4().to_string();
+        let score = |workspace: &str| EvaluationScore {
+            workspace_id: workspace.to_string(),
             service_name: "api".to_string(),
             timestamp: 10 * NANOS_PER_HOUR,
             ..EvaluationScore::default()
         };
 
         writer
-            .insert_scores(&[score(&ta), score(&tb)])
+            .insert_scores(&[score(&wa), score(&wb)])
             .await
             .unwrap();
 
@@ -613,16 +604,16 @@ mod tests {
                 SignalBatch::Scores(v) => {
                     assert_eq!(v.len(), 1);
                     assert_eq!(
-                        v[0].tenant_id, k.tenant_id,
-                        "each score binned under its own tenant"
+                        v[0].workspace_id, k.workspace_id,
+                        "each score binned under its own workspace"
                     );
                 }
                 _ => panic!("expected Scores batch"),
             }
         }
-        let tenants: std::collections::HashSet<_> =
-            slots.iter().map(|(k, _)| k.tenant_id.clone()).collect();
-        assert!(tenants.contains(&ta) && tenants.contains(&tb));
+        let workspaces: std::collections::HashSet<_> =
+            slots.iter().map(|(k, _)| k.workspace_id.clone()).collect();
+        assert!(workspaces.contains(&wa) && workspaces.contains(&wb));
     }
 
     /// Fast path: a homogeneous batch stays a single partition with all rows.
@@ -633,12 +624,12 @@ mod tests {
         let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
         let writer = buffered_writer(buffer.clone());
 
-        let (t, p) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let w = Uuid::new_v4().to_string();
         let h10 = 10 * NANOS_PER_HOUR;
 
-        // Same tenant/project/stream, both within the same hour.
+        // Same workspace/stream, both within the same hour.
         writer
-            .insert_spans(&[span_at(&t, &p, "api", h10), span_at(&t, &p, "api", h10 + 5)])
+            .insert_spans(&[span_at(&w, "api", h10), span_at(&w, "api", h10 + 5)])
             .await
             .unwrap();
 
@@ -664,15 +655,15 @@ mod tests {
             ParquetTelemetryWriter::new(fw)
         };
 
-        let (ta, pa) = (Uuid::new_v4(), Uuid::new_v4());
-        let (tb, pb) = (Uuid::new_v4(), Uuid::new_v4());
+        let wa = Uuid::new_v4();
+        let wb = Uuid::new_v4();
         let h10 = 10 * NANOS_PER_HOUR;
 
         writer
             .insert_spans(&[
-                span_at(&ta.to_string(), &pa.to_string(), "api", h10),
-                span_at(&tb.to_string(), &pb.to_string(), "web", h10),
-                span_at(&ta.to_string(), &pa.to_string(), "api", h10),
+                span_at(&wa.to_string(), "api", h10),
+                span_at(&wb.to_string(), "web", h10),
+                span_at(&wa.to_string(), "api", h10),
             ])
             .await
             .unwrap();
@@ -682,18 +673,18 @@ mod tests {
 
         let b = entries
             .iter()
-            .find(|e| e.tenant_id == tb)
-            .expect("tenant B file must exist");
-        assert_eq!(b.records, 1, "tenant B file holds only B's span");
+            .find(|e| e.workspace_id == wb.into())
+            .expect("workspace B file must exist");
+        assert_eq!(b.records, 1, "workspace B file holds only B's span");
         assert_eq!(b.stream_name, "web");
 
         let a = entries
             .iter()
-            .find(|e| e.tenant_id == ta)
-            .expect("tenant A file must exist");
+            .find(|e| e.workspace_id == wa.into())
+            .expect("workspace A file must exist");
         assert_eq!(
             a.records, 2,
-            "tenant A's two same-partition spans coalesced"
+            "workspace A's two same-partition spans coalesced"
         );
         assert_eq!(a.stream_name, "api");
     }

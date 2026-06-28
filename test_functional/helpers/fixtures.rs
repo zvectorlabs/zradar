@@ -57,15 +57,15 @@ impl TestDataGenerator {
     // Project Data
     // ========================================================================
 
-    /// Generate a unique project name
-    pub fn project_name() -> String {
+    /// Generate a unique workspace name
+    pub fn workspace_name() -> String {
         // Use UUID instead of timestamp to avoid collisions in parallel tests
         let unique_id = Self::test_id();
-        format!("test-project-{}", unique_id)
+        format!("test-workspace-{}", unique_id)
     }
 
-    /// Generate a random project display name
-    pub fn project_display_name() -> String {
+    /// Generate a random workspace display name
+    pub fn workspace_display_name() -> String {
         format!("{} Project", CompanyName().fake::<String>())
     }
 
@@ -157,8 +157,8 @@ impl TestDataGenerator {
 pub struct FixtureBuilder {
     org_name: Option<String>,
     org_display_name: Option<String>,
-    project_name: Option<String>,
-    project_display_name: Option<String>,
+    workspace_name: Option<String>,
+    workspace_display_name: Option<String>,
     api_key_name: Option<String>,
     api_key_description: Option<String>,
 }
@@ -174,8 +174,8 @@ impl FixtureBuilder {
         Self {
             org_name: None,
             org_display_name: None,
-            project_name: None,
-            project_display_name: None,
+            workspace_name: None,
+            workspace_display_name: None,
             api_key_name: None,
             api_key_description: None,
         }
@@ -191,13 +191,13 @@ impl FixtureBuilder {
         self
     }
 
-    pub fn project_name(mut self, name: impl Into<String>) -> Self {
-        self.project_name = Some(name.into());
+    pub fn workspace_name(mut self, name: impl Into<String>) -> Self {
+        self.workspace_name = Some(name.into());
         self
     }
 
-    pub fn project_display_name(mut self, name: impl Into<String>) -> Self {
-        self.project_display_name = Some(name.into());
+    pub fn workspace_display_name(mut self, name: impl Into<String>) -> Self {
+        self.workspace_display_name = Some(name.into());
         self
     }
 
@@ -217,12 +217,12 @@ impl FixtureBuilder {
             org_display_name: self
                 .org_display_name
                 .unwrap_or_else(TestDataGenerator::org_display_name),
-            project_name: self
-                .project_name
-                .unwrap_or_else(TestDataGenerator::project_name),
-            project_display_name: self
-                .project_display_name
-                .unwrap_or_else(TestDataGenerator::project_display_name),
+            workspace_name: self
+                .workspace_name
+                .unwrap_or_else(TestDataGenerator::workspace_name),
+            workspace_display_name: self
+                .workspace_display_name
+                .unwrap_or_else(TestDataGenerator::workspace_display_name),
             api_key_name: self
                 .api_key_name
                 .unwrap_or_else(TestDataGenerator::api_key_name),
@@ -237,8 +237,8 @@ impl FixtureBuilder {
 pub struct TestFixture {
     pub org_name: String, // This becomes the display name (name field in API)
     pub org_display_name: String, // Deprecated - same as org_name
-    pub project_name: String, // This becomes the display name (name field in API)
-    pub project_display_name: String, // Deprecated - same as project_name
+    pub workspace_name: String, // This becomes the display name (name field in API)
+    pub workspace_display_name: String, // Deprecated - same as workspace_name
     pub api_key_name: String,
     pub api_key_description: String,
 }
@@ -252,9 +252,9 @@ impl TestFixture {
             .replace("_", "-")
     }
 
-    /// Get project slug (auto-generated from project_name)
-    pub fn project_slug(&self) -> String {
-        self.project_name
+    /// Get workspace slug (auto-generated from workspace_name)
+    pub fn workspace_slug(&self) -> String {
+        self.workspace_name
             .to_lowercase()
             .replace(" ", "-")
             .replace("_", "-")

@@ -23,8 +23,7 @@ max_connections = 20
 
 [[api_keys]]
 key        = "zk_dev_local"
-tenant_id  = "local"
-project_id = "default"
+workspace_id = "00000000-0000-0000-0000-000000000000"
 name       = "local dev"
 
 [ingestor]

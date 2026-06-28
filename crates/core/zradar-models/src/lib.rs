@@ -15,9 +15,8 @@ mod evaluation_score;
 pub mod file_list;
 mod log_record;
 mod metric;
-mod project_settings;
-mod retention_policy;
 mod span;
+mod workspace_settings;
 
 pub use audit_log::{AuditLog, NewAuditLog};
 pub use config::Config;
@@ -28,9 +27,11 @@ pub use file_list::{
 };
 pub use log_record::LogRecord;
 pub use metric::{Metric, MetricType};
-pub use project_settings::{NewProjectSettings, ProjectSettings};
-pub use retention_policy::{NewRetentionPolicy, RetentionPolicy};
 pub use span::Span;
+pub use workspace_settings::{NewWorkspaceSettings, WorkspaceSettings};
 
 // Re-export commonly used config types for convenience
 pub use config::{ApiKeyConfig, AuthConfig, ParquetStorageConfig};
+
+pub mod workspace;
+pub use workspace::*;

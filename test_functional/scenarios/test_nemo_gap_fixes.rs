@@ -26,10 +26,10 @@ fn test_auth_header(env: &TestEnv) -> String {
 }
 
 async fn disable_content_capture(env: &TestEnv) -> Result<()> {
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let default_settings = ApiClient::get_json(
         env.client
-            .get(&format!("/api/v1/projects/{project_id}/settings"))
+            .get(&format!("/api/v1/workspaces/{workspace_id}/settings"))
             .await?,
     )
     .await?;
@@ -45,13 +45,13 @@ async fn disable_content_capture(env: &TestEnv) -> Result<()> {
     let update_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{project_id}/settings"),
+            &format!("/api/v1/workspaces/{workspace_id}/settings"),
             &disable_body,
         )
         .await?;
     assert!(
         update_resp.status().is_success(),
-        "project settings update must succeed before content-capture assertion; status={}",
+        "workspace settings update must succeed before content-capture assertion; status={}",
         update_resp.status()
     );
     Ok(())
@@ -128,8 +128,7 @@ async fn test_g1_http_logs_persists_eval_scores() -> Result<()> {
         .post(format!("{}/v1/logs", otlp_http_url))
         .header("content-type", "application/x-protobuf")
         .header("authorization", test_auth_header(&env))
-        .header("x-tenant-id", env.tenant_id.to_string())
-        .header("x-project-id", env.project_id.to_string())
+        .header("x-workspace-id", env.workspace_id.to_string())
         .body(body)
         .send()
         .await?;
@@ -143,12 +142,9 @@ async fn test_g1_http_logs_persists_eval_scores() -> Result<()> {
     let score_files = poll_until(
         || {
             let db = &db;
-            let tenant_id = env.tenant_id;
-            let project_id = env.project_id;
+            let workspace_id = env.workspace_id;
             async move {
-                let rows = db
-                    .file_list_entries(&tenant_id, &project_id, "scores")
-                    .await?;
+                let rows = db.file_list_entries(&workspace_id, "scores").await?;
                 if rows.iter().any(|row| row.records > 0 && !row.deleted) {
                     Ok(Some(rows))
                 } else {
@@ -164,7 +160,7 @@ async fn test_g1_http_logs_persists_eval_scores() -> Result<()> {
         score_files
             .iter()
             .any(|row| row.records > 0 && !row.deleted),
-        "HTTP /v1/logs must persist at least one score file for tenant/project"
+        "HTTP /v1/logs must persist at least one score file for workspace/workspace"
     );
 
     println!("✅ G1: HTTP /v1/logs persists eval scores with auth/context headers");
@@ -200,13 +196,12 @@ async fn test_g4_trace_llm_response_model_filter() -> Result<()> {
 
     wait_for_trace_default(&env.client, &hex::encode(trace_id)).await?;
 
-    let project_id = env.client.project_id();
-
+    let workspace_id = env.client.workspace_id();
     // Filter by the unique response model — must return at least one trace.
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/traces?project_id={project_id}&llm_response_model={unique_model}"
+            "/api/v1/traces?workspace_id={workspace_id}&llm_response_model={unique_model}"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -222,7 +217,7 @@ async fn test_g4_trace_llm_response_model_filter() -> Result<()> {
     let resp_none = env
         .client
         .get(&format!(
-            "/api/v1/traces?project_id={project_id}&llm_response_model=nonexistent_model_zzz"
+            "/api/v1/traces?workspace_id={workspace_id}&llm_response_model=nonexistent_model_zzz"
         ))
         .await?;
     assert!(resp_none.status().is_success());
@@ -346,7 +341,7 @@ async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
 #[ignore]
 async fn test_g9_start_time_only_filter_applied() -> Result<()> {
     let env = TestEnv::setup().await?;
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let service = TestDataGenerator::service_name();
 
     // Ingest a span so there's data.
@@ -371,7 +366,7 @@ async fn test_g9_start_time_only_filter_applied() -> Result<()> {
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&start_time={future_start}"
+            "/api/v1/spans?workspace_id={workspace_id}&start_time={future_start}"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -392,12 +387,12 @@ async fn test_g9_start_time_only_filter_applied() -> Result<()> {
 // G3/G6: content-capture scrubs events and attributes
 // ---------------------------------------------------------------------------
 
-/// G3/G6: When content capture is disabled for a project, the ingested span
+/// G3/G6: When content capture is disabled for a workspace, the ingested span
 /// must not contain prompt/completion text in llm_input, llm_output, events,
 /// or attributes columns.
 ///
-/// Note: this test only fires if the project has capture disabled in its
-/// settings. The test updates the real project settings row, ingests a span,
+/// Note: this test only fires if the workspace has capture disabled in its
+/// settings. The test updates the real workspace settings row, ingests a span,
 /// and verifies prompt/completion text is scrubbed from all response columns.
 #[tokio::test]
 #[ignore]
@@ -436,7 +431,7 @@ async fn test_g3_g6_content_capture_disabled_scrubs_all_columns() -> Result<()> 
     Ok(())
 }
 
-/// G3/G6: OTLP/HTTP traces must use the same project settings-backed content
+/// G3/G6: OTLP/HTTP traces must use the same workspace settings-backed content
 /// capture policy as gRPC traces.
 #[tokio::test]
 #[ignore]
@@ -467,8 +462,7 @@ async fn test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns() ->
         .post(format!("{}/v1/traces", otlp_http_url()))
         .header("content-type", "application/x-protobuf")
         .header("authorization", test_auth_header(&env))
-        .header("x-tenant-id", env.tenant_id.to_string())
-        .header("x-project-id", env.project_id.to_string())
+        .header("x-workspace-id", env.workspace_id.to_string())
         .body(req.encode_to_vec())
         .send()
         .await?;
@@ -487,18 +481,18 @@ async fn test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns() ->
 }
 
 /// HTTP guard-chain parity: OTLP/HTTP traces must enforce the same
-/// project-level ingestion rate limits as gRPC traces.
+/// workspace-level ingestion rate limits as gRPC traces.
 #[tokio::test]
 #[ignore]
-async fn test_http_trace_project_ingestion_rate_limited() -> Result<()> {
+async fn test_http_trace_workspace_ingestion_rate_limited() -> Result<()> {
     let env = TestEnv::setup().await?;
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let service = TestDataGenerator::service_name();
 
     let settings_resp = env
         .client
         .put(
-            &format!("/api/v1/projects/{project_id}/settings"),
+            &format!("/api/v1/workspaces/{workspace_id}/settings"),
             &serde_json::json!({
                 "traces_retention_days": 90,
                 "metrics_retention_days": 30,
@@ -529,8 +523,7 @@ async fn test_http_trace_project_ingestion_rate_limited() -> Result<()> {
         .post(format!("{}/v1/traces", otlp_http_url()))
         .header("content-type", "application/x-protobuf")
         .header("authorization", test_auth_header(&env))
-        .header("x-tenant-id", env.tenant_id.to_string())
-        .header("x-project-id", env.project_id.to_string())
+        .header("x-workspace-id", env.workspace_id.to_string())
         .body(req.encode_to_vec())
         .send()
         .await?;
@@ -538,7 +531,7 @@ async fn test_http_trace_project_ingestion_rate_limited() -> Result<()> {
     assert_eq!(
         resp.status(),
         429,
-        "OTLP/HTTP traces must enforce project max_ingestion_rate"
+        "OTLP/HTTP traces must enforce workspace max_ingestion_rate"
     );
 
     println!("✅ HTTP guard-chain parity: trace ingestion rate limits apply to OTLP/HTTP");

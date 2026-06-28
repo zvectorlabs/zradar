@@ -90,84 +90,78 @@ impl AuthContext {
         }
     }
 
-    /// Parses the authenticated tenant ID as a UUID.
-    pub fn tenant_uuid(&self) -> ApiResult<Uuid> {
-        parse_ctx_uuid(&self.ctx.tenant_id, "tenant_id")
+    /// Parses the authenticated workspace ID as a UUID.
+    pub fn workspace_uuid(&self) -> ApiResult<Uuid> {
+        Ok(self.ctx.workspace_id.into())
     }
 
-    /// Parses the authenticated project ID as a UUID.
-    pub fn project_uuid(&self) -> ApiResult<Uuid> {
-        parse_ctx_uuid(&self.ctx.project_id, "project_id")
+    /// Returns the authenticated workspace ID string.
+    pub fn workspace_id(&self) -> Uuid {
+        self.ctx.workspace_id.into()
     }
 
-    /// Returns the authenticated project ID string.
-    pub fn project_id(&self) -> &str {
-        &self.ctx.project_id
-    }
-
-    /// Enforces that a path project matches the authenticated project.
+    /// Enforces that a path workspace matches the authenticated workspace.
     ///
     /// When capabilities are present (gateway wrapper), the authenticated
-    /// project must match the path parameter to prevent cross-project reads.
+    /// workspace must match the path parameter to prevent cross-workspace reads.
     /// In standalone mode (empty capabilities list) this is a no-op.
-    pub fn enforce_path_project(&self, path_project: Uuid) -> ApiResult<()> {
+    pub fn enforce_path_workspace(&self, path_workspace: Uuid) -> ApiResult<()> {
         if self.capabilities.is_empty() {
             return Ok(());
         }
-        if self.project_uuid()? != path_project {
+        if self.workspace_uuid()? != path_workspace {
             return Err(ControlError::Forbidden(
-                "path project_id does not match authenticated project".to_string(),
+                "path workspace_id does not match authenticated workspace".to_string(),
             ));
         }
         Ok(())
     }
 
-    /// Returns the tenant, allowing an optional caller-provided override when
+    /// Returns the workspace, allowing an optional caller-provided override when
     /// capabilities are not set (standalone API-key mode).
     ///
     /// When capabilities are present, the override is ignored and the
-    /// authenticated tenant is returned to prevent cross-tenant access.
-    pub fn tenant_or_standalone_override(&self, requested_org: Option<Uuid>) -> ApiResult<Uuid> {
-        let tenant_id = self.tenant_uuid()?;
+    /// authenticated workspace is returned to prevent cross-workspace access.
+    pub fn workspace_or_standalone_override(
+        &self,
+        requested_workspace: Option<Uuid>,
+    ) -> ApiResult<Uuid> {
+        let workspace_id = self.workspace_uuid()?;
         if self.capabilities.is_empty() {
-            Ok(requested_org.unwrap_or(tenant_id))
+            Ok(requested_workspace.unwrap_or(workspace_id))
         } else {
-            Ok(tenant_id)
+            Ok(workspace_id)
         }
     }
 
-    /// Returns the tenant or rejects a cross-tenant override when capabilities are present.
-    pub fn tenant_or_reject_platform_override(
+    /// Returns the workspace or rejects a cross-workspace override when capabilities are present.
+    pub fn workspace_or_reject_platform_override(
         &self,
-        requested_org: Option<Uuid>,
+        requested_workspace: Option<Uuid>,
     ) -> ApiResult<Uuid> {
-        let tenant_id = self.tenant_uuid()?;
+        let workspace_id = self.workspace_uuid()?;
         if self.capabilities.is_empty() {
-            return Ok(requested_org.unwrap_or(tenant_id));
+            return Ok(requested_workspace.unwrap_or(workspace_id));
         }
-        if let Some(requested) = requested_org
-            && requested != tenant_id
+        if let Some(requested) = requested_workspace
+            && requested != workspace_id
         {
             return Err(ControlError::Forbidden(
-                "org_id override not allowed when capabilities are enforced".to_string(),
+                "workspace_id override not allowed when capabilities are enforced".to_string(),
             ));
         }
-        Ok(tenant_id)
+        Ok(workspace_id)
     }
 
-    /// Returns tenant/project filters for audit reads.
+    /// Returns workspace filters for audit reads.
     ///
-    /// When capabilities are present, returns the authenticated tenant/project
-    /// to prevent cross-org or cross-project audit reads.
-    pub fn audit_scope(
-        &self,
-        requested_org: Option<Uuid>,
-        requested_project: Option<Uuid>,
-    ) -> ApiResult<(Option<Uuid>, Option<Uuid>)> {
+    /// When capabilities are present, returns the authenticated workspace
+    /// to prevent cross-workspace audit reads.
+    pub fn audit_scope(&self, requested_workspace: Option<Uuid>) -> ApiResult<Option<Uuid>> {
         if !self.capabilities.is_empty() {
-            Ok((Some(self.tenant_uuid()?), Some(self.project_uuid()?)))
+            Ok(Some(self.workspace_uuid()?))
         } else {
-            Ok((requested_org, requested_project))
+            Ok(requested_workspace)
         }
     }
 }

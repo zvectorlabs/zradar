@@ -23,7 +23,7 @@ async fn test_http_gzip_compression_on_telemetry() -> Result<()> {
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
     // Query with Accept-Encoding: gzip header
-    let path = format!("/api/v1/traces/{}", trace_id_hex, env.project_id);
+    let path = format!("/api/v1/traces/{}", trace_id_hex, env.workspace_id);
     let response = env.client
         .get_with_header(&path, "Accept-Encoding", "gzip")
         .await?;
@@ -112,7 +112,7 @@ async fn test_compression_roundtrip() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let query_path = format!("/api/v1/traces/{}", trace_id_hex, env.project_id);
+    let query_path = format!("/api/v1/traces/{}", trace_id_hex, env.workspace_id);
     let response = env.client
         .get_with_header(&query_path, "Accept-Encoding", "gzip")
         .await?;

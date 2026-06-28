@@ -28,8 +28,7 @@ pub fn span_arrow_schema() -> Schema {
         Field::new("timestamp", DataType::Int64, false),
         Field::new("duration_ns", DataType::Int64, false),
         // Multi-tenancy
-        Field::new("tenant_id", DataType::Utf8, false),
-        Field::new("project_id", DataType::Utf8, false),
+        Field::new("workspace_id", DataType::Utf8, false),
         // Service metadata
         Field::new("service_name", DataType::Utf8, false),
         Field::new("span_name", DataType::Utf8, false),
@@ -119,8 +118,7 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
     let timestamp: Int64Array = spans.iter().map(|s| s.timestamp).collect();
     let duration_ns: Int64Array = spans.iter().map(|s| s.duration_ns).collect();
     // Multi-tenancy
-    let tenant_id = StringArray::from_iter_values(spans.iter().map(|s| s.tenant_id.as_str()));
-    let project_id = StringArray::from_iter_values(spans.iter().map(|s| s.project_id.as_str()));
+    let workspace_id = StringArray::from_iter_values(spans.iter().map(|s| s.workspace_id.as_str()));
     // Service metadata
     let service_name = StringArray::from_iter_values(spans.iter().map(|s| s.service_name.as_str()));
     let span_name = StringArray::from_iter_values(spans.iter().map(|s| s.span_name.as_str()));
@@ -207,8 +205,7 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         Arc::new(parent_span_id),
         Arc::new(timestamp),
         Arc::new(duration_ns),
-        Arc::new(tenant_id),
-        Arc::new(project_id),
+        Arc::new(workspace_id),
         Arc::new(service_name),
         Arc::new(span_name),
         Arc::new(span_kind),
@@ -410,8 +407,7 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
     let parent_span_id_col = str_col!("parent_span_id");
     let timestamp_col = i64_col!("timestamp");
     let duration_ns_col = i64_col!("duration_ns");
-    let tenant_id_col = str_col!("tenant_id");
-    let project_id_col = str_col!("project_id");
+    let workspace_id_col = str_col!("workspace_id");
     let service_name_col = str_col!("service_name");
     let span_name_col = str_col!("span_name");
     let span_kind_col = str_col!("span_kind");
@@ -497,8 +493,7 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
             parent_span_id: parent_span_id_col.value(i).to_string(),
             timestamp: timestamp_col.value(i),
             duration_ns: duration_ns_col.value(i),
-            tenant_id: tenant_id_col.value(i).to_string(),
-            project_id: project_id_col.value(i).to_string(),
+            workspace_id: workspace_id_col.value(i).to_string(),
             service_name: service_name_col.value(i).to_string(),
             span_name: span_name_col.value(i).to_string(),
             span_kind: span_kind_col.value(i).to_string(),
@@ -601,11 +596,11 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
 mod tests {
     use super::*;
 
-    fn make_span(trace_id: &str, project_id: &str) -> Span {
+    fn make_span(trace_id: &str, workspace_id: &str) -> Span {
         Span {
             trace_id: trace_id.to_string(),
             span_id: uuid::Uuid::new_v4().to_string(),
-            project_id: project_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             ..Span::default()
         }
     }
@@ -613,19 +608,19 @@ mod tests {
     #[test]
     fn test_span_arrow_schema_field_count() {
         let schema = span_arrow_schema();
-        // 60 fields total: 45 baseline + 6 Phase 0 Guardrails + 5 Phase 1
+        // 59 fields total: 45 baseline + 6 Phase 0 Guardrails + 5 Phase 1
         // (workflow_run_id, framework, llm_provider, llm_response_model, events)
-        // + 4 Phase 4 (llm_cache_hit, llm_response_id, environment, links).
+        // + 4 Phase 4 (llm_cache_hit, llm_response_id, environment, links) - 1 workspace_id refactor.
         // Per OQ7/D-G3 (single release), the schema-count test asserts the
-        // final 60-col layout; multi-generation regression tests are dropped.
-        assert_eq!(schema.fields().len(), 60);
+        // final 59-col layout; multi-generation regression tests are dropped.
+        assert_eq!(schema.fields().len(), 59);
     }
 
     #[test]
     fn test_spans_to_record_batch_empty() {
         let batch = spans_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 60);
+        assert_eq!(batch.num_columns(), 59);
     }
 
     #[test]
@@ -642,7 +637,7 @@ mod tests {
         assert_eq!(recovered.len(), 2);
         assert_eq!(recovered[0].trace_id, "trace-001");
         assert_eq!(recovered[1].trace_id, "trace-002");
-        assert_eq!(recovered[0].project_id, "proj-001");
+        assert_eq!(recovered[0].workspace_id, "proj-001");
     }
 
     #[test]
@@ -985,7 +980,7 @@ mod tests {
         let spans = vec![
             Span {
                 trace_id: "trace-legacy-1".to_string(),
-                project_id: "proj-1".to_string(),
+                workspace_id: "proj-1".to_string(),
                 status_code: "OK".to_string(),
                 llm_model: "gpt-4".to_string(),
                 prompt_tokens: 42,
@@ -1003,7 +998,7 @@ mod tests {
             },
             Span {
                 trace_id: "trace-legacy-2".to_string(),
-                project_id: "proj-1".to_string(),
+                workspace_id: "proj-1".to_string(),
                 ..Span::default()
             },
         ];
@@ -1070,7 +1065,7 @@ mod tests {
 
         // Carried-over columns still round-trip.
         assert_eq!(recovered[0].trace_id, "trace-legacy-1");
-        assert_eq!(recovered[0].project_id, "proj-1");
+        assert_eq!(recovered[0].workspace_id, "proj-1");
         assert_eq!(recovered[0].status_code, "OK");
         assert_eq!(recovered[0].llm_model, "gpt-4");
         assert_eq!(recovered[0].prompt_tokens, 42);
@@ -1093,7 +1088,7 @@ mod tests {
 
     // Note: the Phase 0 → Phase 1 multi-generation regression test
     // (`tolerates_51_col_phase0_file`) was removed per OQ7 / D-G3 — production
-    // never reads a pre-60-col file under the single-release model. The
+    // never reads a pre-59-col file under the single-release model. The
     // generic optional-column tolerance is still covered by
     // `tolerates_missing_columns`, the immediate-prior-generation case by
     // `tolerates_56_col_legacy_file`, and the on-disk + 45-col tests below.

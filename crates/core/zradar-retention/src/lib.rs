@@ -16,7 +16,7 @@ pub mod file_reclaimer;
 pub mod storage_usage_daily;
 
 pub use cleanup::{CleanupJob, CleanupStats, RetentionRunStats};
-pub use config::{OrgRetentionConfig, RetentionConfigStore};
+pub use config::{RetentionConfigStore, WorkspaceRetentionConfig};
 pub use enforcer::{EnforcementResult, EnforcementStrategy, QueryEnforcer};
 pub use file_reclaimer::{FileReclaimer, ReclaimStats};
 pub use storage_usage_daily::StorageUsageDailyJob;

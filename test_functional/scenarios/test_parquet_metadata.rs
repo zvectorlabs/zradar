@@ -51,9 +51,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
     for signal_type in ["traces", "metrics", "logs"] {
         let file_entries = poll_until(
             || async {
-                let rows = db
-                    .file_list_entries(&env.tenant_id, &env.project_id, signal_type)
-                    .await?;
+                let rows = db.file_list_entries(&env.workspace_id, signal_type).await?;
                 if rows.is_empty() {
                     Ok(None)
                 } else {
@@ -71,8 +69,8 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
         );
 
         for entry in file_entries.iter().filter(|entry| !entry.deleted) {
-            assert_eq!(entry.tenant_id, env.tenant_id);
-            assert_eq!(entry.project_id, env.project_id);
+            assert_eq!(entry.workspace_id, env.workspace_id);
+            assert_eq!(entry.workspace_id, env.workspace_id);
             assert_eq!(entry.signal_type, signal_type);
             assert_eq!(entry.location, "local");
             assert!(
@@ -89,9 +87,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
             assert!(entry.min_ts <= entry.max_ts, "time range should be valid");
         }
 
-        let stats_entries = db
-            .stream_stats(&env.tenant_id, &env.project_id, signal_type)
-            .await?;
+        let stats_entries = db.stream_stats(&env.workspace_id, signal_type).await?;
         assert!(
             !stats_entries.is_empty(),
             "{signal_type} should have stream_stats rows"
@@ -112,7 +108,7 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_all_signal_project_isolation() -> Result<()> {
+async fn test_all_signal_workspace_isolation() -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
 
@@ -165,7 +161,7 @@ async fn test_all_signal_project_isolation() -> Result<()> {
         .await?;
     assert!(
         trace_response.status().as_u16() == 404 || trace_response.status().as_u16() == 200,
-        "trace detail for another project should return 404 or empty 200"
+        "trace detail for another workspace should return 404 or empty 200"
     );
     if trace_response.status().is_success() {
         let trace_body: Value = trace_response.json().await?;
@@ -202,6 +198,6 @@ async fn test_all_signal_project_isolation() -> Result<()> {
         "Project B must not see Project A logs"
     );
 
-    println!("✅ All-signal project isolation verified");
+    println!("✅ All-signal workspace isolation verified");
     Ok(())
 }

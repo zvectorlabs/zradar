@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 //! gRPC client for testing OTLP endpoints
 
 use anyhow::{Context, Result};
@@ -36,8 +37,7 @@ pub struct SpanDefExt {
 pub struct OtlpClient {
     grpc_url: String,
     api_key: Option<String>,
-    tenant_id: Option<String>,
-    project_id: Option<String>,
+    workspace_id: Option<String>,
 }
 
 impl OtlpClient {
@@ -46,8 +46,7 @@ impl OtlpClient {
         Self {
             grpc_url,
             api_key: None,
-            tenant_id: None,
-            project_id: None,
+            workspace_id: None,
         }
     }
 
@@ -62,15 +61,9 @@ impl OtlpClient {
         self.api_key = Some(api_key);
     }
 
-    /// Set tenant ID header override
-    pub fn with_tenant_id(mut self, tenant_id: String) -> Self {
-        self.tenant_id = Some(tenant_id);
-        self
-    }
-
-    /// Set project ID header override
-    pub fn with_project_id(mut self, project_id: String) -> Self {
-        self.project_id = Some(project_id);
+    /// Set workspace ID header override
+    pub fn with_workspace_id(mut self, workspace_id: String) -> Self {
+        self.workspace_id = Some(workspace_id);
         self
     }
 
@@ -91,12 +84,8 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
-        let tenant_id_val = self
-            .tenant_id
-            .as_ref()
-            .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
-        let project_id_val = self
-            .project_id
+        let workspace_id_val = self
+            .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
@@ -105,11 +94,8 @@ impl OtlpClient {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
                 }
-                if let Some(val) = &tenant_id_val {
-                    req.metadata_mut().insert("x-tenant-id", val.clone());
-                }
-                if let Some(val) = &project_id_val {
-                    req.metadata_mut().insert("x-project-id", val.clone());
+                if let Some(val) = &workspace_id_val {
+                    req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
                 Ok(req)
             });
@@ -307,12 +293,12 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
-        let tenant_id_val = self
-            .tenant_id
+        let _workspace_id_val = self
+            .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
-        let project_id_val = self
-            .project_id
+        let _workspace_id_val = self
+            .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
@@ -321,11 +307,11 @@ impl OtlpClient {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
                 }
-                if let Some(val) = &tenant_id_val {
-                    req.metadata_mut().insert("x-tenant-id", val.clone());
+                if let Some(val) = &_workspace_id_val {
+                    req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
-                if let Some(val) = &project_id_val {
-                    req.metadata_mut().insert("x-project-id", val.clone());
+                if let Some(val) = &_workspace_id_val {
+                    req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
                 Ok(req)
             });
@@ -450,12 +436,12 @@ impl OtlpClient {
             .api_key
             .as_ref()
             .and_then(|key| MetadataValue::try_from(format!("Bearer {}", key)).ok());
-        let tenant_id_val = self
-            .tenant_id
+        let _workspace_id_val = self
+            .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
-        let project_id_val = self
-            .project_id
+        let _workspace_id_val = self
+            .workspace_id
             .as_ref()
             .and_then(|v| MetadataValue::try_from(v.as_str()).ok());
 
@@ -464,11 +450,11 @@ impl OtlpClient {
                 if let Some(token) = &api_key_token {
                     req.metadata_mut().insert("authorization", token.clone());
                 }
-                if let Some(val) = &tenant_id_val {
-                    req.metadata_mut().insert("x-tenant-id", val.clone());
+                if let Some(val) = &_workspace_id_val {
+                    req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
-                if let Some(val) = &project_id_val {
-                    req.metadata_mut().insert("x-project-id", val.clone());
+                if let Some(val) = &_workspace_id_val {
+                    req.metadata_mut().insert("x-workspace-id", val.clone());
                 }
                 Ok(req)
             });

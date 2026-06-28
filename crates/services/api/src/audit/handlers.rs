@@ -17,8 +17,7 @@ pub struct AuditState {
 
 #[derive(Debug, Deserialize)]
 pub struct AuditLogQuery {
-    pub org_id: Option<Uuid>,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub action: Option<String>,
     pub resource_type: Option<String>,
     pub resource_id: Option<String>,
@@ -43,15 +42,14 @@ pub async fn list_audit_logs(
 ) -> Result<Json<AuditLogResponse>> {
     auth.require(Capability::Admin)?;
 
-    // In platform mode, ignore caller-provided org_id/project_id filters and
-    // always scope to the authenticated tenant/project to prevent cross-tenant reads.
-    let (org_id, project_id) = auth.audit_scope(query.org_id, query.project_id)?;
+    // In platform mode, ignore caller-provided workspace_id filters and
+    // always scope to the authenticated workspace to prevent cross-workspace reads.
+    let workspace_id = auth.audit_scope(query.workspace_id)?;
 
     let page = state
         .repository
         .list_audit_logs(AuditLogFilters {
-            org_id,
-            project_id,
+            workspace_id,
             action: query.action,
             resource_type: query.resource_type,
             resource_id: query.resource_id,

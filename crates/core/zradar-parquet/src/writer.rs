@@ -137,8 +137,7 @@ impl ParquetFileWriter {
     /// Write `spans` to a Parquet file and register it in `file_list`.
     pub async fn write_spans(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         spans: &[Span],
     ) -> anyhow::Result<String> {
@@ -157,8 +156,7 @@ impl ParquetFileWriter {
             .unwrap_or(0);
 
         self.write_batch(
-            tenant_id,
-            project_id,
+            workspace_id,
             stream_name,
             "traces",
             batch,
@@ -173,8 +171,7 @@ impl ParquetFileWriter {
     /// Write `metrics` to a Parquet file and register it in `file_list`.
     pub async fn write_metrics(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         metrics: &[Metric],
     ) -> anyhow::Result<String> {
@@ -189,8 +186,7 @@ impl ParquetFileWriter {
         let max_ts_ns = metrics.iter().map(|m| m.timestamp).max().unwrap_or(0);
 
         self.write_batch(
-            tenant_id,
-            project_id,
+            workspace_id,
             stream_name,
             "metrics",
             batch,
@@ -205,8 +201,7 @@ impl ParquetFileWriter {
     /// Write `logs` to a Parquet file and register it in `file_list`.
     pub async fn write_logs(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         logs: &[LogRecord],
     ) -> anyhow::Result<String> {
@@ -220,8 +215,7 @@ impl ParquetFileWriter {
         let max_ts_ns = logs.iter().map(|l| l.timestamp).max().unwrap_or(0);
 
         self.write_batch(
-            tenant_id,
-            project_id,
+            workspace_id,
             stream_name,
             "logs",
             batch,
@@ -237,8 +231,7 @@ impl ParquetFileWriter {
     /// `signal_type = "scores"`. Phase 1 R1.8 / OQ8 / OQ9.
     pub async fn write_scores(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         scores: &[EvaluationScore],
     ) -> anyhow::Result<String> {
@@ -253,8 +246,7 @@ impl ParquetFileWriter {
         let max_ts_ns = scores.iter().map(|s| s.timestamp).max().unwrap_or(0);
 
         self.write_batch(
-            tenant_id,
-            project_id,
+            workspace_id,
             stream_name,
             "scores",
             batch,
@@ -272,8 +264,7 @@ impl ParquetFileWriter {
     #[allow(clippy::too_many_arguments)]
     pub async fn write_record_batch(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         signal_type: &str,
         batch: RecordBatch,
@@ -282,8 +273,7 @@ impl ParquetFileWriter {
         record_count: i64,
     ) -> anyhow::Result<String> {
         self.write_batch(
-            tenant_id,
-            project_id,
+            workspace_id,
             stream_name,
             signal_type,
             batch,
@@ -316,8 +306,7 @@ impl ParquetFileWriter {
     #[allow(clippy::too_many_arguments)]
     async fn write_batch(
         &self,
-        tenant_id: &str,
-        project_id: &str,
+        workspace_id: &str,
         stream_name: &str,
         signal_type: &str,
         batch: RecordBatch,
@@ -330,7 +319,7 @@ impl ParquetFileWriter {
         let file_id = Uuid::new_v4();
         let relative = format!(
             "files/{}/{}/{}/{}/{}.parquet",
-            tenant_id, signal_type, stream_name, date_path, file_id
+            workspace_id, signal_type, stream_name, date_path, file_id
         );
         let full_path = self.data_dir.join(&relative);
 
@@ -417,14 +406,12 @@ impl ParquetFileWriter {
 
         let full_path_str = full_path.to_string_lossy().into_owned();
         let now_us = chrono::Utc::now().timestamp_micros();
-        let tenant_uuid = parse_uuid_or_nil(tenant_id);
-        let project_uuid = parse_uuid_or_nil(project_id);
+        let workspace_uuid = parse_uuid_or_nil(workspace_id);
 
         let registered_file_id = self
             .file_list_repo
             .register_file(NewFileListEntry {
-                tenant_id: tenant_uuid,
-                project_id: project_uuid,
+                workspace_id: workspace_uuid.into(),
                 signal_type: signal_type.to_string(),
                 stream_name: stream_name.to_string(),
                 date: date_path,
@@ -449,8 +436,7 @@ impl ParquetFileWriter {
             tokio::spawn(async move {
                 usage_tracker
                     .record_write(WriteSample {
-                        tenant_id: tenant_uuid,
-                        project_id: project_uuid,
+                        workspace_id: workspace_uuid.into(),
                         signal,
                         stream_name: Some(stream_name),
                         compressed_bytes: compressed_size,
@@ -466,8 +452,7 @@ impl ParquetFileWriter {
 
         self.file_list_repo
             .upsert_stream_stats(StreamStatsUpdate {
-                tenant_id: tenant_uuid,
-                project_id: project_uuid,
+                workspace_id: workspace_uuid.into(),
                 signal_type: signal_type.to_string(),
                 stream_name: stream_name.to_string(),
                 min_ts: min_ts_us,
@@ -576,7 +561,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -594,12 +582,11 @@ mod tests {
         (w, repo)
     }
 
-    fn make_span(tenant: &str, project: &str) -> Span {
+    fn make_span(workspace: &str) -> Span {
         Span {
             trace_id: Uuid::new_v4().to_string(),
             span_id: Uuid::new_v4().to_string(),
-            tenant_id: tenant.to_string(),
-            project_id: project.to_string(),
+            workspace_id: workspace.to_string(),
             service_name: "test-svc".to_string(),
             timestamp: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
             duration_ns: 1_000_000,
@@ -623,12 +610,11 @@ mod tests {
     async fn test_write_spans_produces_parquet_not_par() {
         let dir = TempDir::new().unwrap();
         let (writer, repo) = make_writer(&dir);
-        let tenant = Uuid::new_v4().to_string();
-        let project = Uuid::new_v4().to_string();
-        let span = make_span(&tenant, &project);
+        let workspace = Uuid::new_v4().to_string();
+        let span = make_span(&workspace);
 
         let path = writer
-            .write_spans(&tenant, &project, "svc", &[span])
+            .write_spans(&workspace, "svc", &[span])
             .await
             .unwrap();
 
@@ -671,18 +657,17 @@ mod tests {
             config,
         ));
 
-        let tenant = Uuid::new_v4().to_string();
-        let project = Uuid::new_v4().to_string();
-        let span = make_span(&tenant, &project);
+        let workspace = Uuid::new_v4().to_string();
+        let span = make_span(&workspace);
         let trace_id = span.trace_id.clone();
 
         let file_path = writer
-            .write_spans(&tenant, &project, "svc", &[span])
+            .write_spans(&workspace, "svc", &[span])
             .await
             .unwrap();
 
         // Build a repo stub that returns the written file
-        struct SingleFileRepo(String, Uuid, Uuid);
+        struct SingleFileRepo(String, Uuid);
         #[async_trait::async_trait]
         impl FileListRepository for SingleFileRepo {
             async fn register_file(&self, _: NewFileListEntry) -> anyhow::Result<i64> {
@@ -691,8 +676,7 @@ mod tests {
             async fn query_files(&self, _: FileListFilter) -> anyhow::Result<Vec<FileListEntry>> {
                 Ok(vec![FileListEntry {
                     id: 1,
-                    tenant_id: self.1,
-                    project_id: self.2,
+                    workspace_id: self.1.into(),
                     signal_type: "traces".to_string(),
                     stream_name: "svc".to_string(),
                     date: "2024/01/01/00".to_string(),
@@ -717,7 +701,10 @@ mod tests {
             async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
                 Ok(())
             }
-            async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+            async fn get_stream_stats(
+                &self,
+                _: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Vec<StreamStats>> {
                 Ok(vec![])
             }
             async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -725,11 +712,10 @@ mod tests {
             }
         }
 
-        let tenant_uuid = parse_uuid_or_nil(&tenant);
-        let project_uuid = parse_uuid_or_nil(&project);
+        let workspace_uuid = parse_uuid_or_nil(&workspace);
         let reader = ParquetFileReader::new(
             dir.path().to_path_buf(),
-            Arc::new(SingleFileRepo(file_path, tenant_uuid, project_uuid)),
+            Arc::new(SingleFileRepo(file_path, workspace_uuid)),
         );
 
         let batches = reader
