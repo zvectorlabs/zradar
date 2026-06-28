@@ -52,8 +52,7 @@ async fn launch_topology(env: &TestEnv) -> Result<NimTopology> {
         &dcgm.addr,
         &otlp_http_url(),
         &env.api_key,
-        &env.tenant_id.to_string(),
-        &env.project_id.to_string(),
+        &env.workspace_id.to_string(),
     );
     let collector = CollectorProcess::spawn(&yaml)?;
 
@@ -86,8 +85,8 @@ impl NimTopology {
 
 /// Poll `/api/v1/metrics?metric_name=<name>` until at least one row appears.
 async fn wait_for_metric(client: &ApiClient, name: &str) -> Result<serde_json::Value> {
-    let project_id = client.project_id().to_string();
-    let path = format!("/api/v1/metrics?project_id={project_id}&metric_name={name}");
+    let workspace_id = client.workspace_id().to_string();
+    let path = format!("/api/v1/metrics?workspace_id={workspace_id}&metric_name={name}");
     poll_until(
         || async {
             let resp = client.get(&path).await?;
@@ -183,9 +182,9 @@ async fn test_r3_7_time_window_metric_query_no_trace_id_labels() -> Result<()> {
     let _ = wait_for_metric(&env.client, "vllm:e2e_request_latency_seconds").await?;
 
     let window_end = chrono::Utc::now();
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let path = format!(
-        "/api/v1/metrics?project_id={project_id}\
+        "/api/v1/metrics?workspace_id={workspace_id}\
          &metric_name=vllm:e2e_request_latency_seconds\
          &start_time={}&end_time={}",
         window_start.to_rfc3339(),
@@ -302,15 +301,15 @@ async fn test_t1_histogram_count_sum_match_payload() -> Result<()> {
 }
 
 // ===========================================================================
-// T2 — Cross-tenant isolation for collector-pushed metrics
+// T2 — Cross-workspace isolation for collector-pushed metrics
 // ===========================================================================
 
 /// T2: Two collectors pushing the same metric name with different
-/// `x-tenant-id` / `x-project-id` headers must produce isolated rows.
-/// Tenant A's query must not return tenant B's data.
+/// `x-workspace-id` / `x-workspace-id` headers must produce isolated rows.
+/// Tenant A's query must not return workspace B's data.
 #[tokio::test]
 #[ignore]
-async fn test_t2_collector_pushed_metrics_tenant_isolated() -> Result<()> {
+async fn test_t2_collector_pushed_metrics_workspace_isolated() -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping T2.");
         return Ok(());
@@ -319,59 +318,59 @@ async fn test_t2_collector_pushed_metrics_tenant_isolated() -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
 
-    // Each TestEnv has its own tenant_id and project_id. Sanity check they
+    // Each TestEnv has its own workspace_id and workspace_id. Sanity check they
     // differ — otherwise the test is invalid.
     assert_ne!(
-        env_a.tenant_id, env_b.tenant_id,
-        "TestEnv must produce distinct tenant_ids"
+        env_a.workspace_id, env_b.workspace_id,
+        "TestEnv must produce distinct workspace_ids"
     );
 
-    // Run two separate collector topologies, one per tenant. They share the
-    // same mock payload but ship to different tenant contexts via headers.
+    // Run two separate collector topologies, one per workspace. They share the
+    // same mock payload but ship to different workspace contexts via headers.
     let topo_a = launch_topology(&env_a).await?;
     let topo_b = launch_topology(&env_b).await?;
     tokio::time::sleep(Duration::from_secs(8)).await;
 
-    // Wait until each tenant sees its own data.
+    // Wait until each workspace sees its own data.
     let _ = wait_for_metric(&env_a.client, "vllm:request_success_total").await?;
     let _ = wait_for_metric(&env_b.client, "vllm:request_success_total").await?;
 
-    // Tenant A's query must only see rows tagged with tenant A. Since
-    // /api/v1/metrics filters by tenant via the x-tenant-id header (test
-    // mode), tenant A's response should have rows. If they leak we'd see
+    // Tenant A's query must only see rows tagged with workspace A. Since
+    // /api/v1/metrics filters by workspace via the x-workspace-id header (test
+    // mode), workspace A's response should have rows. If they leak we'd see
     // double the count.
     let a_path = format!(
-        "/api/v1/metrics?project_id={}&metric_name=vllm:request_success_total",
-        env_a.client.project_id()
+        "/api/v1/metrics?workspace_id={}&metric_name=vllm:request_success_total",
+        env_a.client.workspace_id()
     );
     let a_data: serde_json::Value = env_a.client.get(&a_path).await?.json().await?;
     let a_items = a_data["items"].as_array().expect("items");
-    assert!(!a_items.is_empty(), "tenant A must see its own metrics");
+    assert!(!a_items.is_empty(), "workspace A must see its own metrics");
 
     let b_path = format!(
-        "/api/v1/metrics?project_id={}&metric_name=vllm:request_success_total",
-        env_b.client.project_id()
+        "/api/v1/metrics?workspace_id={}&metric_name=vllm:request_success_total",
+        env_b.client.workspace_id()
     );
     let b_data: serde_json::Value = env_b.client.get(&b_path).await?.json().await?;
     let b_items = b_data["items"].as_array().expect("items");
-    assert!(!b_items.is_empty(), "tenant B must see its own metrics");
+    assert!(!b_items.is_empty(), "workspace B must see its own metrics");
 
-    // Cross-tenant query: tenant A's client querying tenant B's project_id.
-    // Must return zero rows because tenant_id from the header doesn't match.
+    // Cross-workspace query: workspace A's client querying workspace B's workspace_id.
+    // Must return zero rows because workspace_id from the header doesn't match.
     let cross_path = format!(
-        "/api/v1/metrics?project_id={}&metric_name=vllm:request_success_total",
-        env_b.client.project_id()
+        "/api/v1/metrics?workspace_id={}&metric_name=vllm:request_success_total",
+        env_b.client.workspace_id()
     );
     let cross_data: serde_json::Value = env_a.client.get(&cross_path).await?.json().await?;
     let cross_total = cross_data["total"].as_i64().unwrap_or(-1);
     assert_eq!(
         cross_total, 0,
-        "T2: tenant A querying tenant B's project must return 0 rows; got {cross_total}"
+        "T2: workspace A querying workspace B's workspace must return 0 rows; got {cross_total}"
     );
 
     topo_a.shutdown().await;
     topo_b.shutdown().await;
-    println!("✅ T2: tenant isolation enforced on collector-pushed metrics");
+    println!("✅ T2: workspace isolation enforced on collector-pushed metrics");
     Ok(())
 }
 
@@ -420,7 +419,7 @@ async fn test_t3_counter_values_nonzero() -> Result<()> {
 
 /// T4: OTLP/HTTP metrics endpoint must reject pushes that lack a valid
 /// Bearer token. This is the security perimeter — the gap-fix audit
-/// already removed the `x-tenant-id` header escape; this test locks in
+/// already removed the `x-workspace-id` header escape; this test locks in
 /// the positive path of "no auth → 401."
 #[tokio::test]
 #[ignore]
@@ -536,13 +535,13 @@ async fn test_t5_prometheus_labels_preserved() -> Result<()> {
 #[ignore]
 async fn test_t6_metric_query_no_match_returns_empty() -> Result<()> {
     let env = TestEnv::setup().await?;
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let unique = format!(
         "non_existent_metric_{}",
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
     );
 
-    let path = format!("/api/v1/metrics?project_id={project_id}&metric_name={unique}");
+    let path = format!("/api/v1/metrics?workspace_id={workspace_id}&metric_name={unique}");
     let resp = env.client.get(&path).await?;
     assert!(
         resp.status().is_success(),
@@ -654,8 +653,8 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
         .post(format!("{}/v1/metrics", otlp_http_url()))
         .header("content-type", "application/x-protobuf")
         .header("authorization", format!("Bearer {}", env.api_key))
-        .header("x-tenant-id", env.tenant_id.to_string())
-        .header("x-project-id", env.project_id.to_string())
+        .header("x-workspace-id", env.workspace_id.to_string())
+        .header("x-workspace-id", env.workspace_id.to_string())
         .body(body)
         .send()
         .await?;

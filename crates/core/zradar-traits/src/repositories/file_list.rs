@@ -5,7 +5,7 @@
 //! overlap a given time range.
 
 use async_trait::async_trait;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 use zradar_models::{
     FileListEntry, FileListFilter, NewFileListEntry, StreamStats, StreamStatsUpdate,
 };
@@ -41,13 +41,12 @@ pub trait FileListRepository: Send + Sync {
             })
             .await?;
         let mut groups =
-            std::collections::HashMap::<(Uuid, Uuid, String, String), Vec<FileListEntry>>::new();
+            std::collections::HashMap::<(WorkspaceId, String, String), Vec<FileListEntry>>::new();
         for file in files {
             if file.created_at < cutoff_us {
                 groups
                     .entry((
-                        file.tenant_id,
-                        file.project_id,
+                        file.workspace_id,
                         file.signal_type.clone(),
                         file.date.clone(),
                     ))
@@ -70,17 +69,14 @@ pub trait FileListRepository: Send + Sync {
     /// Hard-delete file entries after physical deletion from storage.
     async fn delete_entries(&self, ids: &[i64]) -> anyhow::Result<()>;
 
-    /// Return stream stats for all streams belonging to a tenant + project.
-    async fn get_stream_stats(
-        &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
-    ) -> anyhow::Result<Vec<StreamStats>>;
+    /// Return stream stats for all streams belonging to a workspace.
+    async fn get_stream_stats(&self, workspace_id: WorkspaceId)
+    -> anyhow::Result<Vec<StreamStats>>;
 
     /// Upsert stream stats for a single stream (insert or accumulate deltas).
     async fn upsert_stream_stats(&self, stats: StreamStatsUpdate) -> anyhow::Result<()>;
 
-    /// Return the distinct (tenant_id, project_id, signal_type) combinations for
+    /// Return the distinct (workspace_id, signal_type) combinations for
     /// all non-deleted files whose `created_at` is before `before_micros`.
     ///
     /// Used by the storage-usage snapshot job to discover which keys need a
@@ -88,7 +84,7 @@ pub trait FileListRepository: Send + Sync {
     async fn list_active_keys(
         &self,
         before_micros: i64,
-    ) -> anyhow::Result<Vec<(Uuid, Uuid, String)>> {
+    ) -> anyhow::Result<Vec<(WorkspaceId, String)>> {
         // Default implementation falls back to query_files — works for tests /
         // in-memory repos without needing a separate SQL method.
         let files = self
@@ -98,23 +94,19 @@ pub trait FileListRepository: Send + Sync {
             })
             .await?;
         let mut seen = std::collections::HashSet::new();
-        let mut keys = Vec::new();
-        for f in files {
-            if f.created_at < before_micros
-                && seen.insert((f.tenant_id, f.project_id, f.signal_type.clone()))
-            {
-                keys.push((f.tenant_id, f.project_id, f.signal_type));
+        for file in files {
+            if file.created_at < before_micros {
+                seen.insert((file.workspace_id, file.signal_type.clone()));
             }
         }
-        Ok(keys)
+        Ok(seen.into_iter().collect())
     }
 
     /// Check whether a file produced from a WAL flush at the given offset already
     /// exists in the file_list. Used by WAL replay to skip duplicate flushes.
     async fn already_flushed(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal_type: &str,
         _stream_name: &str,
         _max_wal_offset: i64,

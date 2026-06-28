@@ -36,8 +36,7 @@ impl ApiKeyAdminAuthorizer {
                 (
                     k.key.clone(),
                     RequestContext {
-                        tenant_id: k.tenant_id.clone(),
-                        project_id: k.project_id.clone(),
+                        workspace_id: k.workspace_id,
                     },
                 )
             })
@@ -64,13 +63,11 @@ impl AdminAuthorizer for ApiKeyAdminAuthorizer {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid API key"))?;
 
-        if self.allow_test_header_context {
-            if let Some(val) = header_str(headers, "x-tenant-id") {
-                context.tenant_id = val.to_string();
-            }
-            if let Some(val) = header_str(headers, "x-project-id") {
-                context.project_id = val.to_string();
-            }
+        if self.allow_test_header_context
+            && let Some(val) = header_str(headers, "x-workspace-id")
+            && let Ok(id) = uuid::Uuid::parse_str(val)
+        {
+            context.workspace_id = id.into();
         }
 
         Ok(AdminAuth {

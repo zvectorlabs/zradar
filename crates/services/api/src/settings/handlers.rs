@@ -5,7 +5,7 @@ use axum::{
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
-use zradar_models::{NewAuditLog, NewProjectSettings, ProjectSettings};
+use zradar_models::{NewAuditLog, NewWorkspaceSettings, WorkspaceSettings};
 use zradar_traits::{AuditLogRepository, SettingsRepository};
 
 use crate::errors::{ControlError, Result};
@@ -17,7 +17,7 @@ pub struct SettingsState {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateProjectSettingsRequest {
+pub struct UpdateWorkspaceSettingsRequest {
     pub traces_retention_days: i32,
     pub metrics_retention_days: i32,
     pub logs_retention_days: i32,
@@ -32,20 +32,20 @@ fn default_capture_llm_content() -> bool {
     true
 }
 
-pub async fn get_project_settings(
+pub async fn get_workspace_settings(
     State(state): State<Arc<SettingsState>>,
     auth: AuthContext,
-    Path(project_id): Path<Uuid>,
-) -> Result<Json<ProjectSettings>> {
+    Path(workspace_id): Path<Uuid>,
+) -> Result<Json<WorkspaceSettings>> {
     auth.require(Capability::ReadSettings)?;
-    auth.enforce_path_project(project_id)?;
+    auth.enforce_path_workspace(workspace_id)?;
 
-    let settings = match state.repository.get_settings(project_id).await? {
+    let settings = match state.repository.get_settings(workspace_id.into()).await? {
         Some(settings) => settings,
         None => {
             state
                 .repository
-                .upsert_settings(NewProjectSettings::defaults_for(project_id))
+                .upsert_settings(NewWorkspaceSettings::defaults_for(workspace_id.into()))
                 .await?
         }
     };
@@ -53,20 +53,20 @@ pub async fn get_project_settings(
     Ok(Json(settings))
 }
 
-pub async fn update_project_settings(
+pub async fn update_workspace_settings(
     State(state): State<Arc<SettingsState>>,
     auth: AuthContext,
-    Path(project_id): Path<Uuid>,
-    Json(body): Json<UpdateProjectSettingsRequest>,
-) -> Result<Json<ProjectSettings>> {
+    Path(workspace_id): Path<Uuid>,
+    Json(body): Json<UpdateWorkspaceSettingsRequest>,
+) -> Result<Json<WorkspaceSettings>> {
     auth.require(Capability::WriteSettings)?;
-    auth.enforce_path_project(project_id)?;
+    auth.enforce_path_workspace(workspace_id)?;
     validate_settings(&body)?;
 
     let settings = state
         .repository
-        .upsert_settings(NewProjectSettings {
-            project_id,
+        .upsert_settings(NewWorkspaceSettings {
+            workspace_id: workspace_id.into(),
             traces_retention_days: body.traces_retention_days,
             metrics_retention_days: body.metrics_retention_days,
             logs_retention_days: body.logs_retention_days,
@@ -78,17 +78,14 @@ pub async fn update_project_settings(
         .await?;
 
     if let Some(audit_log_repo) = &state.audit_log_repo {
-        let actor_tenant_id = auth.tenant_uuid().ok();
-        let actor_project_id = auth.project_uuid().ok();
+        let actor_workspace_id = auth.workspace_uuid().ok();
         audit_log_repo
             .create_audit_log(NewAuditLog {
-                actor_tenant_id,
-                actor_project_id,
-                org_id: actor_tenant_id,
-                project_id: Some(project_id),
-                action: "project_settings.update".to_string(),
-                resource_type: "project_settings".to_string(),
-                resource_id: project_id.to_string(),
+                actor_workspace_id,
+                resource_workspace_id: Some(workspace_id),
+                action: "workspace_settings.update".to_string(),
+                resource_type: "workspace_settings".to_string(),
+                resource_id: workspace_id.to_string(),
                 metadata: serde_json::json!({
                     "traces_retention_days": settings.traces_retention_days,
                     "metrics_retention_days": settings.metrics_retention_days,
@@ -105,7 +102,7 @@ pub async fn update_project_settings(
     Ok(Json(settings))
 }
 
-fn validate_settings(body: &UpdateProjectSettingsRequest) -> Result<()> {
+fn validate_settings(body: &UpdateWorkspaceSettingsRequest) -> Result<()> {
     if body.traces_retention_days < 0 {
         return Err(ControlError::InvalidInput(
             "traces_retention_days must be non-negative".to_string(),

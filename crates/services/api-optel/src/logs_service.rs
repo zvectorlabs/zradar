@@ -6,7 +6,7 @@
 
 use crate::auth::authenticate_grpc;
 use crate::circuit_breaker::CircuitBreaker;
-use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings};
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings};
 use crate::logs_converter::OtlpLogsConverter;
 use crate::parser_caps::validate_logs_request;
 use crate::rate_limiter::ProjectRateLimiter;
@@ -133,7 +133,7 @@ impl LogsService for OtlpLogsService {
             )
             .await?;
         }
-        enforce_project_settings(
+        enforce_workspace_settings(
             &self.settings_repo,
             &self.rate_limiter,
             &context,
@@ -142,8 +142,7 @@ impl LogsService for OtlpLogsService {
         .await?;
 
         tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
+            workspace_id = %context.workspace_id,
             resource_logs = req.resource_logs.len(),
             "Received logs export request"
         );
@@ -175,8 +174,7 @@ impl LogsService for OtlpLogsService {
         }
 
         tracing::debug!(
-            tenant_id = %context.tenant_id,
-            project_id = %context.project_id,
+            workspace_id = %context.workspace_id,
             scores_extracted = score_count,
             logs_persisted = log_count,
             "Successfully processed logs"

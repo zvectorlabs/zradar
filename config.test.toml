@@ -34,8 +34,7 @@ allow_test_header_context = true
 # Tests use this one API key and pass unique x-tenant-id/x-project-id values for isolation.
 [[api_keys]]
 key = "zk_test_default"
-tenant_id = "00000000-0000-0000-0000-000000000000"
-project_id = "00000000-0000-0000-0000-000000000000"
+workspace_id = "00000000-0000-0000-0000-000000000000"
 name = "functional-test-key"
 
 

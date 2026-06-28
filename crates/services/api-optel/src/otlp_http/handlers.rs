@@ -13,7 +13,7 @@ use zradar_policy::SignalKind;
 use zradar_traits::{Authenticator, SettingsRepository};
 
 use crate::converter::OtlpConverter;
-use crate::ingestion_guard::{enforce_policy_ingest, enforce_project_settings_and_get};
+use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings_and_get};
 use crate::logs_converter::OtlpLogsConverter;
 use crate::metrics_converter::OtlpMetricsConverter;
 use crate::parser_caps::{validate_logs_request, validate_metrics_request, validate_trace_request};
@@ -71,7 +71,7 @@ async fn authenticate_http(
     allow_test_header_context: bool,
 ) -> Result<RequestContext, StatusCode> {
     let Some(authenticator) = auth else {
-        return Ok(RequestContext::default());
+        return Ok(RequestContext::new(uuid::Uuid::nil().into()));
     };
     let auth_header = headers
         .get("authorization")
@@ -85,13 +85,13 @@ async fn authenticate_http(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    if allow_test_header_context {
-        if let Some(tenant_id) = headers.get("x-tenant-id").and_then(|v| v.to_str().ok()) {
-            context.tenant_id = tenant_id.to_string();
-        }
-        if let Some(project_id) = headers.get("x-project-id").and_then(|v| v.to_str().ok()) {
-            context.project_id = project_id.to_string();
-        }
+    if allow_test_header_context
+        && let Some(workspace_id) = headers
+            .get("x-workspace-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok())
+    {
+        context.workspace_id = workspace_id;
     }
 
     Ok(context)
@@ -161,7 +161,7 @@ async fn export_traces(
     {
         return response;
     }
-    let settings = match enforce_project_settings_and_get(
+    let settings = match enforce_workspace_settings_and_get(
         &state.settings_repo,
         &state.rate_limiter,
         &context,
@@ -224,7 +224,7 @@ async fn export_metrics(
     {
         return response;
     }
-    if let Err(status) = enforce_project_settings_and_get(
+    if let Err(status) = enforce_workspace_settings_and_get(
         &state.settings_repo,
         &state.rate_limiter,
         &context,
@@ -282,7 +282,7 @@ async fn export_logs(
     {
         return response;
     }
-    if let Err(status) = enforce_project_settings_and_get(
+    if let Err(status) = enforce_workspace_settings_and_get(
         &state.settings_repo,
         &state.rate_limiter,
         &context,

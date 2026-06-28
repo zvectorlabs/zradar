@@ -100,11 +100,11 @@ async fn test_r2_1_rail_type_filter_returns_matching() -> Result<()> {
     wait_for_trace_default(&env.client, &output_hex).await?;
 
     // Filter by rail_type=input — should return the input span only
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&rail_type=input"
+            "/api/v1/spans?workspace_id={workspace_id}&rail_type=input"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -129,12 +129,12 @@ async fn test_r2_1_rail_type_filter_returns_matching() -> Result<()> {
 #[ignore]
 async fn test_r2_1_filter_no_match_returns_empty() -> Result<()> {
     let env = TestEnv::setup().await?;
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
 
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&rail_type=nonexistent_type_zzz"
+            "/api/v1/spans?workspace_id={workspace_id}&rail_type=nonexistent_type_zzz"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -178,11 +178,11 @@ async fn test_r2_2_action_name_filter() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&action_name=self_check_input"
+            "/api/v1/spans?workspace_id={workspace_id}&action_name=self_check_input"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -230,11 +230,11 @@ async fn test_r2_3_workflow_run_id_filter() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&workflow_run_id={unique_run_id}"
+            "/api/v1/spans?workspace_id={workspace_id}&workflow_run_id={unique_run_id}"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -276,11 +276,11 @@ async fn test_r2_4_framework_filter() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&framework=langchain"
+            "/api/v1/spans?workspace_id={workspace_id}&framework=langchain"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -324,11 +324,11 @@ async fn test_r2_5_tool_name_filter() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&tool_name=web_search"
+            "/api/v1/spans?workspace_id={workspace_id}&tool_name=web_search"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -375,8 +375,8 @@ async fn test_r2_6_invocation_id_filter() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
-    let path = format!("/api/v1/spans?project_id={project_id}&invocation_id={unique_inv_id}");
+    let workspace_id = env.client.workspace_id();
+    let path = format!("/api/v1/spans?workspace_id={workspace_id}&invocation_id={unique_inv_id}");
     let data = poll_until(
         || {
             let client = &env.client;
@@ -475,11 +475,11 @@ async fn test_r2_8_reranker_queryable_by_span_type() -> Result<()> {
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let resp = env
         .client
         .get(&format!(
-            "/api/v1/spans?project_id={project_id}&span_type=RERANKER"
+            "/api/v1/spans?workspace_id={workspace_id}&span_type=RERANKER"
         ))
         .await?;
     assert!(resp.status().is_success());
@@ -547,8 +547,8 @@ async fn test_r2_9_guardrails_analytics_endpoint_shape() -> Result<()> {
         ))
         .await?;
 
-    let project_id = env.client.project_id();
-    let path = format!("/api/v1/analytics/guardrails?project_id={project_id}");
+    let workspace_id = env.client.workspace_id();
+    let path = format!("/api/v1/analytics/guardrails?workspace_id={workspace_id}");
     let mut data = None;
     for _ in 0..25 {
         let resp = env.client.get(&path).await?;
@@ -666,10 +666,10 @@ async fn test_r2_10_nat_agents_analytics_smoke() -> Result<()> {
         ))
         .await?;
 
-    let project_id = env.client.project_id();
+    let workspace_id = env.client.workspace_id();
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
-    let path = format!("/api/v1/analytics/agents?project_id={project_id}");
+    let path = format!("/api/v1/analytics/agents?workspace_id={workspace_id}");
     let data = poll_until(
         || {
             let client = &env.client;

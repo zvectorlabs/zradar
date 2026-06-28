@@ -1,14 +1,15 @@
 /// On-disk WAL record format as specified in SPEC-DISK-WAL §3.2.
 ///
 /// Each record is length-prefixed with a CRC32 integrity check:
-///   [4 byte length][4 byte CRC32][1 byte signal_type][16 byte tenant_id]
-///   [16 byte project_id][8 byte arrival_timestamp_ns][8 byte assigned_offset]
+///   [4 byte length][4 byte CRC32][1 byte signal_type][16 byte workspace_id]
+///   [8 byte arrival_timestamp_ns][8 byte assigned_offset]
 ///   [N byte payload]
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
-/// Header size: length(4) + crc(4) + signal(1) + tenant(16) + project(16) + ts(8) + offset(8) = 57
-pub const RECORD_HEADER_SIZE: usize = 4 + 4 + 1 + 16 + 16 + 8 + 8;
+/// Header size: length(4) + crc(4) + signal(1) + workspace(16) + ts(8) + offset(8) = 41
+pub const RECORD_HEADER_SIZE: usize = 4 + 4 + 1 + 16 + 8 + 8;
 
 /// Signal type discriminator stored in each WAL record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +38,7 @@ impl SignalType {
 #[derive(Debug, Clone)]
 pub struct WalRecord {
     pub signal_type: SignalType,
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub arrival_timestamp_ns: i64,
     pub assigned_offset: u64,
     pub payload: Bytes,
@@ -78,11 +78,11 @@ pub enum RecordReadError {
 impl WalRecord {
     /// Serialize this record into a byte buffer suitable for appending to a segment.
     ///
-    /// Layout: [length:4][crc32:4][signal:1][tenant:16][project:16][ts:8][offset:8][payload:N]
+    /// Layout: [length:4][crc32:4][signal:1][workspace:16][ts:8][offset:8][payload:N]
     /// where `length` = total bytes after the length field (i.e., the record size minus 4).
     pub fn serialize(&self) -> Bytes {
         let payload_len = self.payload.len();
-        let body_len = 4 + 1 + 16 + 16 + 8 + 8 + payload_len; // crc + header fields + payload
+        let body_len = 4 + 1 + 16 + 8 + 8 + payload_len; // crc + header fields + payload
         let total_len = 4 + body_len; // length prefix + body
 
         let mut buf = BytesMut::with_capacity(total_len);
@@ -96,8 +96,7 @@ impl WalRecord {
 
         // Body (what gets CRC'd)
         buf.put_u8(self.signal_type as u8);
-        buf.put_slice(self.tenant_id.as_bytes());
-        buf.put_slice(self.project_id.as_bytes());
+        buf.put_slice(self.workspace_id.as_bytes());
         buf.put_i64(self.arrival_timestamp_ns);
         buf.put_u64(self.assigned_offset);
         buf.put_slice(&self.payload);
@@ -152,15 +151,10 @@ impl WalRecord {
                 value: signal_byte,
             })?;
 
-        let mut tenant_bytes = [0u8; 16];
-        tenant_bytes.copy_from_slice(&cursor[..16]);
+        let mut workspace_bytes = [0u8; 16];
+        workspace_bytes.copy_from_slice(&cursor[..16]);
         cursor.advance(16);
-        let tenant_id = Uuid::from_bytes(tenant_bytes);
-
-        let mut project_bytes = [0u8; 16];
-        project_bytes.copy_from_slice(&cursor[..16]);
-        cursor.advance(16);
-        let project_id = Uuid::from_bytes(project_bytes);
+        let workspace_id = Uuid::from_bytes(workspace_bytes);
 
         let arrival_timestamp_ns = cursor.get_i64();
         let assigned_offset = cursor.get_u64();
@@ -172,8 +166,7 @@ impl WalRecord {
         Ok((
             Self {
                 signal_type,
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 arrival_timestamp_ns,
                 assigned_offset,
                 payload,
@@ -190,8 +183,7 @@ mod tests {
     fn make_record(signal: SignalType, offset: u64) -> WalRecord {
         WalRecord {
             signal_type: signal,
-            tenant_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             arrival_timestamp_ns: 1_700_000_000_000_000_000,
             assigned_offset: offset,
             payload: Bytes::from(vec![0xAB; 64]),
@@ -212,8 +204,7 @@ mod tests {
 
             assert_eq!(consumed, serialized.len());
             assert_eq!(deserialized.signal_type, signal);
-            assert_eq!(deserialized.tenant_id, rec.tenant_id);
-            assert_eq!(deserialized.project_id, rec.project_id);
+            assert_eq!(deserialized.workspace_id, rec.workspace_id);
             assert_eq!(deserialized.arrival_timestamp_ns, rec.arrival_timestamp_ns);
             assert_eq!(deserialized.assigned_offset, rec.assigned_offset);
             assert_eq!(deserialized.payload, rec.payload);
@@ -289,8 +280,7 @@ mod proptests {
         ) {
             let rec = WalRecord {
                 signal_type: signal,
-                tenant_id: Uuid::nil(),
-                project_id: Uuid::nil(),
+                workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
                 arrival_timestamp_ns: 12345,
                 assigned_offset: offset,
                 payload: Bytes::from(vec![0xBB; payload_len]),

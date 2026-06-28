@@ -2,47 +2,46 @@ use crate::rate_limiter::ProjectRateLimiter;
 use std::sync::Arc;
 use tonic::Status;
 use uuid::Uuid;
-use zradar_models::{ProjectSettings, RequestContext};
+use zradar_models::{RequestContext, WorkspaceSettings};
 use zradar_policy::{BlockCode, Decision, IngestCtx, PolicyEnforcer, SignalKind};
 use zradar_traits::SettingsRepository;
 
-pub async fn load_project_settings(
+pub async fn load_workspace_settings(
     repository: &Option<Arc<dyn SettingsRepository>>,
     context: &RequestContext,
-) -> Result<(Uuid, Option<ProjectSettings>), Status> {
-    let project_id = Uuid::parse_str(&context.project_id)
-        .map_err(|_| Status::invalid_argument("Invalid project_id in request context"))?;
+) -> Result<(Uuid, Option<WorkspaceSettings>), Status> {
+    let workspace_id = context.workspace_id;
 
     let Some(repository) = repository else {
-        return Ok((project_id, None));
+        return Ok((workspace_id.into(), None));
     };
 
     let settings = repository
-        .get_settings(project_id)
+        .get_settings(workspace_id)
         .await
         .map_err(|e| Status::internal(format!("Failed to load project settings: {}", e)))?;
 
-    Ok((project_id, settings))
+    Ok((workspace_id.into(), settings))
 }
 
-pub async fn enforce_project_settings(
+pub async fn enforce_workspace_settings(
     repository: &Option<Arc<dyn SettingsRepository>>,
     rate_limiter: &Option<Arc<ProjectRateLimiter>>,
     context: &RequestContext,
     records: u64,
 ) -> Result<(), Status> {
-    enforce_project_settings_and_get(repository, rate_limiter, context, records)
+    enforce_workspace_settings_and_get(repository, rate_limiter, context, records)
         .await
         .map(|_| ())
 }
 
-pub async fn enforce_project_settings_and_get(
+pub async fn enforce_workspace_settings_and_get(
     repository: &Option<Arc<dyn SettingsRepository>>,
     rate_limiter: &Option<Arc<ProjectRateLimiter>>,
     context: &RequestContext,
     records: u64,
-) -> Result<Option<ProjectSettings>, Status> {
-    let (project_id, settings) = load_project_settings(repository, context).await?;
+) -> Result<Option<WorkspaceSettings>, Status> {
+    let (workspace_id, settings) = load_workspace_settings(repository, context).await?;
 
     let Some(settings) = settings else {
         return Ok(None);
@@ -62,7 +61,7 @@ pub async fn enforce_project_settings_and_get(
             return Ok(Some(settings));
         };
 
-        if !rate_limiter.check_and_record(project_id, limit, records) {
+        if !rate_limiter.check_and_record(workspace_id.into(), limit, records) {
             return Err(Status::resource_exhausted(
                 "Project ingestion rate limit exceeded",
             ));
@@ -79,15 +78,11 @@ pub async fn enforce_policy_ingest(
     records: u64,
     estimated_bytes: Option<u64>,
 ) -> Result<(), Status> {
-    let tenant_id = Uuid::parse_str(&context.tenant_id)
-        .map_err(|_| Status::invalid_argument("Invalid tenant_id in request context"))?;
-    let project_id = Uuid::parse_str(&context.project_id)
-        .map_err(|_| Status::invalid_argument("Invalid project_id in request context"))?;
+    let workspace_id = context.workspace_id;
 
     let decision = enforcer
         .check_ingest(IngestCtx {
-            tenant_id,
-            project_id,
+            workspace_id,
             signal,
             records,
             estimated_bytes,

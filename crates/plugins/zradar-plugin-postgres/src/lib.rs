@@ -10,9 +10,8 @@ pub mod repositories;
 pub use client::PostgresClient;
 pub use repositories::{
     PostgresAuditLogRepository, PostgresDecisionAuditSink, PostgresFileListRepository,
-    PostgresPolicyStore, PostgresRetentionPolicyRepository, PostgresSettingsRepository,
-    PostgresStorageUsageRepository, PostgresThresholdSink, PostgresUsageReader,
-    PostgresUsageTracker, UsageTrackerMetrics,
+    PostgresPolicyStore, PostgresSettingsRepository, PostgresStorageUsageRepository,
+    PostgresThresholdSink, PostgresUsageReader, PostgresUsageTracker, UsageTrackerMetrics,
 };
 
 /// Crate version

@@ -14,7 +14,7 @@ use zradar_models::RequestContext;
 /// Returned by [`AdminAuthorizer::authorize`] and consumed by the `api` crate's
 /// auth extractor to build the handler-facing `AuthContext`.
 pub struct AdminAuth {
-    /// Resolved tenant and project context.
+    /// Resolved workspace context.
     pub context: RequestContext,
     /// Zero or more zradar capability identifiers resolved by the authorizer.
     /// In standalone mode this is always empty; handlers pass without capability checks.
@@ -22,7 +22,7 @@ pub struct AdminAuth {
     pub capability_keys: Vec<String>,
 }
 
-/// Validates an Admin HTTP request and resolves tenant/project/capability context.
+/// Validates an Admin HTTP request and resolves workspace/capability context.
 ///
 /// Implementations validate credentials and extract context from request headers.
 /// The runtime's HTTP layer calls this once per request before routing to handlers.

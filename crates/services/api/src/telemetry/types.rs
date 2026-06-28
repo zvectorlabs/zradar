@@ -12,7 +12,7 @@ pub use zradar_traits::TelemetryWriter;
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TraceQueryFilters {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub service_name: Option<String>,
@@ -41,7 +41,7 @@ pub struct TraceQueryFilters {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SpanQueryFilters {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub trace_id: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn test_parse_single_span_type() {
         let params = SpanQueryFilters {
-            project_id: "test".to_string(),
+            workspace_id: "test".to_string(),
             trace_id: None,
             start_time: None,
             end_time: None,
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_parse_multiple_span_types() {
         let params = SpanQueryFilters {
-            project_id: "test".to_string(),
+            workspace_id: "test".to_string(),
             trace_id: None,
             start_time: None,
             end_time: None,
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn test_parse_invalid_span_type() {
         let params = SpanQueryFilters {
-            project_id: "test".to_string(),
+            workspace_id: "test".to_string(),
             trace_id: None,
             start_time: None,
             end_time: None,
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_parse_span_types_with_whitespace() {
         let params = SpanQueryFilters {
-            project_id: "test".to_string(),
+            workspace_id: "test".to_string(),
             trace_id: None,
             start_time: None,
             end_time: None,
@@ -272,7 +272,7 @@ mod tests {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AnalyticsQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start: Option<DateTime<Utc>>,
     pub end: Option<DateTime<Utc>>,
     pub metric: Option<String>,
@@ -285,7 +285,7 @@ pub struct AnalyticsQuery {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TopNQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub n: Option<i64>,
@@ -445,7 +445,7 @@ pub struct GuardrailsAnalytics {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StorageUsageQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub signal_type: Option<String>,
@@ -455,8 +455,7 @@ pub struct StorageUsageQuery {
 /// Aggregated storage usage for active telemetry files.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StorageUsage {
-    pub tenant_id: String,
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal_type: String,
     pub location: String,
     pub file_count: i64,
@@ -468,7 +467,7 @@ pub struct StorageUsage {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StorageUsageDailyQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -476,8 +475,7 @@ pub struct StorageUsageDailyQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StorageUsageDaily {
-    pub tenant_id: String,
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: String,
     pub day: String,
     pub compressed_bytes: i64,
@@ -489,14 +487,14 @@ pub struct StorageUsageDaily {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QuotaStatusQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UsageDailyQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -505,7 +503,7 @@ pub struct UsageDailyQuery {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct IngestRateQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -514,7 +512,7 @@ pub struct IngestRateQuery {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QueryUsageQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal: Option<String>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -533,7 +531,7 @@ pub struct PaginatedResponse<T> {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ErrorAnalyticsQuery {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub service_name: Option<String>,
@@ -551,7 +549,7 @@ pub struct ErrorBreakdown {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct LogQueryFilters {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub severity: Option<String>,
@@ -567,7 +565,7 @@ pub struct LogQueryFilters {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MetricQueryFilters {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub metric_name: Option<String>,
@@ -580,7 +578,7 @@ pub struct MetricQueryFilters {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MetricSeriesFilters {
     #[serde(default)]
-    pub project_id: String,
+    pub workspace_id: String,
     pub metric_name: String,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,

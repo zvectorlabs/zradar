@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+zradar-models = { path = "../zradar-models" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 bytes = { workspace = true }

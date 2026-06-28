@@ -5,7 +5,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use sqlx::Row;
 use std::sync::Arc;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 use zradar_models::{
     FileListEntry, FileListFilter, NewFileListEntry, StreamStats, StreamStatsUpdate,
 };
@@ -29,21 +29,20 @@ impl FileListRepository for PostgresFileListRepository {
         let row = sqlx::query(
             r#"
             INSERT INTO file_list (
-                tenant_id, project_id, signal_type, stream_name, date,
+                workspace_id, signal_type, stream_name, date,
                 file_path, location, min_ts, max_ts, records,
                 original_size, compressed_size, deleted, created_at, updated_at,
                 wal_replay_offset
             ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10,
-                $11, $12, false, $13, $14,
-                $15
+                $1, $2, $3, $4,
+                $5, $6, $7, $8, $9,
+                $10, $11, false, $12, $13,
+                $14
             )
             RETURNING id
             "#,
         )
-        .bind(entry.tenant_id)
-        .bind(entry.project_id)
+        .bind(entry.workspace_id.into_inner())
         .bind(entry.signal_type)
         .bind(entry.stream_name)
         .bind(entry.date)
@@ -74,23 +73,21 @@ impl FileListRepository for PostgresFileListRepository {
         let entries = sqlx::query_as::<_, FileListEntry>(
             r#"
             SELECT
-                id, tenant_id, project_id, signal_type, stream_name, date,
+                id, workspace_id, signal_type, stream_name, date,
                 file_path, location, min_ts, max_ts, records,
                 original_size, compressed_size, deleted, created_at, updated_at
             FROM file_list
-            WHERE ($1::uuid   IS NULL OR tenant_id    = $1)
-              AND ($2::uuid   IS NULL OR project_id   = $2)
-              AND ($3::text   IS NULL OR signal_type  = $3)
-              AND ($4::text   IS NULL OR stream_name  = $4)
-              AND ($5::bigint IS NULL OR max_ts       >= $5)
-              AND ($6::bigint IS NULL OR min_ts       <= $6)
-              AND ($7::text   IS NULL OR location     = $7)
-              AND ($8::bool   IS NULL OR deleted      = $8)
+            WHERE ($1::uuid   IS NULL OR workspace_id = $1)
+              AND ($2::text   IS NULL OR signal_type  = $2)
+              AND ($3::text   IS NULL OR stream_name  = $3)
+              AND ($4::bigint IS NULL OR max_ts       >= $4)
+              AND ($5::bigint IS NULL OR min_ts       <= $5)
+              AND ($6::text   IS NULL OR location     = $6)
+              AND ($7::bool   IS NULL OR deleted      = $7)
             ORDER BY min_ts DESC, created_at DESC
             "#,
         )
-        .bind(filter.tenant_id)
-        .bind(filter.project_id)
+        .bind(filter.workspace_id)
         .bind(filter.signal_type)
         .bind(filter.stream_name)
         .bind(filter.time_range_start)
@@ -109,18 +106,16 @@ impl FileListRepository for PostgresFileListRepository {
             r#"
             SELECT COALESCE(SUM(compressed_size), 0)::bigint AS compressed_size
             FROM file_list
-            WHERE ($1::uuid   IS NULL OR tenant_id    = $1)
-              AND ($2::uuid   IS NULL OR project_id   = $2)
-              AND ($3::text   IS NULL OR signal_type  = $3)
-              AND ($4::text   IS NULL OR stream_name  = $4)
-              AND ($5::bigint IS NULL OR max_ts       >= $5)
-              AND ($6::bigint IS NULL OR min_ts       <= $6)
-              AND ($7::text   IS NULL OR location     = $7)
-              AND ($8::bool   IS NULL OR deleted      = $8)
+            WHERE ($1::uuid   IS NULL OR workspace_id = $1)
+              AND ($2::text   IS NULL OR signal_type  = $2)
+              AND ($3::text   IS NULL OR stream_name  = $3)
+              AND ($4::bigint IS NULL OR max_ts       >= $4)
+              AND ($5::bigint IS NULL OR min_ts       <= $5)
+              AND ($6::text   IS NULL OR location     = $6)
+              AND ($7::bool   IS NULL OR deleted      = $7)
             "#,
         )
-        .bind(filter.tenant_id)
-        .bind(filter.project_id)
+        .bind(filter.workspace_id)
         .bind(filter.signal_type)
         .bind(filter.stream_name)
         .bind(filter.time_range_start)
@@ -141,27 +136,26 @@ impl FileListRepository for PostgresFileListRepository {
         let entries = sqlx::query_as::<_, FileListEntry>(
             r#"
             WITH groups AS (
-                SELECT tenant_id, project_id, signal_type, date, count(*) AS cnt
+                SELECT workspace_id, signal_type, date, count(*) AS cnt
                 FROM file_list
                 WHERE deleted = false
                   AND location = 'local'
                   AND created_at < $1
-                GROUP BY tenant_id, project_id, signal_type, date
+                GROUP BY workspace_id, signal_type, date
                 HAVING count(*) >= 2
             )
             SELECT
-                f.id, f.tenant_id, f.project_id, f.signal_type, f.stream_name, f.date,
+                f.id, f.workspace_id, f.signal_type, f.stream_name, f.date,
                 f.file_path, f.location, f.min_ts, f.max_ts, f.records,
                 f.original_size, f.compressed_size, f.deleted, f.created_at, f.updated_at
             FROM file_list f
-            JOIN groups g ON f.tenant_id = g.tenant_id
-                         AND f.project_id = g.project_id
+            JOIN groups g ON f.workspace_id = g.workspace_id
                          AND f.signal_type = g.signal_type
                          AND f.date = g.date
             WHERE f.deleted = false
               AND f.location = 'local'
               AND f.created_at < $1
-            ORDER BY f.tenant_id, f.project_id, f.signal_type, f.date, f.min_ts
+            ORDER BY f.workspace_id, f.signal_type, f.date, f.min_ts
             "#,
         )
         .bind(cutoff_us)
@@ -170,12 +164,11 @@ impl FileListRepository for PostgresFileListRepository {
         .context("Failed to query compactable file groups")?;
 
         let mut groups =
-            std::collections::HashMap::<(Uuid, Uuid, String, String), Vec<FileListEntry>>::new();
+            std::collections::HashMap::<(WorkspaceId, String, String), Vec<FileListEntry>>::new();
         for entry in entries {
             groups
                 .entry((
-                    entry.tenant_id,
-                    entry.project_id,
+                    entry.workspace_id,
                     entry.signal_type.clone(),
                     entry.date.clone(),
                 ))
@@ -245,23 +238,20 @@ impl FileListRepository for PostgresFileListRepository {
 
     async fn get_stream_stats(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
     ) -> anyhow::Result<Vec<StreamStats>> {
         let stats = sqlx::query_as::<_, StreamStats>(
             r#"
             SELECT
-                id, tenant_id, project_id, signal_type, stream_name,
+                id, workspace_id, signal_type, stream_name,
                 file_count, min_ts, max_ts, total_records,
                 total_original_size, total_compressed_size, updated_at
             FROM stream_stats
-            WHERE tenant_id  = $1
-              AND project_id = $2
+            WHERE workspace_id = $1
             ORDER BY signal_type, stream_name
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .fetch_all(self.client.pool())
         .await
         .context("Failed to query stream_stats")?;
@@ -272,11 +262,11 @@ impl FileListRepository for PostgresFileListRepository {
     async fn list_active_keys(
         &self,
         before_micros: i64,
-    ) -> anyhow::Result<Vec<(Uuid, Uuid, String)>> {
-        // Uses idx_file_list_active_size (tenant_id, project_id, signal_type WHERE deleted=false)
+    ) -> anyhow::Result<Vec<(WorkspaceId, String)>> {
+        // Uses idx_file_list_active_size (workspace_id, signal_type WHERE deleted=false)
         let rows = sqlx::query(
             r#"
-            SELECT DISTINCT tenant_id, project_id, signal_type
+            SELECT DISTINCT workspace_id, signal_type
             FROM file_list
             WHERE deleted    = false
               AND created_at < $1
@@ -291,8 +281,7 @@ impl FileListRepository for PostgresFileListRepository {
             .into_iter()
             .map(|r| {
                 (
-                    r.get::<Uuid, _>("tenant_id"),
-                    r.get::<Uuid, _>("project_id"),
+                    r.get::<uuid::Uuid, _>("workspace_id").into(),
                     r.get::<String, _>("signal_type"),
                 )
             })
@@ -301,8 +290,7 @@ impl FileListRepository for PostgresFileListRepository {
 
     async fn already_flushed(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_type: &str,
         stream_name: &str,
         max_wal_offset: i64,
@@ -311,17 +299,15 @@ impl FileListRepository for PostgresFileListRepository {
             r#"
             SELECT EXISTS(
                 SELECT 1 FROM file_list
-                WHERE tenant_id = $1
-                  AND project_id = $2
-                  AND signal_type = $3
-                  AND stream_name = $4
-                  AND wal_replay_offset >= $5
+                WHERE workspace_id = $1
+                  AND signal_type = $2
+                  AND stream_name = $3
+                  AND wal_replay_offset >= $4
                   AND deleted = false
             )
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_type)
         .bind(stream_name)
         .bind(max_wal_offset)
@@ -337,17 +323,17 @@ impl FileListRepository for PostgresFileListRepository {
         sqlx::query(
             r#"
             INSERT INTO stream_stats (
-                tenant_id, project_id, signal_type, stream_name,
+                workspace_id, signal_type, stream_name,
                 file_count, min_ts, max_ts,
                 total_records, total_original_size, total_compressed_size,
                 updated_at
             ) VALUES (
-                $1, $2, $3, $4,
-                1, $5, $6,
-                $7, $8, $9,
-                $10
+                $1, $2, $3,
+                1, $4, $5,
+                $6, $7, $8,
+                $9
             )
-            ON CONFLICT (tenant_id, project_id, signal_type, stream_name)
+            ON CONFLICT (workspace_id, signal_type, stream_name)
             DO UPDATE SET
                 file_count            = stream_stats.file_count            + 1,
                 min_ts                = LEAST(stream_stats.min_ts,                   EXCLUDED.min_ts),
@@ -358,8 +344,7 @@ impl FileListRepository for PostgresFileListRepository {
                 updated_at            = EXCLUDED.updated_at
             "#,
         )
-        .bind(stats.tenant_id)
-        .bind(stats.project_id)
+        .bind(stats.workspace_id)
         .bind(stats.signal_type)
         .bind(stats.stream_name)
         .bind(stats.min_ts)

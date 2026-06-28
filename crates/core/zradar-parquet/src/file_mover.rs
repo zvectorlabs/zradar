@@ -224,9 +224,12 @@ fn path_to_s3_key(path: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use std::sync::Mutex;
-    use uuid::Uuid;
+    
     use zradar_models::{FileListEntry, NewFileListEntry, StreamStats, StreamStatsUpdate};
 
     struct MockBlockStorage {
@@ -280,7 +283,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -354,7 +360,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -368,8 +377,7 @@ mod tests {
         std::fs::write(&path, b"parquet bytes here").unwrap();
         FileListEntry {
             id,
-            tenant_id: Uuid::nil(),
-            project_id: Uuid::nil(),
+            workspace_id: WorkspaceId::from(uuid::Uuid::nil()),
             signal_type: "traces".to_string(),
             stream_name: "default".to_string(),
             date: "2026/06/26/00".to_string(),

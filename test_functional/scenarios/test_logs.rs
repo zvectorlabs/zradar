@@ -260,10 +260,10 @@ async fn test_get_log_by_id() -> Result<()> {
     Ok(())
 }
 
-/// Logs from different projects are isolated (tenant isolation)
+/// Logs from different workspaces are isolated (workspace isolation)
 #[tokio::test]
 #[ignore]
-async fn test_logs_tenant_isolation() -> Result<()> {
+async fn test_logs_workspace_isolation() -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
 
@@ -272,7 +272,7 @@ async fn test_logs_tenant_isolation() -> Result<()> {
         .build_log_request("isolated-svc", 9, "secret-log-message-proj-a");
     env_a.otlp.export_logs(request).await?;
 
-    // Wait for project A's log to land
+    // Wait for workspace A's log to land
     let url_a = "/api/v1/logs".to_string();
     wait_for_items_default(&env_a.client, &url_a).await?;
 
@@ -284,7 +284,7 @@ async fn test_logs_tenant_isolation() -> Result<()> {
     let items = data["items"].as_array().unwrap();
     assert!(items.is_empty(), "Project B must not see Project A's logs");
 
-    println!("✅ Logs tenant isolation verified");
+    println!("✅ Logs workspace isolation verified");
     Ok(())
 }
 

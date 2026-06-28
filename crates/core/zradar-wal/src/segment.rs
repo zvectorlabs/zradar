@@ -276,6 +276,11 @@ pub fn list_segments(dir: &Path) -> Result<Vec<u64>, SegmentError> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use crate::record::{SignalType, WalRecord};
     use bytes::Bytes;
@@ -284,8 +289,7 @@ mod tests {
     fn sample_record(offset: u64) -> WalRecord {
         WalRecord {
             signal_type: SignalType::Trace,
-            tenant_id: uuid::Uuid::new_v4(),
-            project_id: uuid::Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             arrival_timestamp_ns: 1_700_000_000_000_000_000,
             assigned_offset: offset,
             payload: Bytes::from(vec![0xDE; 128]),
@@ -312,7 +316,7 @@ mod tests {
 
         let r1 = reader.next_record().unwrap().unwrap();
         assert_eq!(r1.assigned_offset, 1);
-        assert_eq!(r1.tenant_id, rec1.tenant_id);
+        assert_eq!(r1.workspace_id, rec1.workspace_id);
 
         let r2 = reader.next_record().unwrap().unwrap();
         assert_eq!(r2.assigned_offset, 2);

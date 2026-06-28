@@ -3,6 +3,7 @@
 use chrono::DateTime;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 use super::types::{
     AgentAnalytics, AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown,
@@ -236,10 +237,10 @@ impl QueryService {
     ///
     /// Returns the effective start time after clamping (or the original if no
     /// enforcer is configured, or if the start is within the retention window).
-    fn enforce_start(&self, org_id: Uuid, project_id: Uuid, start_ns: Option<i64>) -> Result<i64> {
+    fn enforce_start(&self, workspace_id: WorkspaceId, start_ns: Option<i64>) -> Result<i64> {
         if let Some(enforcer) = &self.enforcer {
             let (effective_start, _result) = enforcer
-                .enforce(org_id, project_id, start_ns)
+                .enforce(workspace_id, start_ns)
                 .map_err(|e| ControlError::InvalidInput(e.to_string()))?;
             Ok(effective_start)
         } else {
@@ -249,14 +250,13 @@ impl QueryService {
 
     async fn enforce_policy_query(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         start_micros: Option<i64>,
         end_micros: Option<i64>,
     ) -> Result<Option<u64>> {
         let estimated_scanned_bytes = self
-            .estimate_scanned_bytes(tenant_id, project_id, signal, start_micros, end_micros)
+            .estimate_scanned_bytes(workspace_id, signal, start_micros, end_micros)
             .await?;
         let Some(enforcer) = &self.policy_enforcer else {
             return Ok(estimated_scanned_bytes);
@@ -264,8 +264,8 @@ impl QueryService {
 
         match enforcer
             .check_query(QueryCtx {
-                tenant_id,
-                project_id,
+                workspace_id,
+
                 signal,
                 start_micros,
                 end_micros,
@@ -283,8 +283,7 @@ impl QueryService {
 
     async fn estimate_scanned_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         start_micros: Option<i64>,
         end_micros: Option<i64>,
@@ -298,8 +297,7 @@ impl QueryService {
 
         let compressed_size = file_list_repo
             .sum_compressed_size(FileListFilter {
-                tenant_id: Some(tenant_id),
-                project_id: Some(project_id),
+                workspace_id: Some(workspace_id.into()),
                 signal_type: Some(signal_type.to_string()),
                 time_range_start: start_micros,
                 time_range_end: end_micros,
@@ -314,8 +312,7 @@ impl QueryService {
 
     async fn record_query_usage(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         estimated_scanned_bytes: Option<u64>,
         rows_scanned: i64,
@@ -329,8 +326,8 @@ impl QueryService {
         tokio::spawn(async move {
             usage_tracker
                 .record_query(QuerySample {
-                    tenant_id,
-                    project_id,
+                    workspace_id,
+
                     signal,
                     bytes_scanned: i64::try_from(estimated_scanned_bytes.unwrap_or(0))
                         .unwrap_or(i64::MAX),
@@ -348,18 +345,17 @@ impl QueryService {
     /// Query traces
     pub async fn query_traces(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: TraceQueryFilters,
     ) -> Result<PaginatedResponse<TraceSummary>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
             .enforce_policy_query(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 start_micros,
                 end_micros,
@@ -371,7 +367,7 @@ impl QueryService {
             .start_time
             .as_ref()
             .and_then(|t| t.timestamp_nanos_opt());
-        let enforced_start = self.enforce_start(tenant_id, project_id, raw_start)?;
+        let enforced_start = self.enforce_start(workspace_id.into(), raw_start)?;
 
         // Convert API filters to storage filters.
         // Build time_range when either start_time or end_time is supplied.
@@ -389,8 +385,7 @@ impl QueryService {
             None
         };
         let storage_filters = StorageTraceFilters {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             time_range: trace_time_range,
             service_name: filters.service_name.clone(),
             // R1.11: trace operation_name filter (maps to span_name at storage layer)
@@ -424,8 +419,7 @@ impl QueryService {
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
         let rows_scanned = i64::try_from(result.items.len()).unwrap_or(i64::MAX);
         self.record_query_usage(
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Traces,
             estimated_scanned_bytes,
             rows_scanned,
@@ -463,14 +457,13 @@ impl QueryService {
     /// Get trace detail
     pub async fn get_trace(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         trace_id: &str,
     ) -> Result<TraceDetail> {
         // Query storage for spans in this trace
         let spans = self
             .storage
-            .get_trace_detail(tenant_id, project_id, trace_id)
+            .get_trace_detail(workspace_id, trace_id)
             .await
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
 
@@ -548,18 +541,17 @@ impl QueryService {
     /// Query spans
     pub async fn query_spans(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: SpanQueryFilters,
     ) -> Result<PaginatedResponse<SpanDetail>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
             .enforce_policy_query(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 start_micros,
                 end_micros,
@@ -571,7 +563,7 @@ impl QueryService {
             .start_time
             .as_ref()
             .and_then(|t| t.timestamp_nanos_opt());
-        let enforced_start = self.enforce_start(tenant_id, project_id, raw_start)?;
+        let enforced_start = self.enforce_start(workspace_id.into(), raw_start)?;
 
         // Parse and validate span_types
         let span_types = filters
@@ -594,8 +586,7 @@ impl QueryService {
             None
         };
         let storage_filters = StorageSpanFilters {
-            tenant_id: Some(tenant_id),
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             trace_id: filters.trace_id.clone(),
             time_range: span_time_range,
             service_name: filters.service_name.clone(),
@@ -628,8 +619,7 @@ impl QueryService {
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
         let rows_scanned = i64::try_from(result.items.len()).unwrap_or(i64::MAX);
         self.record_query_usage(
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Traces,
             estimated_scanned_bytes,
             rows_scanned,
@@ -700,15 +690,10 @@ impl QueryService {
     }
 
     /// Get a single span by its ID.
-    pub async fn get_span(
-        &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
-        span_id: &str,
-    ) -> Result<SpanDetail> {
+    pub async fn get_span(&self, workspace_id: WorkspaceId, span_id: &str) -> Result<SpanDetail> {
         let span = self
             .storage
-            .get_span(tenant_id, project_id, span_id)
+            .get_span(workspace_id, span_id)
             .await
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?
             .ok_or_else(|| ControlError::NotFound("Span not found".to_string()))?;
@@ -770,10 +755,10 @@ impl QueryService {
     /// original `get_daily_trace_counts()` for backward compatibility.
     pub async fn get_analytics(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<AnalyticsResult>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let end = query
@@ -801,7 +786,7 @@ impl QueryService {
         // a non-default metric, or ad-hoc filters.
         if has_group_by || has_metric || has_filters {
             let storage_filters = StorageAnalyticsFilters {
-                project_id,
+                workspace_id: workspace_id.into(),
                 start,
                 end,
                 metric: query.metric.unwrap_or_else(|| "trace_count".to_string()),
@@ -811,7 +796,7 @@ impl QueryService {
 
             let points = self
                 .storage
-                .query_analytics(tenant_id, storage_filters)
+                .query_analytics(workspace_id.into(), storage_filters)
                 .await
                 .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
 
@@ -840,7 +825,7 @@ impl QueryService {
         // Backward-compatible default: daily trace counts without grouping.
         let points = self
             .storage
-            .get_daily_trace_counts(tenant_id, project_id, start, end)
+            .get_daily_trace_counts(workspace_id.into(), start, end)
             .await
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
 
@@ -859,10 +844,10 @@ impl QueryService {
     /// Get metrics summary
     pub async fn get_metrics_summary(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<crate::telemetry::types::MetricsSummary> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let end = query
@@ -877,7 +862,7 @@ impl QueryService {
 
         let summary = self
             .storage
-            .get_metrics_summary(tenant_id, project_id, start, end)
+            .get_metrics_summary(workspace_id.into(), start, end)
             .await
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
 
@@ -894,10 +879,10 @@ impl QueryService {
     /// Get top endpoints
     pub async fn get_top_endpoints(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: TopNQuery,
     ) -> Result<Vec<TopEndpoint>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let limit = query.n.unwrap_or(10).max(1) as usize;
         let start = query.start_time.timestamp_nanos_opt().unwrap_or(0);
@@ -906,9 +891,9 @@ impl QueryService {
         let points = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "span_count".to_string(),
@@ -922,9 +907,9 @@ impl QueryService {
         let durations = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "avg_duration_ms".to_string(),
@@ -938,9 +923,9 @@ impl QueryService {
         let errors = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "error_count".to_string(),
@@ -981,7 +966,7 @@ impl QueryService {
             })
             .collect();
 
-        endpoints.sort_by(|a, b| b.count.cmp(&a.count));
+        endpoints.sort_by_key(|b| std::cmp::Reverse(b.count));
         endpoints.truncate(limit);
         Ok(endpoints)
     }
@@ -989,10 +974,10 @@ impl QueryService {
     /// Get error breakdown
     pub async fn get_error_breakdown(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: ErrorAnalyticsQuery,
     ) -> Result<Vec<ErrorBreakdown>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let mut filters = HashMap::new();
         filters.insert("status_code".to_string(), "ERROR".to_string());
@@ -1002,9 +987,9 @@ impl QueryService {
         let points = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start: query.start_time.timestamp_nanos_opt().unwrap_or(0),
                     end: query.end_time.timestamp_nanos_opt().unwrap_or(0),
                     metric: "error_count".to_string(),
@@ -1036,10 +1021,10 @@ impl QueryService {
 
     pub async fn get_llm_analytics(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<LlmAnalytics>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let end = query
             .end
@@ -1054,9 +1039,9 @@ impl QueryService {
         let requests = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "span_count".to_string(),
@@ -1069,9 +1054,9 @@ impl QueryService {
         let tokens = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "total_tokens".to_string(),
@@ -1084,9 +1069,9 @@ impl QueryService {
         let costs = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "total_cost_usd".to_string(),
@@ -1099,9 +1084,9 @@ impl QueryService {
         let durations = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "avg_duration_ms".to_string(),
@@ -1129,10 +1114,10 @@ impl QueryService {
 
     pub async fn get_agent_analytics(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<Vec<AgentAnalytics>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let end = query
             .end
@@ -1147,9 +1132,9 @@ impl QueryService {
         let spans = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "span_count".to_string(),
@@ -1162,9 +1147,9 @@ impl QueryService {
         let errors = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "error_count".to_string(),
@@ -1177,9 +1162,9 @@ impl QueryService {
         let tokens = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "total_tokens".to_string(),
@@ -1192,9 +1177,9 @@ impl QueryService {
         let durations = self
             .storage
             .query_analytics(
-                tenant_id,
+                workspace_id.into(),
                 StorageAnalyticsFilters {
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     start,
                     end,
                     metric: "avg_duration_ms".to_string(),
@@ -1234,10 +1219,10 @@ impl QueryService {
     /// Return guardrails analytics: halt rate, rail-type breakdown, top halting rails.
     pub async fn get_guardrails_analytics(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: AnalyticsQuery,
     ) -> Result<GuardrailsAnalytics> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let end = query
             .end
@@ -1251,8 +1236,8 @@ impl QueryService {
         let result: StorageGuardrailsResult = self
             .storage
             .get_guardrails_analytics(StorageGuardrailsFilters {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
+
                 start,
                 end,
             })
@@ -1289,10 +1274,10 @@ impl QueryService {
     /// Return active storage usage grouped by signal type and storage location.
     pub async fn get_storage_usage(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: StorageUsageQuery,
     ) -> Result<Vec<StorageUsage>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let file_list_repo = self.file_list_repo.as_ref().ok_or_else(|| {
             ControlError::Internal(
@@ -1302,8 +1287,7 @@ impl QueryService {
 
         let files = file_list_repo
             .query_files(FileListFilter {
-                tenant_id: Some(tenant_id),
-                project_id: Some(project_id),
+                workspace_id: Some(workspace_id),
                 signal_type: filters.signal_type,
                 time_range_start: filters.start_time.map(|start| start.timestamp_micros()),
                 time_range_end: filters.end_time.map(|end| end.timestamp_micros()),
@@ -1318,8 +1302,7 @@ impl QueryService {
         for file in files {
             let key = (file.signal_type.clone(), file.location.clone());
             let usage = grouped.entry(key).or_insert_with(|| StorageUsage {
-                tenant_id: file.tenant_id.to_string(),
-                project_id: file.project_id.to_string(),
+                workspace_id: file.workspace_id.to_string(),
                 signal_type: file.signal_type.clone(),
                 location: file.location.clone(),
                 file_count: 0,
@@ -1344,10 +1327,10 @@ impl QueryService {
 
     pub async fn get_quota_status(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: QuotaStatusQuery,
     ) -> Result<Vec<QuotaStatus>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let policy_store = self
             .policy_store
@@ -1366,7 +1349,7 @@ impl QueryService {
 
         for signal in signals {
             for operation in [Operation::Ingest, Operation::Query] {
-                let resolved = policy_store.resolve(tenant_id, project_id, signal, operation);
+                let resolved = policy_store.resolve(workspace_id.into(), signal, operation);
                 for quota in resolved.quotas {
                     if let PolicyLimit::Quota {
                         max_bytes,
@@ -1377,8 +1360,7 @@ impl QueryService {
                     {
                         let observed_value = usage_reader
                             .period_used_bytes(
-                                tenant_id,
-                                project_id,
+                                workspace_id.into(),
                                 signal,
                                 operation,
                                 period_start,
@@ -1399,10 +1381,10 @@ impl QueryService {
                 }
             }
 
-            let resolved = policy_store.resolve(tenant_id, project_id, signal, Operation::Store);
+            let resolved = policy_store.resolve(workspace_id.into(), signal, Operation::Store);
             if let Some(PolicyLimit::Size { max_bytes, .. }) = resolved.size {
                 let observed_value = usage_reader
-                    .stored_compressed_bytes(tenant_id, project_id, signal)
+                    .stored_compressed_bytes(workspace_id.into(), signal)
                     .await
                     .map_err(|e| ControlError::Internal(e.to_string()))?;
                 statuses.push(quota_status(
@@ -1422,10 +1404,10 @@ impl QueryService {
 
     pub async fn get_usage_daily(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: UsageDailyQuery,
     ) -> Result<Vec<UsageDailyRecord>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
@@ -1434,8 +1416,7 @@ impl QueryService {
 
         usage_analytics_reader
             .usage_daily(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 signal,
                 query.start_time.map(|start| start.timestamp_micros()),
                 query.end_time.map(|end| end.timestamp_micros()),
@@ -1446,10 +1427,10 @@ impl QueryService {
 
     pub async fn get_storage_usage_daily(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: StorageUsageDailyQuery,
     ) -> Result<Vec<StorageUsageDaily>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let storage_usage_repo = self.storage_usage_repo.as_ref().ok_or_else(|| {
             ControlError::Internal("Storage usage repository is not configured".to_string())
@@ -1459,8 +1440,7 @@ impl QueryService {
 
         let rows = storage_usage_repo
             .query_storage_usage_daily(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 signal_kind,
                 query.start_time.map(|start| start.timestamp_micros()),
                 query.end_time.map(|end| end.timestamp_micros()),
@@ -1471,8 +1451,7 @@ impl QueryService {
         Ok(rows
             .into_iter()
             .map(|row| StorageUsageDaily {
-                tenant_id: row.tenant_id.to_string(),
-                project_id: row.project_id.to_string(),
+                workspace_id: row.workspace_id.to_string(),
                 signal: row.signal_kind,
                 day: row.day,
                 compressed_bytes: row.compressed_bytes,
@@ -1485,10 +1464,10 @@ impl QueryService {
 
     pub async fn get_ingest_rate(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: IngestRateQuery,
     ) -> Result<Vec<IngestRateRecord>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
@@ -1502,17 +1481,17 @@ impl QueryService {
             .timestamp_micros();
 
         usage_analytics_reader
-            .ingest_rate(tenant_id, project_id, signal, start, end)
+            .ingest_rate(workspace_id.into(), signal, start, end)
             .await
             .map_err(|e| ControlError::Internal(e.to_string()))
     }
 
     pub async fn get_query_usage(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         query: QueryUsageQuery,
     ) -> Result<Vec<QueryUsageRecord>> {
-        let project_id = Uuid::parse_str(&query.project_id)
+        let workspace_id = Uuid::parse_str(&query.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let usage_analytics_reader = self.usage_analytics_reader.as_ref().ok_or_else(|| {
             ControlError::Internal("Usage analytics reader is not configured".to_string())
@@ -1526,7 +1505,7 @@ impl QueryService {
             .timestamp_micros();
 
         usage_analytics_reader
-            .query_usage(tenant_id, project_id, signal, start, end)
+            .query_usage(workspace_id.into(), signal, start, end)
             .await
             .map_err(|e| ControlError::Internal(e.to_string()))
     }
@@ -1534,18 +1513,17 @@ impl QueryService {
     /// Query log records
     pub async fn query_logs(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: LogQueryFilters,
     ) -> Result<PaginatedResponse<LogDetail>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
             .enforce_policy_query(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Logs,
                 start_micros,
                 end_micros,
@@ -1558,10 +1536,10 @@ impl QueryService {
             .start_time
             .as_ref()
             .and_then(|t| t.timestamp_nanos_opt());
-        let enforced_start = self.enforce_start(tenant_id, project_id, raw_start)?;
+        let enforced_start = self.enforce_start(workspace_id.into(), raw_start)?;
 
         let storage_filters = StorageLogFilters {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             time_range: filters.end_time.map(|end| TimeRange {
                 start: enforced_start,
                 end: end.timestamp_nanos_opt().unwrap_or(0),
@@ -1585,8 +1563,7 @@ impl QueryService {
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
         let rows_scanned = i64::try_from(result.items.len()).unwrap_or(i64::MAX);
         self.record_query_usage(
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Logs,
             estimated_scanned_bytes,
             rows_scanned,
@@ -1641,15 +1618,10 @@ impl QueryService {
     }
 
     /// Get a single log by ID
-    pub async fn get_log(
-        &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
-        log_id: &str,
-    ) -> Result<LogDetail> {
+    pub async fn get_log(&self, workspace_id: WorkspaceId, log_id: &str) -> Result<LogDetail> {
         let log = self
             .storage
-            .get_log(tenant_id, project_id, log_id)
+            .get_log(workspace_id, log_id)
             .await
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?
             .ok_or_else(|| ControlError::NotFound("Log not found".to_string()))?;
@@ -1692,18 +1664,17 @@ impl QueryService {
     /// Query metrics
     pub async fn query_metrics(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: MetricQueryFilters,
     ) -> Result<PaginatedResponse<MetricDetail>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
 
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
             .enforce_policy_query(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Metrics,
                 start_micros,
                 end_micros,
@@ -1716,10 +1687,10 @@ impl QueryService {
             .start_time
             .as_ref()
             .and_then(|t| t.timestamp_nanos_opt());
-        let enforced_start = self.enforce_start(tenant_id, project_id, raw_start)?;
+        let enforced_start = self.enforce_start(workspace_id.into(), raw_start)?;
 
         let storage_filters = StorageMetricFilters {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             time_range: filters.end_time.map(|end| TimeRange {
                 start: enforced_start,
                 end: end.timestamp_nanos_opt().unwrap_or(0),
@@ -1740,8 +1711,7 @@ impl QueryService {
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
         let rows_scanned = i64::try_from(result.items.len()).unwrap_or(i64::MAX);
         self.record_query_usage(
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Metrics,
             estimated_scanned_bytes,
             rows_scanned,
@@ -1777,17 +1747,16 @@ impl QueryService {
     /// Query metric time-series (bucketed aggregates)
     pub async fn query_metric_series(
         &self,
-        tenant_id: Uuid,
+        _workspace_id: WorkspaceId,
         filters: MetricSeriesFilters,
     ) -> Result<Vec<MetricSeriesPoint>> {
-        let project_id = Uuid::parse_str(&filters.project_id)
+        let workspace_id = Uuid::parse_str(&filters.workspace_id)
             .map_err(|_| ControlError::InvalidInput("Invalid project ID".to_string()))?;
         let start_micros = filters.start_time.as_ref().map(|t| t.timestamp_micros());
         let end_micros = filters.end_time.as_ref().map(|t| t.timestamp_micros());
         let estimated_scanned_bytes = self
             .enforce_policy_query(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Metrics,
                 start_micros,
                 end_micros,
@@ -1796,7 +1765,7 @@ impl QueryService {
         let query_started_at = Instant::now();
 
         let storage_filters = StorageMetricSeriesFilters {
-            project_id: Some(project_id),
+            workspace_id: Some(workspace_id),
             metric_name: filters.metric_name,
             time_range: filters
                 .start_time
@@ -1817,8 +1786,7 @@ impl QueryService {
             .map_err(|e| ControlError::Internal(format!("Storage error: {}", e)))?;
         let rows_scanned = i64::try_from(points.len()).unwrap_or(i64::MAX);
         self.record_query_usage(
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Metrics,
             estimated_scanned_bytes,
             rows_scanned,

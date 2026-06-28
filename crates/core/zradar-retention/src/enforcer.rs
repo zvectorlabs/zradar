@@ -9,8 +9,7 @@
 //! so it is a no-op when retention is not configured.
 
 use std::sync::Arc;
-
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 use crate::config::RetentionConfigStore;
 
@@ -55,16 +54,15 @@ impl QueryEnforcer {
     /// Returns `(effective_start_ns, EnforcementResult)`.
     ///
     /// If `start_ns` is `None` the cutoff is used as the start — this prevents
-    /// unbounded scans on projects with a configured retention window.
+    /// unbounded scans on workspaces with a configured retention window.
     pub fn enforce(
         &self,
-        org_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         start_ns: Option<i64>,
     ) -> Result<(i64, EnforcementResult), anyhow::Error> {
-        let retention_days = self.config_store.get_effective_days(org_id, project_id);
+        let retention_days = self.config_store.get_effective_days(workspace_id);
 
-        let cutoff_ns = self.config_store.get_cutoff_ns(org_id, project_id);
+        let cutoff_ns = self.config_store.get_cutoff_ns(workspace_id);
 
         let (effective_start, modified) = match start_ns {
             None => (cutoff_ns, false),
@@ -94,8 +92,13 @@ impl QueryEnforcer {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
-    use crate::config::OrgRetentionConfig;
+    use crate::config::WorkspaceRetentionConfig;
 
     fn make_enforcer(days: u32) -> QueryEnforcer {
         let store = Arc::new(RetentionConfigStore::new(days));
@@ -105,15 +108,14 @@ mod tests {
     #[test]
     fn test_clamp_start_before_cutoff() {
         let enforcer = make_enforcer(7);
-        let org_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
 
         // Start is 30 days ago — before the 7-day cutoff
         let thirty_days_ago_ns =
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) - 30 * 86_400 * 1_000_000_000;
 
         let (effective_start, result) = enforcer
-            .enforce(org_id, project_id, Some(thirty_days_ago_ns))
+            .enforce(workspace_id.into(), Some(thirty_days_ago_ns))
             .unwrap();
 
         assert!(result.modified, "start should have been clamped");
@@ -127,14 +129,13 @@ mod tests {
     #[test]
     fn test_no_clamp_when_start_within_retention() {
         let enforcer = make_enforcer(30);
-        let org_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
 
         let five_days_ago_ns =
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) - 5 * 86_400 * 1_000_000_000;
 
         let (effective_start, result) = enforcer
-            .enforce(org_id, project_id, Some(five_days_ago_ns))
+            .enforce(workspace_id.into(), Some(five_days_ago_ns))
             .unwrap();
 
         assert!(!result.modified);
@@ -149,7 +150,7 @@ mod tests {
         let old_ns =
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) - 30 * 86_400 * 1_000_000_000;
 
-        let result = enforcer.enforce(Uuid::new_v4(), Uuid::new_v4(), Some(old_ns));
+        let result = enforcer.enforce(Uuid::new_v4().into(), Some(old_ns));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("retention cutoff"));
     }
@@ -157,33 +158,29 @@ mod tests {
     #[test]
     fn test_none_start_uses_cutoff() {
         let enforcer = make_enforcer(7);
-        let (_, result) = enforcer
-            .enforce(Uuid::new_v4(), Uuid::new_v4(), None)
-            .unwrap();
+        let (_, result) = enforcer.enforce(Uuid::new_v4().into(), None).unwrap();
         assert!(!result.modified);
         assert_eq!(result.retention_days, 7);
     }
 
     #[test]
-    fn test_project_override_used_in_enforcement() {
+    fn test_workspace_override_used_in_enforcement() {
         let store = Arc::new(RetentionConfigStore::new(30));
-        let org_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
 
-        store.upsert(OrgRetentionConfig {
-            org_id,
-            default_days: 30,
-            project_overrides: [(project_id, 3)].into(),
+        store.upsert(WorkspaceRetentionConfig {
+            workspace_id: workspace_id.into(),
+            retention_days: 3,
         });
 
         let enforcer = QueryEnforcer::new(store, EnforcementStrategy::Clamp);
 
-        // 10 days ago — beyond 3-day project retention
+        // 10 days ago — beyond 3-day workspace retention
         let ten_days_ago =
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) - 10 * 86_400 * 1_000_000_000;
 
         let (_, result) = enforcer
-            .enforce(org_id, project_id, Some(ten_days_ago))
+            .enforce(workspace_id.into(), Some(ten_days_ago))
             .unwrap();
 
         assert!(result.modified);

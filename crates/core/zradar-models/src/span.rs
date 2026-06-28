@@ -22,10 +22,9 @@ pub struct Span {
     pub duration_ns: i64, // Duration in nanoseconds (i64 for PostgreSQL compat)
 
     // ============================================================
-    // Hierarchy (Two-Level Multi-tenancy)
+    // Hierarchy (Workspace Scope)
     // ============================================================
-    pub tenant_id: String,  // Organization/Team
-    pub project_id: String, // Project within org
+    pub workspace_id: String, // Unified isolation boundary
 
     // ============================================================
     // Service Metadata
@@ -180,8 +179,7 @@ impl Default for Span {
             parent_span_id: String::new(),
             timestamp: 0,
             duration_ns: 0, // i64
-            tenant_id: String::new(),
-            project_id: String::new(),
+            workspace_id: String::new(),
             service_name: String::new(),
             span_name: String::new(),
             span_kind: "INTERNAL".to_string(),

@@ -4,6 +4,7 @@
 //! Platform-specific auth (gateway service tokens, remote OTLP key validation)
 //! lives exclusively in an external platform wrapper binary.
 
+use crate::WorkspaceId;
 use serde::Deserialize;
 
 /// A single API key entry in `config.toml`.
@@ -11,16 +12,14 @@ use serde::Deserialize;
 /// Example:
 /// ```toml
 /// [[api_keys]]
-/// key        = "zk_live_abc123"
-/// tenant_id  = "acme"
-/// project_id = "prod"
-/// name       = "production ingestor"
+/// key          = "zk_live_abc123"
+/// workspace_id = "550e8400-e29b-41d4-a716-446655440000"
+/// name         = "production ingestor"
 /// ```
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiKeyConfig {
     pub key: String,
-    pub tenant_id: String,
-    pub project_id: String,
+    pub workspace_id: WorkspaceId,
     #[serde(default)]
     pub name: String,
 }
@@ -36,8 +35,8 @@ pub struct AuthConfig {
     pub otlp_require_api_key: bool,
     /// Test-only context simulation for functional/E2E tests.
     ///
-    /// When `true`, standalone API-key auth accepts `x-tenant-id` and
-    /// `x-project-id` headers after validating the bearer token. This lets tests
+    /// When `true`, standalone API-key auth accepts `x-workspace-id` header
+    /// after validating the bearer token. This lets tests
     /// simulate many API keys/contexts with one static key. Keep this `false`
     /// in all non-test configs.
     #[serde(default)]

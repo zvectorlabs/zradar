@@ -37,8 +37,7 @@ pub fn extract_scores(
 
 fn parse_score(log: &LogRecord, context: &RequestContext) -> Option<EvaluationScore> {
     let mut score = EvaluationScore {
-        tenant_id: context.tenant_id.clone(),
-        project_id: context.project_id.clone(),
+        workspace_id: context.workspace_id.to_string(),
         ..EvaluationScore::default()
     };
 
@@ -218,8 +217,7 @@ mod tests {
 
     fn ctx() -> RequestContext {
         RequestContext {
-            tenant_id: "tenant-1".to_string(),
-            project_id: "proj-1".to_string(),
+            workspace_id: uuid::Uuid::nil().into(),
         }
     }
 
@@ -246,8 +244,7 @@ mod tests {
         assert_eq!(scores[0].trace_id, "abc123");
         assert_eq!(scores[0].name, "accuracy");
         assert!((scores[0].value - 0.95).abs() < 1e-9);
-        assert_eq!(scores[0].tenant_id, "tenant-1");
-        assert_eq!(scores[0].project_id, "proj-1");
+        assert_eq!(scores[0].workspace_id, uuid::Uuid::nil().to_string());
     }
 
     #[test]

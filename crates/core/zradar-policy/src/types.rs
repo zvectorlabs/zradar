@@ -1,4 +1,4 @@
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,8 +69,7 @@ pub struct PolicyId(pub i64);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Policy {
     pub id: Option<PolicyId>,
-    pub tenant_id: Uuid,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub operation: Operation,
     pub limit: PolicyLimit,
@@ -158,8 +157,7 @@ impl From<&Decision> for DecisionSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IngestCtx {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub records: u64,
     pub estimated_bytes: Option<u64>,
@@ -168,8 +166,7 @@ pub struct IngestCtx {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueryCtx {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub start_micros: Option<i64>,
     pub end_micros: Option<i64>,
@@ -195,8 +192,7 @@ pub struct RetentionUsageBucket {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WriteSample {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub stream_name: Option<String>,
     pub compressed_bytes: i64,
@@ -209,8 +205,7 @@ pub struct WriteSample {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuerySample {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub bytes_scanned: i64,
     pub rows_scanned: Option<i64>,
@@ -245,8 +240,7 @@ pub struct QuotaStatus {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ThresholdEvent {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub operation: Operation,
     pub limit_kind: String,
@@ -259,8 +253,7 @@ pub struct ThresholdEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DecisionAuditEvent {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub operation: Operation,
     pub decision: DecisionSummary,
@@ -273,8 +266,7 @@ pub struct DecisionAuditEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UsageDailyRecord {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub operation: Operation,
     pub day: String,
@@ -286,8 +278,7 @@ pub struct UsageDailyRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IngestRateRecord {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub records_per_sec: u64,
     pub bytes_per_sec: u64,
@@ -297,8 +288,7 @@ pub struct IngestRateRecord {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueryUsageRecord {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal: SignalKind,
     pub bytes_scanned: i64,
     pub rows_scanned: i64,

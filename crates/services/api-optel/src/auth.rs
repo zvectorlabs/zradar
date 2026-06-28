@@ -12,9 +12,9 @@ use zradar_traits::Authenticator;
 ///
 /// Returns `RequestContext::default()` when `auth` is `None` (auth disabled).
 ///
-/// Tenant and project are bound to the authenticated token by default.
+/// Workspace is bound to the authenticated token by default.
 ///
-/// When `allow_test_header_context` is true, `x-tenant-id` and `x-project-id`
+/// When `allow_test_header_context` is true, `x-workspace-id`
 /// are applied after bearer-token validation. This mode exists only for
 /// functional/E2E tests that need to simulate many API keys with one static key.
 pub async fn authenticate_grpc<T>(
@@ -23,7 +23,7 @@ pub async fn authenticate_grpc<T>(
     allow_test_header_context: bool,
 ) -> Result<RequestContext, Status> {
     let Some(authenticator) = auth else {
-        return Ok(RequestContext::default());
+        return Ok(RequestContext::new(uuid::Uuid::nil().into()));
     };
 
     let metadata = request.metadata();
@@ -42,19 +42,13 @@ pub async fn authenticate_grpc<T>(
         Status::unauthenticated("Invalid API key")
     })?;
 
-    if allow_test_header_context {
-        if let Some(tenant_id) = metadata
-            .get("x-tenant-id")
+    if allow_test_header_context
+        && let Some(workspace_id) = metadata
+            .get("x-workspace-id")
             .and_then(|value| value.to_str().ok())
-        {
-            context.tenant_id = tenant_id.to_string();
-        }
-        if let Some(project_id) = metadata
-            .get("x-project-id")
-            .and_then(|value| value.to_str().ok())
-        {
-            context.project_id = project_id.to_string();
-        }
+            .and_then(|s| s.parse().ok())
+    {
+        context.workspace_id = workspace_id;
     }
 
     Ok(context)
@@ -73,8 +67,7 @@ mod tests {
                 anyhow::bail!("invalid token");
             }
             Ok(RequestContext {
-                tenant_id: "auth-tenant".to_string(),
-                project_id: "auth-project".to_string(),
+                workspace_id: uuid::Uuid::nil().into(),
             })
         }
     }
@@ -86,17 +79,14 @@ mod tests {
         request
             .metadata_mut()
             .insert("authorization", "Bearer valid".parse().unwrap());
-        request
-            .metadata_mut()
-            .insert("x-tenant-id", "header-tenant".parse().unwrap());
-        request
-            .metadata_mut()
-            .insert("x-project-id", "header-project".parse().unwrap());
+        request.metadata_mut().insert(
+            "x-workspace-id",
+            "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+        );
 
         let context = authenticate_grpc(&auth, &request, false).await.unwrap();
 
-        assert_eq!(context.tenant_id, "auth-tenant");
-        assert_eq!(context.project_id, "auth-project");
+        assert_eq!(context.workspace_id, uuid::Uuid::nil().into());
     }
 
     #[tokio::test]
@@ -106,16 +96,16 @@ mod tests {
         request
             .metadata_mut()
             .insert("authorization", "Bearer valid".parse().unwrap());
-        request
-            .metadata_mut()
-            .insert("x-tenant-id", "header-tenant".parse().unwrap());
-        request
-            .metadata_mut()
-            .insert("x-project-id", "header-project".parse().unwrap());
+        request.metadata_mut().insert(
+            "x-workspace-id",
+            "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+        );
 
         let context = authenticate_grpc(&auth, &request, true).await.unwrap();
 
-        assert_eq!(context.tenant_id, "header-tenant");
-        assert_eq!(context.project_id, "header-project");
+        assert_eq!(
+            context.workspace_id.to_string(),
+            "00000000-0000-0000-0000-000000000001"
+        );
     }
 }

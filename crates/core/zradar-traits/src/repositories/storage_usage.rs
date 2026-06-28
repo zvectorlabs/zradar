@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageUsageDelta {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_kind: String,
     pub day: NaiveDate,
     pub compressed_bytes: i64,
@@ -14,8 +13,7 @@ pub struct StorageUsageDelta {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageUsageDailySnapshot {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub signal_kind: String,
     pub day: String,
     pub compressed_bytes: i64,
@@ -47,8 +45,7 @@ pub trait StorageUsageRepository: Send + Sync {
     /// or `(0, 0)` if no ingestion was recorded.
     async fn get_ingestion_daily(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<(i64, i64)>;
@@ -57,8 +54,7 @@ pub trait StorageUsageRepository: Send + Sync {
     /// on `day`, or `(0, 0)` if nothing was cleaned up.
     async fn get_cleanup_daily(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<(i64, i64)>;
@@ -67,8 +63,7 @@ pub trait StorageUsageRepository: Send + Sync {
     /// if this is the first snapshot for that combination (bootstrap case).
     async fn get_previous_snapshot(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<Option<(i64, i64)>>;
@@ -77,8 +72,7 @@ pub trait StorageUsageRepository: Send + Sync {
     /// Idempotent: re-running for the same key+day overwrites with the new values.
     async fn upsert_storage_snapshot(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
         compressed_bytes: i64,
@@ -89,16 +83,14 @@ pub trait StorageUsageRepository: Send + Sync {
     /// before `before_micros` and not deleted.
     async fn get_current_file_stats(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         before_micros: i64,
     ) -> anyhow::Result<(i64, i64)>;
 
     async fn query_storage_usage_daily(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: Option<&str>,
         start_micros: Option<i64>,
         end_micros: Option<i64>,

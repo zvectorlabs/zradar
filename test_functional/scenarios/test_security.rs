@@ -27,7 +27,7 @@ use anyhow::Result;
 // ===========================================================================
 
 /// Send a single OTLP span with the given `service_name` so we have at least
-/// one real row under the current tenant. Returns the hex trace_id.
+/// one real row under the current workspace. Returns the hex trace_id.
 async fn ingest_named_span(env: &TestEnv, service_name: &str) -> Result<String> {
     use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
     use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
@@ -108,7 +108,7 @@ async fn query_spans_by_service(env: &TestEnv, service_name: &str) -> Result<(u1
 async fn test_sql_injection_service_name_payloads_return_zero_rows() -> Result<()> {
     let env = TestEnv::setup().await?;
 
-    // Ingest exactly one span so there is real data under this tenant.
+    // Ingest exactly one span so there is real data under this workspace.
     let _trace_id = ingest_named_span(&env, "legit-service").await?;
     // Give the flush worker time to write the Parquet file.
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;

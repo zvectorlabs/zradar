@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
+use zradar_models::WorkspaceId;
 
 use chrono::NaiveDate;
 use tokio::sync::Semaphore;
@@ -7,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use zradar_traits::{FileListRepository, StorageUsageRepository};
 
-/// Maximum number of (tenant, project, signal) keys snapshotted concurrently.
+/// Maximum number of (workspace, signal) keys snapshotted concurrently.
 const SNAPSHOT_CONCURRENCY: usize = 10;
 
 pub struct StorageUsageDailyJob {
@@ -31,7 +32,7 @@ impl StorageUsageDailyJob {
 
     /// Snapshot storage usage for all active keys on `day`.
     ///
-    /// For each (tenant, project, signal) combination:
+    /// For each (workspace, signal) combination:
     /// - Looks up the previous day's snapshot in `retention_storage_daily`.
     /// - If found (incremental): applies ingestion and cleanup deltas from the
     ///   daily accounting tables to produce the new snapshot value.
@@ -61,7 +62,7 @@ impl StorageUsageDailyJob {
         let sem = Arc::new(Semaphore::new(SNAPSHOT_CONCURRENCY));
         let mut tasks = tokio::task::JoinSet::new();
 
-        for (tenant_id, project_id, signal_kind) in keys {
+        for (workspace_id, signal_kind) in keys {
             let permit = sem.clone().acquire_owned().await?;
             let repo = self.storage_usage_repo.clone();
 
@@ -69,14 +70,13 @@ impl StorageUsageDailyJob {
                 let _permit = permit;
                 snapshot_one_key(
                     repo.as_ref(),
-                    tenant_id,
-                    project_id,
+                    workspace_id,
                     &signal_kind,
                     day,
                     day_end_micros,
                 )
                 .await
-                .map_err(|e| format!("{tenant_id}/{project_id}/{signal_kind}: {e}"))
+                .map_err(|e| format!("{workspace_id}/{signal_kind}: {e}"))
             });
         }
 
@@ -130,7 +130,7 @@ impl StorageUsageDailyJob {
     }
 }
 
-/// Snapshot a single (tenant, project, signal) key for `day`.
+/// Snapshot a single (workspace, signal) key for `day`.
 ///
 /// Logic:
 ///
@@ -142,23 +142,22 @@ impl StorageUsageDailyJob {
 /// 4. Upsert the result into `retention_storage_daily`.
 async fn snapshot_one_key(
     repo: &dyn StorageUsageRepository,
-    tenant_id: uuid::Uuid,
-    project_id: uuid::Uuid,
+    workspace_id: WorkspaceId,
     signal_kind: &str,
     day: NaiveDate,
     day_end_micros: i64,
 ) -> anyhow::Result<()> {
     let (compressed_bytes, file_count) = match repo
-        .get_previous_snapshot(tenant_id, project_id, signal_kind, day)
+        .get_previous_snapshot(workspace_id, signal_kind, day)
         .await?
     {
         Some((prev_bytes, prev_count)) => {
             // Incremental: load today's ingestion and cleanup deltas.
             let (added_bytes, added_count) = repo
-                .get_ingestion_daily(tenant_id, project_id, signal_kind, day)
+                .get_ingestion_daily(workspace_id, signal_kind, day)
                 .await?;
             let (removed_bytes, removed_count) = repo
-                .get_cleanup_daily(tenant_id, project_id, signal_kind, day)
+                .get_cleanup_daily(workspace_id, signal_kind, day)
                 .await?;
 
             let bytes = (prev_bytes + added_bytes - removed_bytes).max(0);
@@ -167,20 +166,13 @@ async fn snapshot_one_key(
         }
         None => {
             // Bootstrap: full count from file_list, bounded by day_end.
-            repo.get_current_file_stats(tenant_id, project_id, signal_kind, day_end_micros)
+            repo.get_current_file_stats(workspace_id, signal_kind, day_end_micros)
                 .await?
         }
     };
 
-    repo.upsert_storage_snapshot(
-        tenant_id,
-        project_id,
-        signal_kind,
-        day,
-        compressed_bytes,
-        file_count,
-    )
-    .await
+    repo.upsert_storage_snapshot(workspace_id, signal_kind, day, compressed_bytes, file_count)
+        .await
 }
 
 /// Microseconds at the exclusive end of `day` (i.e. start of the next day).

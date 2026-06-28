@@ -1,7 +1,7 @@
 //! M07-04: In-memory write buffer.
 //!
 //! `WriteBuffer` accumulates incoming telemetry in memory, keyed by
-//! `(tenant_id, project_id, signal_type, stream_name, hour)`.
+//! `(workspace_id, signal_type, stream_name, hour)`.
 //!
 //! A background [`FlushWorker`](crate::flush_worker::FlushWorker) drains
 //! TTL-expired or over-size slots, batching many API calls into a single
@@ -27,13 +27,12 @@ use zradar_models::{EvaluationScore, LogRecord, Metric, Span};
 
 /// Identifies a single accumulating slot.
 ///
-/// One slot per `(tenant, project, signal_type, stream_name, hour)`.
+/// One slot per `(workspace, signal_type, stream_name, hour)`.
 /// The `hour` field is `"YYYY/MM/DD/HH"` derived from the first record's
 /// nanosecond timestamp via [`crate::writer::ts_ns_to_date_path`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BufferKey {
-    pub tenant_id: String,
-    pub project_id: String,
+    pub workspace_id: String,
     pub signal_type: String,
     pub stream_name: String,
     /// Truncated to the hour: `"YYYY/MM/DD/HH"`.
@@ -301,13 +300,15 @@ fn rough_size(count: usize, bytes_per_record: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use uuid::Uuid;
 
     fn key(signal: &str) -> BufferKey {
         BufferKey {
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             signal_type: signal.to_string(),
             stream_name: "svc".to_string(),
             hour: "2024/01/15/14".to_string(),
@@ -318,8 +319,7 @@ mod tests {
         Span {
             trace_id: Uuid::new_v4().to_string(),
             span_id: Uuid::new_v4().to_string(),
-            tenant_id: Uuid::new_v4().to_string(),
-            project_id: Uuid::new_v4().to_string(),
+            workspace_id: WorkspaceId::new().to_string(),
             timestamp: 1_000_000_000,
             duration_ns: 500_000,
             ..Span::default()

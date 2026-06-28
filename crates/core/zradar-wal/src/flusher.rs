@@ -196,6 +196,11 @@ impl WalFlusher {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use crate::config::WalConfig;
     use crate::record::SignalType;
@@ -219,8 +224,7 @@ mod tests {
     fn make_record(signal: SignalType) -> WalRecord {
         WalRecord {
             signal_type: signal,
-            tenant_id: uuid::Uuid::new_v4(),
-            project_id: uuid::Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             arrival_timestamp_ns: 1_700_000_000_000_000_000,
             assigned_offset: 0,
             payload: Bytes::from(vec![0xCC; 64]),

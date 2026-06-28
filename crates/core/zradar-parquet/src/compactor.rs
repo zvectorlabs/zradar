@@ -1,14 +1,14 @@
 //! M07-07: Background Parquet compaction job.
 //!
 //! `Compactor` periodically scans the `file_list` for small Parquet files that
-//! share the same `(tenant_id, project_id, signal_type, date)` bucket, merges
+//! share the same `(workspace_id, signal_type, date)` bucket, merges
 //! their rows into a single larger file, soft-deletes the originals, and
 //! registers the merged result.
 //!
 //! ## Why compaction?
 //!
 //! Under write-buffered ingestion (M07-04) each flush produces one Parquet
-//! file per `(tenant, project, signal, hour)` slot.  Over a long-running
+//! file per `(workspace, signal, hour)` slot.  Over a long-running
 //! deployment, a single day-bucket can accumulate dozens of small files,
 //! each requiring a separate file-open + footer-parse during queries.
 //! Compaction collapses these into one file so DataFusion's `ListingTable`
@@ -17,7 +17,7 @@
 //! ## Algorithm
 //!
 //! 1. Query all non-deleted local files from `file_list`.
-//! 2. Group by `(tenant_id, project_id, signal_type, date)`.
+//! 2. Group by `(workspace_id, signal_type, date)`.
 //! 3. For groups with ≥ `min_files` files **where every file is smaller than
 //!    `max_file_size_bytes`**, schedule a merge.
 //! 4. For each merge candidate group: read all files into Arrow `RecordBatch`
@@ -120,8 +120,7 @@ impl Compactor {
                 continue;
             }
             let bucket = (
-                files[0].tenant_id.to_string(),
-                files[0].project_id.to_string(),
+                files[0].workspace_id.to_string(),
                 files[0].signal_type.clone(),
                 files[0].date.clone(),
             );
@@ -136,10 +135,9 @@ impl Compactor {
             }
 
             debug!(
-                tenant = %bucket.0,
-                project = %bucket.1,
-                signal = %bucket.2,
-                date = %bucket.3,
+                workspace = %bucket.0,
+                signal = %bucket.1,
+                date = %bucket.2,
                 file_count = small.len(),
                 "Compactor: merging bucket"
             );
@@ -148,10 +146,9 @@ impl Compactor {
                 Ok(()) => merged += 1,
                 Err(e) => {
                     warn!(
-                        tenant = %bucket.0,
-                        project = %bucket.1,
-                        signal = %bucket.2,
-                        date = %bucket.3,
+                        workspace = %bucket.0,
+                        signal = %bucket.1,
+                        date = %bucket.2,
                         error = %e,
                         "Compactor: failed to compact group — skipping"
                     );
@@ -170,10 +167,10 @@ impl Compactor {
     /// Parquet file, and soft-delete the originals.
     async fn compact_group(
         &self,
-        bucket: &(String, String, String, String),
+        bucket: &(String, String, String),
         files: &[&FileListEntry],
     ) -> anyhow::Result<()> {
-        let (tenant_id, project_id, signal_type, _date) = bucket;
+        let (workspace_id, signal_type, _date) = bucket;
 
         // Collect file paths for blocking read.
         let paths: Vec<String> = files.iter().map(|f| f.file_path.clone()).collect();
@@ -203,8 +200,7 @@ impl Compactor {
         // Write merged file via the shared writer.
         self.writer
             .write_record_batch(
-                tenant_id,
-                project_id,
+                workspace_id,
                 &stream_name,
                 signal_type,
                 merged_batch,
@@ -240,9 +236,9 @@ impl Compactor {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Group key: `(tenant_id, project_id, signal_type, date)`.
+/// Group key: `(workspace_id, signal_type, date)`.
 #[cfg(test)]
-type BucketKey = (String, String, String, String);
+type BucketKey = (String, String, String);
 
 #[cfg(test)]
 fn group_by_bucket(
@@ -253,8 +249,7 @@ fn group_by_bucket(
     let mut groups: HashMap<BucketKey, Vec<FileListEntry>> = HashMap::new();
     for file in files {
         let key = (
-            file.tenant_id.to_string(),
-            file.project_id.to_string(),
+            file.workspace_id.to_string(),
             file.signal_type.clone(),
             file.date.clone(),
         );
@@ -293,6 +288,9 @@ fn read_parquet_files(paths: &[String]) -> anyhow::Result<Vec<arrow::record_batc
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use crate::writer::{ParquetFileWriter, WriterConfig};
     use std::sync::Mutex;
@@ -337,7 +335,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -352,8 +353,7 @@ mod tests {
 
         let span = Span {
             trace_id: trace_id.to_string(),
-            tenant_id: Uuid::nil().to_string(),
-            project_id: Uuid::nil().to_string(),
+            workspace_id: WorkspaceId::from(uuid::Uuid::nil()).to_string(),
             timestamp: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
             duration_ns: 1_000_000,
             ..Span::default()
@@ -372,8 +372,7 @@ mod tests {
     async fn test_compact_group_merges_small_files() {
         let dir = tempfile::TempDir::new().unwrap();
 
-        let tenant_id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let workspace_id = Uuid::nil();
 
         // Create 4 small Parquet files.
         let mut entries = Vec::new();
@@ -383,8 +382,7 @@ mod tests {
             let meta = std::fs::metadata(&path).unwrap();
             entries.push(FileListEntry {
                 id: i as i64 + 1,
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal_type: "traces".to_string(),
                 stream_name: "svc".to_string(),
                 date: "2024/01/15".to_string(),
@@ -446,8 +444,7 @@ mod tests {
     #[tokio::test]
     async fn test_compact_skips_group_below_min_files() {
         let dir = tempfile::TempDir::new().unwrap();
-        let tenant_id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let workspace_id = Uuid::nil();
 
         // Only 2 files — below the min_files threshold of 4.
         let mut entries = Vec::new();
@@ -455,8 +452,7 @@ mod tests {
             let path = make_span_parquet(dir.path(), &format!("{i}.parquet"), &format!("t-{i}"));
             entries.push(FileListEntry {
                 id: i as i64 + 1,
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal_type: "traces".to_string(),
                 stream_name: "svc".to_string(),
                 date: "2024/01/15".to_string(),
@@ -502,13 +498,11 @@ mod tests {
 
     #[test]
     fn test_group_by_bucket_groups_correctly() {
-        let tenant = Uuid::nil();
-        let project = Uuid::nil();
+        let workspace = Uuid::nil();
 
         let make = |date: &str| FileListEntry {
             id: 1,
-            tenant_id: tenant,
-            project_id: project,
+            workspace_id: workspace.into(),
             signal_type: "traces".to_string(),
             stream_name: "svc".to_string(),
             date: date.to_string(),
@@ -529,8 +523,7 @@ mod tests {
 
         assert_eq!(groups.len(), 2, "two distinct date buckets");
         let jan15_key = (
-            tenant.to_string(),
-            project.to_string(),
+            workspace.to_string(),
             "traces".to_string(),
             "2024/01/15".to_string(),
         );

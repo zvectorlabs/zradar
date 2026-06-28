@@ -17,8 +17,7 @@ pub fn score_arrow_schema() -> Schema {
     Schema::new(vec![
         // Identity
         Field::new("id", DataType::Utf8, false),
-        Field::new("tenant_id", DataType::Utf8, false),
-        Field::new("project_id", DataType::Utf8, false),
+        Field::new("workspace_id", DataType::Utf8, false),
         // Timing (nanoseconds)
         Field::new("timestamp", DataType::Int64, false),
         Field::new("created_at", DataType::Int64, false),
@@ -57,8 +56,8 @@ pub fn scores_to_record_batch(scores: &[EvaluationScore]) -> anyhow::Result<Reco
     let schema = Arc::new(score_arrow_schema());
 
     let id = StringArray::from_iter_values(scores.iter().map(|s| s.id.as_str()));
-    let tenant_id = StringArray::from_iter_values(scores.iter().map(|s| s.tenant_id.as_str()));
-    let project_id = StringArray::from_iter_values(scores.iter().map(|s| s.project_id.as_str()));
+    let workspace_id =
+        StringArray::from_iter_values(scores.iter().map(|s| s.workspace_id.as_str()));
     let timestamp: Int64Array = scores.iter().map(|s| s.timestamp).collect();
     let created_at: Int64Array = scores.iter().map(|s| s.created_at).collect();
     let updated_at: Int64Array = scores.iter().map(|s| s.updated_at).collect();
@@ -91,8 +90,7 @@ pub fn scores_to_record_batch(scores: &[EvaluationScore]) -> anyhow::Result<Reco
 
     let columns: Vec<ArrayRef> = vec![
         Arc::new(id),
-        Arc::new(tenant_id),
-        Arc::new(project_id),
+        Arc::new(workspace_id),
         Arc::new(timestamp),
         Arc::new(created_at),
         Arc::new(updated_at),
@@ -171,8 +169,7 @@ pub fn record_batch_to_scores(batch: &RecordBatch) -> anyhow::Result<Vec<Evaluat
     }
 
     let id = str_col!("id");
-    let tenant_id = str_col!("tenant_id");
-    let project_id = str_col!("project_id");
+    let workspace_id_col = str_col!("workspace_id");
     let timestamp = i64_col!("timestamp");
     let created_at = i64_col!("created_at");
     let updated_at = i64_col!("updated_at");
@@ -202,8 +199,7 @@ pub fn record_batch_to_scores(batch: &RecordBatch) -> anyhow::Result<Vec<Evaluat
     for i in 0..n {
         out.push(EvaluationScore {
             id: id.value(i).to_string(),
-            tenant_id: tenant_id.value(i).to_string(),
-            project_id: project_id.value(i).to_string(),
+            workspace_id: workspace_id_col.value(i).to_string(),
             timestamp: timestamp.value(i),
             created_at: created_at.value(i),
             updated_at: updated_at.value(i),
@@ -241,7 +237,7 @@ mod tests {
     fn make_score(trace: &str, project: &str, name: &str, value: f64) -> EvaluationScore {
         EvaluationScore {
             trace_id: trace.to_string(),
-            project_id: project.to_string(),
+            workspace_id: project.to_string(),
             name: name.to_string(),
             value,
             ..EvaluationScore::default()
@@ -251,15 +247,15 @@ mod tests {
     #[test]
     fn test_score_arrow_schema_field_count() {
         let schema = score_arrow_schema();
-        // 27 fields total (matches the EvaluationScore struct)
-        assert_eq!(schema.fields().len(), 27);
+        // 26 fields total (matches the EvaluationScore struct)
+        assert_eq!(schema.fields().len(), 26);
     }
 
     #[test]
     fn test_scores_to_record_batch_empty() {
         let batch = scores_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 27);
+        assert_eq!(batch.num_columns(), 26);
     }
 
     #[test]
@@ -269,7 +265,7 @@ mod tests {
         let recovered = record_batch_to_scores(&batch).unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].trace_id, "trace-001");
-        assert_eq!(recovered[0].project_id, "proj-001");
+        assert_eq!(recovered[0].workspace_id, "proj-001");
         assert_eq!(recovered[0].name, "faithfulness");
         assert!((recovered[0].value - 0.93).abs() < f64::EPSILON);
         // Defaults preserved through round-trip
@@ -299,8 +295,7 @@ mod tests {
     fn test_round_trip_preserves_all_fields() {
         let s = EvaluationScore {
             id: "eval_123".to_string(),
-            tenant_id: "tenant_a".to_string(),
-            project_id: "proj_x".to_string(),
+            workspace_id: "proj_x".to_string(),
             timestamp: 1_700_000_000_000_000_000,
             created_at: 1_700_000_000_000_000_001,
             updated_at: 1_700_000_000_000_000_002,
@@ -336,7 +331,7 @@ mod tests {
     fn test_categorical_score_value_in_string_value() {
         let s = EvaluationScore {
             trace_id: "t1".to_string(),
-            project_id: "p1".to_string(),
+            workspace_id: "p1".to_string(),
             name: "topic".to_string(),
             value: 0.0,
             data_type: "CATEGORICAL".to_string(),

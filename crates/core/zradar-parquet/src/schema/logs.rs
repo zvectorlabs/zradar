@@ -18,8 +18,7 @@ pub fn log_arrow_schema() -> Schema {
         // Timing (nanoseconds)
         Field::new("timestamp", DataType::Int64, false),
         // Multi-tenancy
-        Field::new("tenant_id", DataType::Utf8, false),
-        Field::new("project_id", DataType::Utf8, false),
+        Field::new("workspace_id", DataType::Utf8, false),
         // Trace correlation
         Field::new("trace_id", DataType::Utf8, false),
         Field::new("span_id", DataType::Utf8, false),
@@ -47,8 +46,7 @@ pub fn logs_to_record_batch(logs: &[LogRecord]) -> anyhow::Result<RecordBatch> {
 
     let id = StringArray::from_iter_values(logs.iter().map(|l| l.id.as_str()));
     let timestamp: Int64Array = logs.iter().map(|l| l.timestamp).collect();
-    let tenant_id = StringArray::from_iter_values(logs.iter().map(|l| l.tenant_id.as_str()));
-    let project_id = StringArray::from_iter_values(logs.iter().map(|l| l.project_id.as_str()));
+    let workspace_id = StringArray::from_iter_values(logs.iter().map(|l| l.workspace_id.as_str()));
     let trace_id = StringArray::from_iter_values(logs.iter().map(|l| l.trace_id.as_str()));
     let span_id = StringArray::from_iter_values(logs.iter().map(|l| l.span_id.as_str()));
     let severity = StringArray::from_iter_values(logs.iter().map(|l| l.severity.as_str()));
@@ -64,8 +62,7 @@ pub fn logs_to_record_batch(logs: &[LogRecord]) -> anyhow::Result<RecordBatch> {
     let columns: Vec<ArrayRef> = vec![
         Arc::new(id),
         Arc::new(timestamp),
-        Arc::new(tenant_id),
-        Arc::new(project_id),
+        Arc::new(workspace_id),
         Arc::new(trace_id),
         Arc::new(span_id),
         Arc::new(severity),
@@ -112,8 +109,7 @@ pub fn record_batch_to_logs(batch: &RecordBatch) -> anyhow::Result<Vec<LogRecord
 
     let id_col = str_col!("id");
     let timestamp_col = i64_col!("timestamp");
-    let tenant_id_col = str_col!("tenant_id");
-    let project_id_col = str_col!("project_id");
+    let workspace_id_col = str_col!("workspace_id");
     let trace_id_col = str_col!("trace_id");
     let span_id_col = str_col!("span_id");
     let severity_col = str_col!("severity");
@@ -131,8 +127,7 @@ pub fn record_batch_to_logs(batch: &RecordBatch) -> anyhow::Result<Vec<LogRecord
         logs.push(LogRecord {
             id: id_col.value(i).to_string(),
             timestamp: timestamp_col.value(i),
-            tenant_id: tenant_id_col.value(i).to_string(),
-            project_id: project_id_col.value(i).to_string(),
+            workspace_id: workspace_id_col.value(i).to_string(),
             trace_id: trace_id_col.value(i).to_string(),
             span_id: span_id_col.value(i).to_string(),
             severity: severity_col.value(i).to_string(),
@@ -153,10 +148,10 @@ pub fn record_batch_to_logs(batch: &RecordBatch) -> anyhow::Result<Vec<LogRecord
 mod tests {
     use super::*;
 
-    fn make_log(id: &str, project_id: &str) -> LogRecord {
+    fn make_log(id: &str, workspace_id: &str) -> LogRecord {
         LogRecord {
             id: id.to_string(),
-            project_id: project_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             severity: "INFO".to_string(),
             ..LogRecord::default()
         }
@@ -165,14 +160,14 @@ mod tests {
     #[test]
     fn test_log_arrow_schema_field_count() {
         let schema = log_arrow_schema();
-        assert_eq!(schema.fields().len(), 15);
+        assert_eq!(schema.fields().len(), 14);
     }
 
     #[test]
     fn test_logs_to_record_batch_empty() {
         let batch = logs_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 15);
+        assert_eq!(batch.num_columns(), 14);
     }
 
     #[test]

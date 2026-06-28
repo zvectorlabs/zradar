@@ -104,8 +104,7 @@ impl FlushWorker {
         for (key, slot) in slots {
             if let Err(e) = self.flush_one(&key, slot.data).await {
                 error!(
-                    tenant_id = %key.tenant_id,
-                    project_id = %key.project_id,
+                    workspace_id = %key.workspace_id,
                     signal_type = %key.signal_type,
                     stream_name = %key.stream_name,
                     error = %e,
@@ -119,45 +118,45 @@ impl FlushWorker {
         match data {
             SignalBatch::Spans(spans) if !spans.is_empty() => {
                 self.writer
-                    .write_spans(&key.tenant_id, &key.project_id, &key.stream_name, &spans)
+                    .write_spans(&key.workspace_id, &key.stream_name, &spans)
                     .await
                     .with_context(|| {
                         format!(
                             "FlushWorker write_spans failed for {}/{}",
-                            key.tenant_id, key.stream_name
+                            key.workspace_id, key.stream_name
                         )
                     })?;
             }
             SignalBatch::Metrics(metrics) if !metrics.is_empty() => {
                 self.writer
-                    .write_metrics(&key.tenant_id, &key.project_id, &key.stream_name, &metrics)
+                    .write_metrics(&key.workspace_id, &key.stream_name, &metrics)
                     .await
                     .with_context(|| {
                         format!(
                             "FlushWorker write_metrics failed for {}/{}",
-                            key.tenant_id, key.stream_name
+                            key.workspace_id, key.stream_name
                         )
                     })?;
             }
             SignalBatch::Logs(logs) if !logs.is_empty() => {
                 self.writer
-                    .write_logs(&key.tenant_id, &key.project_id, &key.stream_name, &logs)
+                    .write_logs(&key.workspace_id, &key.stream_name, &logs)
                     .await
                     .with_context(|| {
                         format!(
                             "FlushWorker write_logs failed for {}/{}",
-                            key.tenant_id, key.stream_name
+                            key.workspace_id, key.stream_name
                         )
                     })?;
             }
             SignalBatch::Scores(scores) if !scores.is_empty() => {
                 self.writer
-                    .write_scores(&key.tenant_id, &key.project_id, &key.stream_name, &scores)
+                    .write_scores(&key.workspace_id, &key.stream_name, &scores)
                     .await
                     .with_context(|| {
                         format!(
                             "FlushWorker write_scores failed for {}/{}",
-                            key.tenant_id, key.stream_name
+                            key.workspace_id, key.stream_name
                         )
                     })?;
             }
@@ -208,7 +207,10 @@ mod tests {
         async fn delete_entries(&self, _: &[i64]) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_stream_stats(&self, _: Uuid, _: Uuid) -> anyhow::Result<Vec<StreamStats>> {
+        async fn get_stream_stats(
+            &self,
+            _: zradar_models::WorkspaceId,
+        ) -> anyhow::Result<Vec<StreamStats>> {
             Ok(vec![])
         }
         async fn upsert_stream_stats(&self, _: StreamStatsUpdate) -> anyhow::Result<()> {
@@ -216,12 +218,11 @@ mod tests {
         }
     }
 
-    fn make_span(tenant: &str, project: &str) -> Span {
+    fn make_span(workspace: &str) -> Span {
         Span {
             trace_id: Uuid::new_v4().to_string(),
             span_id: Uuid::new_v4().to_string(),
-            tenant_id: tenant.to_string(),
-            project_id: project.to_string(),
+            workspace_id: workspace.to_string(),
             service_name: "svc".to_string(),
             timestamp: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
             duration_ns: 1_000_000,
@@ -245,19 +246,17 @@ mod tests {
         ));
 
         let buffer = Arc::new(WriteBuffer::new(8 * 1024 * 1024));
-        let tenant = Uuid::new_v4().to_string();
-        let project = Uuid::new_v4().to_string();
+        let workspace = Uuid::new_v4().to_string();
 
         let key = BufferKey {
-            tenant_id: tenant.clone(),
-            project_id: project.clone(),
+            workspace_id: workspace.clone(),
             signal_type: "traces".to_string(),
             stream_name: "svc".to_string(),
             hour: "2024/01/15/14".to_string(),
         };
 
         // Push 5 spans — they should be flushed as a single Parquet file on shutdown.
-        let spans: Vec<Span> = (0..5).map(|_| make_span(&tenant, &project)).collect();
+        let spans: Vec<Span> = (0..5).map(|_| make_span(&workspace)).collect();
         buffer.push_spans(key, &spans);
         assert_eq!(buffer.len(), 1, "one slot after push");
 

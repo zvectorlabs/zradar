@@ -1,21 +1,21 @@
-//! Phase 5 multi-tenant isolation suite (TECH-SPEC-PHASE-5 §5, OQ30).
+//! Phase 5 multi-workspace isolation suite (TECH-SPEC-PHASE-5 §5, OQ30).
 //!
 //! Goal: for every isolation axis the API exposes, prove that Tenant A's
 //! filter query cannot see Tenant B's data. Empty-result assertions are
 //! first-class — silent leakage is the failure mode this suite is
 //! preventing.
 //!
-//! Tenant fan-out uses the existing `x-tenant-id` test-header mechanism
+//! Tenant fan-out uses the existing `x-workspace-id` test-header mechanism
 //! (`allow_test_header_context = true` in `config.test.toml`): every
-//! `TestEnv::setup()` returns a fresh tenant_id, so two parallel envs are
+//! `TestEnv::setup()` returns a fresh workspace_id, so two parallel envs are
 //! genuinely independent.
 //!
 //! Each axis follows the same shape:
-//! 1. Ingest a span under tenant A with `axis = ALPHA_VALUE`.
-//! 2. Ingest a span under tenant B with `axis = BRAVO_VALUE`.
+//! 1. Ingest a span under workspace A with `axis = ALPHA_VALUE`.
+//! 2. Ingest a span under workspace B with `axis = BRAVO_VALUE`.
 //! 3. Wait until both spans land.
 //! 4. Query `?axis=ALPHA_VALUE` from A → expect at least one hit, all
-//!    tagged with tenant A's project_id.
+//!    tagged with workspace A's workspace_id.
 //! 5. Query `?axis=ALPHA_VALUE` from B → expect zero hits (B never used
 //!    that value).
 //! 6. Query `?axis=BRAVO_VALUE` from A → expect zero hits.
@@ -30,7 +30,7 @@
 //!   today, only readable on SpanDetail.
 //! - `links`: same — readable, not filterable.
 //! - `scores`: rides through `/api/v1/logs?trace_id=...` (evaluator emits
-//!   scores as logs). Covered by `test_score_log_tenant_isolation`.
+//!   scores as logs). Covered by `test_score_log_workspace_isolation`.
 
 #[allow(unused_imports)]
 use crate::*;
@@ -110,13 +110,13 @@ async fn ingest(
 }
 
 /// Wait for a /spans query to return at least one item. The real isolation
-/// proof is `assert_empty_for` — if tenant B queries tenant A's axis value
+/// proof is `assert_empty_for` — if workspace B queries workspace A's axis value
 /// and gets zero rows, isolation holds. The positive assertion here only
 /// confirms ingest completed (so the negative assertion is meaningful).
 ///
-/// Note: `/api/v1/spans` items do not expose `project_id` on each row, so
-/// we cannot assert project ownership here. Isolation is validated by the
-/// cross-tenant empty assertions in `run_axis_isolation`.
+/// Note: `/api/v1/spans` items do not expose `workspace_id` on each row, so
+/// we cannot assert workspace ownership here. Isolation is validated by the
+/// cross-workspace empty assertions in `run_axis_isolation`.
 async fn wait_until_visible(client: &ApiClient, url: &str, ctx: &str) -> Result<Vec<Value>> {
     wait_for_items_default(client, url)
         .await
@@ -125,7 +125,7 @@ async fn wait_until_visible(client: &ApiClient, url: &str, ctx: &str) -> Result<
 
 /// Query a /spans URL once and assert zero items. We do *not* poll here —
 /// the positive `wait_until_visible` calls above already established that
-/// ingest is complete on both tenants, so any leakage would already be
+/// ingest is complete on both workspaces, so any leakage would already be
 /// observable.
 async fn assert_empty_for(client: &ApiClient, url: &str, ctx: &str) -> Result<()> {
     let resp = client.get(url).await?;
@@ -141,22 +141,22 @@ async fn assert_empty_for(client: &ApiClient, url: &str, ctx: &str) -> Result<()
         .map(|a| a.len())
         .unwrap_or(0);
     if items_len > 0 {
-        anyhow::bail!("{ctx}: cross-tenant query leaked {items_len} item(s) (URL: {url})");
+        anyhow::bail!("{ctx}: cross-workspace query leaked {items_len} item(s) (URL: {url})");
     }
     Ok(())
 }
 
-/// One pass of the cross-tenant matrix on a single filterable attribute.
+/// One pass of the cross-workspace matrix on a single filterable attribute.
 ///
 /// - `axis_attr_key`: OTLP attribute key the span carries (e.g. "rail.type").
 /// - `axis_filter_param`: query-param name (e.g. "rail_type") — usually the
 ///   attribute key with dots replaced by underscores.
-/// - `alpha_value`: value tenant A's span will carry.
-/// - `bravo_value`: value tenant B's span will carry.
+/// - `alpha_value`: value workspace A's span will carry.
+/// - `bravo_value`: value workspace B's span will carry.
 ///
 /// Extra resource-attribute pairs (`extra_attrs_a`, `extra_attrs_b`) cover
 /// axes where the attribute lives in OTLP outside the simple
-/// "tenant-A puts X, tenant-B puts Y" pattern — e.g. `environment` rides on
+/// "workspace-A puts X, workspace-B puts Y" pattern — e.g. `environment` rides on
 /// the Resource, not the Span's attributes.
 async fn run_axis_isolation(
     axis_filter_param: &str,
@@ -170,8 +170,8 @@ async fn run_axis_isolation(
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
     assert_ne!(
-        env_a.tenant_id, env_b.tenant_id,
-        "TestEnv must give independent tenant_ids"
+        env_a.workspace_id, env_b.workspace_id,
+        "TestEnv must give independent workspace_ids"
     );
 
     let service_a = format!("isolation-svc-a-{axis_filter_param}");
@@ -189,7 +189,7 @@ async fn run_axis_isolation(
         urlencoding::encode(bravo_value)
     );
 
-    // Positive: each tenant sees its own row(s).
+    // Positive: each workspace sees its own row(s).
     wait_until_visible(
         &env_a.client,
         &url_alpha,
@@ -203,7 +203,7 @@ async fn run_axis_isolation(
     )
     .await?;
 
-    // Negative: cross-tenant queries return nothing.
+    // Negative: cross-workspace queries return nothing.
     assert_empty_for(
         &env_b.client,
         &url_alpha,
@@ -226,7 +226,7 @@ async fn run_axis_isolation(
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_rail_type() -> Result<()> {
+async fn test_workspace_isolation_rail_type() -> Result<()> {
     run_axis_isolation(
         "rail_type",
         "input",
@@ -241,7 +241,7 @@ async fn test_tenant_isolation_rail_type() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_action_name() -> Result<()> {
+async fn test_workspace_isolation_action_name() -> Result<()> {
     run_axis_isolation(
         "action_name",
         "summarize_alpha",
@@ -256,7 +256,7 @@ async fn test_tenant_isolation_action_name() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_workflow_run_id() -> Result<()> {
+async fn test_workspace_isolation_workflow_run_id() -> Result<()> {
     run_axis_isolation(
         "workflow_run_id",
         "wf-alpha-iso",
@@ -271,7 +271,7 @@ async fn test_tenant_isolation_workflow_run_id() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_framework() -> Result<()> {
+async fn test_workspace_isolation_framework() -> Result<()> {
     run_axis_isolation(
         "framework",
         "langchain_alpha",
@@ -286,7 +286,7 @@ async fn test_tenant_isolation_framework() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_tool_name() -> Result<()> {
+async fn test_workspace_isolation_tool_name() -> Result<()> {
     run_axis_isolation(
         "tool_name",
         "calculator_alpha",
@@ -301,7 +301,7 @@ async fn test_tenant_isolation_tool_name() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_invocation_id() -> Result<()> {
+async fn test_workspace_isolation_invocation_id() -> Result<()> {
     run_axis_isolation(
         "invocation_id",
         "inv-alpha-001",
@@ -316,7 +316,7 @@ async fn test_tenant_isolation_invocation_id() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_llm_response_model() -> Result<()> {
+async fn test_workspace_isolation_llm_response_model() -> Result<()> {
     run_axis_isolation(
         "llm_response_model",
         "gpt-4-alpha",
@@ -331,7 +331,7 @@ async fn test_tenant_isolation_llm_response_model() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_environment() -> Result<()> {
+async fn test_workspace_isolation_environment() -> Result<()> {
     // `environment` is a *resource* attribute (deployment.environment), not a
     // span attribute. The helper already places it on the Resource; the
     // span_attrs vectors stay empty.
@@ -352,15 +352,15 @@ async fn test_tenant_isolation_environment() -> Result<()> {
 // ===========================================================================
 
 /// Sanity baseline (and the assertion that mirrors §5's first arrow): even
-/// without any axis filter, tenant A's traces must not appear in tenant B's
-/// `/api/v1/traces` listing. This guards against bugs in the very base tenant
+/// without any axis filter, workspace A's traces must not appear in workspace B's
+/// `/api/v1/traces` listing. This guards against bugs in the very base workspace
 /// filter — every per-axis assertion above implicitly depends on this.
 #[tokio::test]
 #[ignore]
-async fn test_tenant_isolation_baseline_traces_listing() -> Result<()> {
+async fn test_workspace_isolation_baseline_traces_listing() -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
-    assert_ne!(env_a.tenant_id, env_b.tenant_id);
+    assert_ne!(env_a.workspace_id, env_b.workspace_id);
 
     ingest(
         &env_a,
@@ -378,7 +378,7 @@ async fn test_tenant_isolation_baseline_traces_listing() -> Result<()> {
         .context("A must see its own trace in /traces")?;
 
     // B's /traces must be empty. If a /traces leak occurred we'd see at
-    // least one row tagged with A's tenant.
+    // least one row tagged with A's workspace.
     let resp = env_b.client.get("/api/v1/traces").await?;
     let status = resp.status();
     if !status.is_success() {
@@ -395,28 +395,28 @@ async fn test_tenant_isolation_baseline_traces_listing() -> Result<()> {
         .unwrap_or(0);
     if leaked > 0 {
         anyhow::bail!(
-            "Baseline cross-tenant leak: B's /traces shows {leaked} row(s) while only A ingested"
+            "Baseline cross-workspace leak: B's /traces shows {leaked} row(s) while only A ingested"
         );
     }
     Ok(())
 }
 
 // ===========================================================================
-// Logs / scores tenant isolation
+// Logs / scores workspace isolation
 // ===========================================================================
 
 /// Evaluator scores ride through `/api/v1/logs` (an evaluator emits each
-/// score as an OTLP log). Cross-tenant queries must not surface another
-/// tenant's score logs.
+/// score as an OTLP log). Cross-workspace queries must not surface another
+/// workspace's score logs.
 #[tokio::test]
 #[ignore]
-async fn test_score_log_tenant_isolation() -> Result<()> {
+async fn test_score_log_workspace_isolation() -> Result<()> {
     use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
-    assert_ne!(env_a.tenant_id, env_b.tenant_id);
+    assert_ne!(env_a.workspace_id, env_b.workspace_id);
 
     let trace_id = Uuid::new_v4().as_bytes().to_vec();
     let span_id = Uuid::new_v4().as_bytes()[..8].to_vec();
@@ -475,7 +475,7 @@ async fn test_score_log_tenant_isolation() -> Result<()> {
         .unwrap_or(0);
     if leaked > 0 {
         anyhow::bail!(
-            "Evaluator-log cross-tenant leak: B's query for A's trace_id={trace_id_hex} returned {leaked} row(s)"
+            "Evaluator-log cross-workspace leak: B's query for A's trace_id={trace_id_hex} returned {leaked} row(s)"
         );
     }
     Ok(())

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 use crate::errors::PolicyError;
 use crate::types::{
@@ -25,12 +25,11 @@ pub trait PolicyStore: Send + Sync {
         Ok(())
     }
     async fn delete(&self, id: PolicyId) -> Result<(), PolicyError>;
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<Policy>, PolicyError>;
+    async fn list(&self, workspace_id: WorkspaceId) -> Result<Vec<Policy>, PolicyError>;
 
     fn resolve(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
     ) -> ResolvedPolicy;
@@ -40,16 +39,14 @@ pub trait PolicyStore: Send + Sync {
 pub trait UsageReader: Send + Sync {
     async fn current_rate(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
     ) -> Result<RateSample, PolicyError>;
 
     async fn period_used_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
         period_start: i64,
@@ -58,15 +55,13 @@ pub trait UsageReader: Send + Sync {
 
     async fn stored_compressed_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
     ) -> Result<i64, PolicyError>;
 
     async fn retention_buckets(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
     ) -> Result<Vec<RetentionUsageBucket>, PolicyError>;
 }
@@ -97,8 +92,7 @@ pub trait DecisionAuditSink: Send + Sync {
 pub trait UsageAnalyticsReader: Send + Sync {
     async fn usage_daily(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         start_micros: Option<i64>,
         end_micros: Option<i64>,
@@ -106,8 +100,7 @@ pub trait UsageAnalyticsReader: Send + Sync {
 
     async fn ingest_rate(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         window_start_micros: i64,
         window_end_micros: i64,
@@ -115,8 +108,7 @@ pub trait UsageAnalyticsReader: Send + Sync {
 
     async fn query_usage(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         window_start_micros: i64,
         window_end_micros: i64,
@@ -136,14 +128,13 @@ impl PolicyStore for EmptyPolicyStore {
         Ok(())
     }
 
-    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<Policy>, PolicyError> {
+    async fn list(&self, _workspace_id: WorkspaceId) -> Result<Vec<Policy>, PolicyError> {
         Ok(Vec::new())
     }
 
     fn resolve(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
         _operation: Operation,
     ) -> ResolvedPolicy {
@@ -158,8 +149,7 @@ pub struct EmptyUsageReader;
 impl UsageReader for EmptyUsageReader {
     async fn current_rate(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
         _operation: Operation,
     ) -> Result<RateSample, PolicyError> {
@@ -172,8 +162,7 @@ impl UsageReader for EmptyUsageReader {
 
     async fn period_used_bytes(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
         _operation: Operation,
         _period_start: i64,
@@ -184,8 +173,7 @@ impl UsageReader for EmptyUsageReader {
 
     async fn stored_compressed_bytes(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
     ) -> Result<i64, PolicyError> {
         Ok(0)
@@ -193,8 +181,7 @@ impl UsageReader for EmptyUsageReader {
 
     async fn retention_buckets(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
     ) -> Result<Vec<RetentionUsageBucket>, PolicyError> {
         Ok(Vec::new())
@@ -246,6 +233,11 @@ impl DecisionAuditSink for NoopDecisionAuditSink {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::types::{PolicyLimit, PolicySource, UsageBasis};
@@ -267,14 +259,13 @@ mod tests {
             Ok(())
         }
 
-        async fn list(&self, _tenant_id: Uuid) -> Result<Vec<Policy>, PolicyError> {
+        async fn list(&self, _workspace_id: WorkspaceId) -> Result<Vec<Policy>, PolicyError> {
             Ok(Vec::new())
         }
 
         fn resolve(
             &self,
-            _tenant_id: Uuid,
-            _project_id: Uuid,
+            _workspace_id: WorkspaceId,
             _signal: SignalKind,
             _operation: Operation,
         ) -> ResolvedPolicy {
@@ -282,11 +273,10 @@ mod tests {
         }
     }
 
-    fn policy(tenant_id: Uuid, project_id: Uuid, max_bytes: i64) -> Policy {
+    fn policy(workspace_id: WorkspaceId, max_bytes: i64) -> Policy {
         Policy {
             id: None,
-            tenant_id,
-            project_id: Some(project_id),
+            workspace_id,
             signal: SignalKind::Traces,
             operation: Operation::Ingest,
             limit: PolicyLimit::Size {
@@ -306,13 +296,12 @@ mod tests {
         let store = CountingPolicyStore {
             upsert_count: AtomicUsize::new(0),
         };
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
 
         store
             .upsert_many(vec![
-                policy(tenant_id, project_id, 10),
-                policy(tenant_id, project_id, 20),
+                policy(workspace_id.into(), 10),
+                policy(workspace_id.into(), 20),
             ])
             .await
             .unwrap();

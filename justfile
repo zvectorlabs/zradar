@@ -279,7 +279,7 @@ fmt:
 
 # Check code
 check:
-    cargo check
+    cargo check --all-targets
 
 # Lint code
 lint:

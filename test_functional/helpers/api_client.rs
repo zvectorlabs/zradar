@@ -12,8 +12,7 @@ pub struct ApiClient {
     client: Client,
     base_url: String,
     token: Option<String>,
-    tenant_id: Option<String>,
-    project_id: Option<String>,
+    workspace_id: Option<String>,
 }
 
 impl ApiClient {
@@ -28,8 +27,7 @@ impl ApiClient {
             client,
             base_url,
             token: None,
-            tenant_id: None,
-            project_id: None,
+            workspace_id: None,
         }
     }
 
@@ -43,40 +41,23 @@ impl ApiClient {
         self.token.as_deref()
     }
 
-    /// Set tenant ID header override.
-    pub fn set_tenant_id(&mut self, tenant_id: String) {
-        self.tenant_id = Some(tenant_id);
+    /// Set workspace ID header override.
+    pub fn set_workspace_id(&mut self, workspace_id: String) {
+        self.workspace_id = Some(workspace_id);
     }
 
-    /// Set project ID header override.
-    pub fn set_project_id(&mut self, project_id: String) {
-        self.project_id = Some(project_id);
+    /// Return the configured workspace ID header.
+    pub fn workspace_id(&self) -> &str {
+        self.workspace_id.as_deref().expect("missing")
     }
 
-    /// Return the configured tenant ID header.
-    pub fn tenant_id(&self) -> &str {
-        self.tenant_id
-            .as_deref()
-            .expect("test ApiClient tenant_id is not configured")
-    }
-
-    /// Return the configured project ID header.
-    pub fn project_id(&self) -> &str {
-        self.project_id
-            .as_deref()
-            .expect("test ApiClient project_id is not configured")
-    }
-
-    /// Apply common headers (auth + tenant/project overrides) to a request builder.
+    /// Apply common headers (auth + workspace/workspace overrides) to a request builder.
     fn apply_headers(&self, mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {}", token));
         }
-        if let Some(tid) = &self.tenant_id {
-            req = req.header("x-tenant-id", tid.as_str());
-        }
-        if let Some(pid) = &self.project_id {
-            req = req.header("x-project-id", pid.as_str());
+        if let Some(tid) = &self.workspace_id {
+            req = req.header("x-workspace-id", tid.as_str());
         }
         req
     }

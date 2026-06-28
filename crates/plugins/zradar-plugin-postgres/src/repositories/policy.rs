@@ -5,7 +5,7 @@ use serde_json::Value;
 use sqlx::FromRow;
 use std::{collections::HashMap, sync::Arc};
 use tracing::warn;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 use zradar_policy::{
     Operation, Policy, PolicyError, PolicyId, PolicyLimit, PolicySource, PolicyStore,
     ResolvedPolicy, SignalKind,
@@ -14,8 +14,7 @@ use zradar_policy::{
 #[derive(Debug, FromRow)]
 struct PolicyRow {
     id: i64,
-    tenant_id: Uuid,
-    project_id: Option<Uuid>,
+    workspace_id: WorkspaceId,
     signal_kind: String,
     operation: String,
     limit_json: Value,
@@ -28,8 +27,7 @@ struct PolicyRow {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct PolicyCacheKey {
-    tenant_id: Uuid,
-    project_id: Option<Uuid>,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
     limit_kind: &'static str,
@@ -69,7 +67,7 @@ impl PostgresPolicyStore {
         let rows = sqlx::query_as::<_, PolicyRow>(
             r#"
             SELECT
-                id, tenant_id, project_id, signal_kind, operation, limit_json,
+                id, workspace_id, signal_kind, operation, limit_json,
                 grace_pct, hard_block_pct, effective_from, effective_until, source
             FROM policies
             WHERE effective_from <= $1
@@ -96,76 +94,39 @@ impl PolicyStore for PostgresPolicyStore {
             serde_json::to_value(&policy.limit).map_err(|e| PolicyError::Invalid(e.to_string()))?;
         let now = chrono::Utc::now().timestamp_micros();
 
-        if policy.project_id.is_some() {
-            sqlx::query(
-                r#"
-                INSERT INTO policies (
-                    tenant_id, project_id, signal_kind, operation, limit_kind,
-                    limit_json, grace_pct, hard_block_pct, effective_from,
-                    effective_until, source, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                ON CONFLICT (tenant_id, project_id, signal_kind, operation, limit_kind)
-                WHERE project_id IS NOT NULL AND effective_until IS NULL
-                DO UPDATE SET
-                    limit_json = EXCLUDED.limit_json,
-                    grace_pct = EXCLUDED.grace_pct,
-                    hard_block_pct = EXCLUDED.hard_block_pct,
-                    effective_from = EXCLUDED.effective_from,
-                    effective_until = EXCLUDED.effective_until,
-                    source = EXCLUDED.source,
-                    updated_at = EXCLUDED.updated_at
-                "#,
-            )
-            .bind(policy.tenant_id)
-            .bind(policy.project_id)
-            .bind(signal_kind(policy.signal))
-            .bind(operation(policy.operation))
-            .bind(limit_kind)
-            .bind(limit_json)
-            .bind(i16::from(policy.grace_pct))
-            .bind(i16::from(policy.hard_block_pct))
-            .bind(policy.effective_from)
-            .bind(policy.effective_until)
-            .bind(policy_source(policy.source))
-            .bind(now)
-            .execute(self.client.pool())
-            .await
-            .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
-        } else {
-            sqlx::query(
-                r#"
-                INSERT INTO policies (
-                    tenant_id, project_id, signal_kind, operation, limit_kind,
-                    limit_json, grace_pct, hard_block_pct, effective_from,
-                    effective_until, source, updated_at
-                ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                ON CONFLICT (tenant_id, signal_kind, operation, limit_kind)
-                WHERE project_id IS NULL AND effective_until IS NULL
-                DO UPDATE SET
-                    limit_json = EXCLUDED.limit_json,
-                    grace_pct = EXCLUDED.grace_pct,
-                    hard_block_pct = EXCLUDED.hard_block_pct,
-                    effective_from = EXCLUDED.effective_from,
-                    effective_until = EXCLUDED.effective_until,
-                    source = EXCLUDED.source,
-                    updated_at = EXCLUDED.updated_at
-                "#,
-            )
-            .bind(policy.tenant_id)
-            .bind(signal_kind(policy.signal))
-            .bind(operation(policy.operation))
-            .bind(limit_kind)
-            .bind(limit_json)
-            .bind(i16::from(policy.grace_pct))
-            .bind(i16::from(policy.hard_block_pct))
-            .bind(policy.effective_from)
-            .bind(policy.effective_until)
-            .bind(policy_source(policy.source))
-            .bind(now)
-            .execute(self.client.pool())
-            .await
-            .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
-        }
+        sqlx::query(
+            r#"
+            INSERT INTO policies (
+                workspace_id, signal_kind, operation, limit_kind,
+                limit_json, grace_pct, hard_block_pct, effective_from,
+                effective_until, source, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (workspace_id, signal_kind, operation, limit_kind)
+            WHERE effective_until IS NULL
+            DO UPDATE SET
+                limit_json = EXCLUDED.limit_json,
+                grace_pct = EXCLUDED.grace_pct,
+                hard_block_pct = EXCLUDED.hard_block_pct,
+                effective_from = EXCLUDED.effective_from,
+                effective_until = EXCLUDED.effective_until,
+                source = EXCLUDED.source,
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(policy.workspace_id)
+        .bind(signal_kind(policy.signal))
+        .bind(operation(policy.operation))
+        .bind(limit_kind)
+        .bind(limit_json)
+        .bind(i16::from(policy.grace_pct))
+        .bind(i16::from(policy.hard_block_pct))
+        .bind(policy.effective_from)
+        .bind(policy.effective_until)
+        .bind(policy_source(policy.source))
+        .bind(now)
+        .execute(self.client.pool())
+        .await
+        .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
 
         self.refresh().await
     }
@@ -192,76 +153,39 @@ impl PolicyStore for PostgresPolicyStore {
 
         for (policy, limit_json) in prepared {
             let limit_kind = limit_kind(&policy.limit);
-            if policy.project_id.is_some() {
-                sqlx::query(
-                    r#"
-                    INSERT INTO policies (
-                        tenant_id, project_id, signal_kind, operation, limit_kind,
-                        limit_json, grace_pct, hard_block_pct, effective_from,
-                        effective_until, source, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    ON CONFLICT (tenant_id, project_id, signal_kind, operation, limit_kind)
-                    WHERE project_id IS NOT NULL AND effective_until IS NULL
-                    DO UPDATE SET
-                        limit_json = EXCLUDED.limit_json,
-                        grace_pct = EXCLUDED.grace_pct,
-                        hard_block_pct = EXCLUDED.hard_block_pct,
-                        effective_from = EXCLUDED.effective_from,
-                        effective_until = EXCLUDED.effective_until,
-                        source = EXCLUDED.source,
-                        updated_at = EXCLUDED.updated_at
-                    "#,
-                )
-                .bind(policy.tenant_id)
-                .bind(policy.project_id)
-                .bind(signal_kind(policy.signal))
-                .bind(operation(policy.operation))
-                .bind(limit_kind)
-                .bind(limit_json)
-                .bind(i16::from(policy.grace_pct))
-                .bind(i16::from(policy.hard_block_pct))
-                .bind(policy.effective_from)
-                .bind(policy.effective_until)
-                .bind(policy_source(policy.source))
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
-            } else {
-                sqlx::query(
-                    r#"
-                    INSERT INTO policies (
-                        tenant_id, project_id, signal_kind, operation, limit_kind,
-                        limit_json, grace_pct, hard_block_pct, effective_from,
-                        effective_until, source, updated_at
-                    ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                    ON CONFLICT (tenant_id, signal_kind, operation, limit_kind)
-                    WHERE project_id IS NULL AND effective_until IS NULL
-                    DO UPDATE SET
-                        limit_json = EXCLUDED.limit_json,
-                        grace_pct = EXCLUDED.grace_pct,
-                        hard_block_pct = EXCLUDED.hard_block_pct,
-                        effective_from = EXCLUDED.effective_from,
-                        effective_until = EXCLUDED.effective_until,
-                        source = EXCLUDED.source,
-                        updated_at = EXCLUDED.updated_at
-                    "#,
-                )
-                .bind(policy.tenant_id)
-                .bind(signal_kind(policy.signal))
-                .bind(operation(policy.operation))
-                .bind(limit_kind)
-                .bind(limit_json)
-                .bind(i16::from(policy.grace_pct))
-                .bind(i16::from(policy.hard_block_pct))
-                .bind(policy.effective_from)
-                .bind(policy.effective_until)
-                .bind(policy_source(policy.source))
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
-            }
+            sqlx::query(
+                r#"
+                INSERT INTO policies (
+                    workspace_id, signal_kind, operation, limit_kind,
+                    limit_json, grace_pct, hard_block_pct, effective_from,
+                    effective_until, source, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ON CONFLICT (workspace_id, signal_kind, operation, limit_kind)
+                WHERE effective_until IS NULL
+                DO UPDATE SET
+                    limit_json = EXCLUDED.limit_json,
+                    grace_pct = EXCLUDED.grace_pct,
+                    hard_block_pct = EXCLUDED.hard_block_pct,
+                    effective_from = EXCLUDED.effective_from,
+                    effective_until = EXCLUDED.effective_until,
+                    source = EXCLUDED.source,
+                    updated_at = EXCLUDED.updated_at
+                "#,
+            )
+            .bind(policy.workspace_id)
+            .bind(signal_kind(policy.signal))
+            .bind(operation(policy.operation))
+            .bind(limit_kind)
+            .bind(limit_json)
+            .bind(i16::from(policy.grace_pct))
+            .bind(i16::from(policy.hard_block_pct))
+            .bind(policy.effective_from)
+            .bind(policy.effective_until)
+            .bind(policy_source(policy.source))
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
         }
 
         tx.commit()
@@ -281,18 +205,18 @@ impl PolicyStore for PostgresPolicyStore {
         self.refresh().await
     }
 
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<Policy>, PolicyError> {
+    async fn list(&self, workspace_id: WorkspaceId) -> Result<Vec<Policy>, PolicyError> {
         let rows = sqlx::query_as::<_, PolicyRow>(
             r#"
             SELECT
-                id, tenant_id, project_id, signal_kind, operation, limit_json,
+                id, workspace_id, signal_kind, operation, limit_json,
                 grace_pct, hard_block_pct, effective_from, effective_until, source
             FROM policies
-            WHERE tenant_id = $1
+            WHERE workspace_id = $1
             ORDER BY updated_at DESC
             "#,
         )
-        .bind(tenant_id)
+        .bind(workspace_id.into_inner())
         .fetch_all(self.client.pool())
         .await
         .map_err(|e| PolicyError::StoreUnavailable(e.to_string()))?;
@@ -302,18 +226,11 @@ impl PolicyStore for PostgresPolicyStore {
 
     fn resolve(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
     ) -> ResolvedPolicy {
-        resolve_cached_policy(
-            &self.cache.snapshot(),
-            tenant_id,
-            project_id,
-            signal,
-            operation,
-        )
+        resolve_cached_policy(&self.cache.snapshot(), workspace_id, signal, operation)
     }
 }
 
@@ -334,28 +251,23 @@ fn rows_to_cache(rows: Vec<PolicyRow>) -> PolicyCacheMap {
 
 fn resolve_cached_policy(
     cache: &PolicyCacheMap,
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
 ) -> ResolvedPolicy {
     let mut resolved = ResolvedPolicy::default();
-    let scopes = [Some(project_id), None];
     let signals = [signal, SignalKind::All];
     let operations = [operation, Operation::All];
 
-    for project_scope in scopes {
-        for candidate_signal in signals {
-            for candidate_operation in operations {
-                apply_cached_policy(
-                    cache,
-                    &mut resolved,
-                    tenant_id,
-                    project_scope,
-                    candidate_signal,
-                    candidate_operation,
-                );
-            }
+    for candidate_signal in signals {
+        for candidate_operation in operations {
+            apply_cached_policy(
+                cache,
+                &mut resolved,
+                workspace_id,
+                candidate_signal,
+                candidate_operation,
+            );
         }
     }
 
@@ -365,15 +277,13 @@ fn resolve_cached_policy(
 fn apply_cached_policy(
     cache: &PolicyCacheMap,
     resolved: &mut ResolvedPolicy,
-    tenant_id: Uuid,
-    project_id: Option<Uuid>,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
 ) {
     for limit_kind in ["rate", "size", "retention", "window"] {
         let key = PolicyCacheKey {
-            tenant_id,
-            project_id,
+            workspace_id,
             signal,
             operation,
             limit_kind,
@@ -384,8 +294,7 @@ fn apply_cached_policy(
     }
 
     let quota_key = PolicyCacheKey {
-        tenant_id,
-        project_id,
+        workspace_id,
         signal,
         operation,
         limit_kind: "quota",
@@ -488,8 +397,7 @@ fn min_option(left: Option<u64>, right: Option<u64>) -> Option<u64> {
 fn row_to_policy(row: PolicyRow) -> Result<Policy, PolicyError> {
     Ok(Policy {
         id: Some(PolicyId(row.id)),
-        tenant_id: row.tenant_id,
-        project_id: row.project_id,
+        workspace_id: row.workspace_id,
         signal: parse_signal_kind(&row.signal_kind)?,
         operation: parse_operation(&row.operation)?,
         limit: serde_json::from_value(row.limit_json)
@@ -506,8 +414,7 @@ fn row_to_policy(row: PolicyRow) -> Result<Policy, PolicyError> {
 
 fn policy_key(policy: &Policy) -> PolicyCacheKey {
     PolicyCacheKey {
-        tenant_id: policy.tenant_id,
-        project_id: policy.project_id,
+        workspace_id: policy.workspace_id,
         signal: policy.signal,
         operation: policy.operation,
         limit_kind: limit_kind(&policy.limit),
@@ -593,19 +500,22 @@ fn parse_policy_source(value: &str) -> Result<PolicySource, PolicyError> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
 
     fn policy_row(
-        tenant_id: Uuid,
-        project_id: Option<Uuid>,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         operation: &str,
         limit_json: Value,
     ) -> PolicyRow {
         PolicyRow {
             id: 1,
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind: signal_kind.to_string(),
             operation: operation.to_string(),
             limit_json,
@@ -643,12 +553,10 @@ mod tests {
 
     #[test]
     fn rows_to_cache_skips_invalid_rows_and_keeps_valid_rows() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let cache = rows_to_cache(vec![
             policy_row(
-                tenant_id,
-                Some(project_id),
+                workspace_id.into(),
                 "traces",
                 "ingest",
                 serde_json::json!({
@@ -658,8 +566,7 @@ mod tests {
                 }),
             ),
             policy_row(
-                tenant_id,
-                Some(project_id),
+                workspace_id.into(),
                 "not_a_signal",
                 "ingest",
                 serde_json::json!({
@@ -672,8 +579,7 @@ mod tests {
 
         let resolved = resolve_cached_policy(
             &cache,
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Traces,
             Operation::Ingest,
         );
@@ -688,12 +594,10 @@ mod tests {
 
     #[test]
     fn resolve_cached_policy_prefers_most_restrictive_specific_and_default_limits() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let cache = rows_to_cache(vec![
             policy_row(
-                tenant_id,
-                None,
+                workspace_id.into(),
                 "all",
                 "ingest",
                 serde_json::json!({
@@ -703,8 +607,7 @@ mod tests {
                 }),
             ),
             policy_row(
-                tenant_id,
-                Some(project_id),
+                workspace_id.into(),
                 "traces",
                 "ingest",
                 serde_json::json!({
@@ -714,8 +617,7 @@ mod tests {
                 }),
             ),
             policy_row(
-                tenant_id,
-                Some(project_id),
+                workspace_id.into(),
                 "traces",
                 "ingest",
                 serde_json::json!({
@@ -730,8 +632,7 @@ mod tests {
 
         let resolved = resolve_cached_policy(
             &cache,
-            tenant_id,
-            project_id,
+            workspace_id.into(),
             SignalKind::Traces,
             Operation::Ingest,
         );

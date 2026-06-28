@@ -1,6 +1,7 @@
 //! Telemetry repository traits
 
 use std::collections::HashMap;
+use zradar_models::WorkspaceId;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -28,8 +29,7 @@ pub struct TimeRange {
 /// Trace query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TraceQueryFilters {
-    pub tenant_id: Option<Uuid>,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub time_range: Option<TimeRange>,
     pub service_name: Option<String>,
     /// Filter traces that contain at least one span whose `span_name` matches
@@ -58,8 +58,7 @@ pub struct TraceQueryFilters {
 /// Span query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SpanQueryFilters {
-    pub tenant_id: Option<Uuid>,
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub trace_id: Option<String>,
     pub time_range: Option<TimeRange>,
     pub service_name: Option<String>,
@@ -86,7 +85,7 @@ pub struct SpanQueryFilters {
 /// Log query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LogQueryFilters {
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub time_range: Option<TimeRange>,
     pub severity: Option<String>,
     pub service_name: Option<String>,
@@ -100,7 +99,7 @@ pub struct LogQueryFilters {
 /// Metric query filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricQueryFilters {
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub time_range: Option<TimeRange>,
     pub metric_name: Option<String>,
     pub service_name: Option<String>,
@@ -111,7 +110,7 @@ pub struct MetricQueryFilters {
 /// Metric time-series (bucketed) filters
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricSeriesFilters {
-    pub project_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub metric_name: String,
     pub time_range: Option<TimeRange>,
     /// Bucket interval in seconds (e.g. 60 for 1-minute buckets).
@@ -196,8 +195,7 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     /// Get trace detail with all spans
     async fn get_trace_detail(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         trace_id: &str,
     ) -> anyhow::Result<Option<Vec<Span>>>;
 
@@ -210,8 +208,7 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     /// Get span by ID
     async fn get_span(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         span_id: &str,
     ) -> anyhow::Result<Option<Span>>;
 
@@ -224,8 +221,7 @@ pub trait TelemetryReader: AnalyticsReader + Send + Sync {
     /// Get a single log record by its ID
     async fn get_log(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         log_id: &str,
     ) -> anyhow::Result<Option<LogRecord>>;
 
@@ -266,7 +262,7 @@ pub struct MetricsSummary {
 /// Generic analytics query filters for the storage layer.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyticsQueryFilters {
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub start: i64,
     pub end: i64,
     /// Metric to compute: "trace_count", "span_count", "total_tokens", etc.
@@ -291,8 +287,7 @@ pub struct AnalyticsDataPoint {
 /// Guardrails analytics query input.
 #[derive(Debug, Clone, Default)]
 pub struct GuardrailsAnalyticsFilters {
-    pub tenant_id: Uuid,
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
     pub start: i64,
     pub end: i64,
 }
@@ -331,8 +326,7 @@ pub trait AnalyticsReader: Send + Sync {
     /// Get daily trace counts
     async fn get_daily_trace_counts(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         start: i64,
         end: i64,
     ) -> anyhow::Result<Vec<TimeSeriesPoint>>;
@@ -340,8 +334,7 @@ pub trait AnalyticsReader: Send + Sync {
     /// Get metrics summary
     async fn get_metrics_summary(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         start: i64,
         end: i64,
     ) -> anyhow::Result<MetricsSummary>;
@@ -352,7 +345,7 @@ pub trait AnalyticsReader: Send + Sync {
     /// dimensions, and filters. Returns bucketed time-series data.
     async fn query_analytics(
         &self,
-        tenant_id: Uuid,
+        workspace_id: WorkspaceId,
         filters: AnalyticsQueryFilters,
     ) -> anyhow::Result<Vec<AnalyticsDataPoint>>;
 

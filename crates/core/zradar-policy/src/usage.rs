@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
+use zradar_models::WorkspaceId;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use uuid::Uuid;
 
 use crate::PolicyError;
 use crate::traits::{UsageReader, UsageTracker};
@@ -14,16 +14,14 @@ use crate::types::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct UsageKey {
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct StoredKey {
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
 }
 
@@ -57,15 +55,13 @@ impl InMemoryUsageTracker {
 
     fn add_stored_compressed_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         compressed_bytes: i64,
     ) {
         self.stored_compressed_bytes
             .entry(StoredKey {
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal,
             })
             .and_modify(|value| *value = value.saturating_add(compressed_bytes))
@@ -80,8 +76,7 @@ impl UsageTracker for InMemoryUsageTracker {
         let bytes = u64::try_from(sample.compressed_bytes).unwrap_or(0);
         self.record_point(
             UsageKey {
-                tenant_id: sample.tenant_id,
-                project_id: sample.project_id,
+                workspace_id: sample.workspace_id,
                 signal: sample.signal,
                 operation: Operation::Ingest,
             },
@@ -92,8 +87,7 @@ impl UsageTracker for InMemoryUsageTracker {
             },
         );
         self.add_stored_compressed_bytes(
-            sample.tenant_id,
-            sample.project_id,
+            sample.workspace_id,
             sample.signal,
             sample.compressed_bytes,
         );
@@ -102,8 +96,7 @@ impl UsageTracker for InMemoryUsageTracker {
     async fn record_query(&self, sample: QuerySample) {
         self.record_point(
             UsageKey {
-                tenant_id: sample.tenant_id,
-                project_id: sample.project_id,
+                workspace_id: sample.workspace_id,
                 signal: sample.signal,
                 operation: Operation::Query,
             },
@@ -120,8 +113,7 @@ impl UsageTracker for InMemoryUsageTracker {
 impl UsageReader for InMemoryUsageTracker {
     async fn current_rate(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
     ) -> Result<RateSample, PolicyError> {
@@ -131,7 +123,7 @@ impl UsageReader for InMemoryUsageTracker {
         let mut bytes_per_sec = 0_u64;
 
         for entry in self.events.iter() {
-            if !usage_key_matches(*entry.key(), tenant_id, project_id, signal, operation) {
+            if !usage_key_matches(*entry.key(), workspace_id, signal, operation) {
                 continue;
             }
 
@@ -152,8 +144,7 @@ impl UsageReader for InMemoryUsageTracker {
 
     async fn period_used_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
         period_start: i64,
@@ -162,7 +153,7 @@ impl UsageReader for InMemoryUsageTracker {
         let mut used = 0_i64;
 
         for entry in self.events.iter() {
-            if !usage_key_matches(*entry.key(), tenant_id, project_id, signal, operation) {
+            if !usage_key_matches(*entry.key(), workspace_id, signal, operation) {
                 continue;
             }
 
@@ -180,16 +171,14 @@ impl UsageReader for InMemoryUsageTracker {
 
     async fn stored_compressed_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
     ) -> Result<i64, PolicyError> {
         let mut stored = 0_i64;
 
         for entry in self.stored_compressed_bytes.iter() {
             let key = *entry.key();
-            if key.tenant_id == tenant_id
-                && key.project_id == project_id
+            if key.workspace_id == workspace_id
                 && (signal == SignalKind::All || key.signal == signal)
             {
                 stored = stored.saturating_add(*entry.value());
@@ -201,8 +190,7 @@ impl UsageReader for InMemoryUsageTracker {
 
     async fn retention_buckets(
         &self,
-        _tenant_id: Uuid,
-        _project_id: Uuid,
+        _workspace_id: WorkspaceId,
         _signal: SignalKind,
     ) -> Result<Vec<RetentionUsageBucket>, PolicyError> {
         Ok(Vec::new())
@@ -236,33 +224,34 @@ impl UsageTracker for FanoutUsageTracker {
 
 fn usage_key_matches(
     key: UsageKey,
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
 ) -> bool {
-    key.tenant_id == tenant_id
-        && key.project_id == project_id
+    key.workspace_id == workspace_id
         && (signal == SignalKind::All || key.signal == signal)
         && (operation == Operation::All || key.operation == operation)
 }
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use uuid::Uuid;
+    #[allow(unused_imports)]
+    use zradar_models::WorkspaceId;
+
     use super::*;
     use crate::types::DecisionSummary;
 
     #[tokio::test]
     async fn records_current_ingest_rate_and_period_usage() {
         let tracker = InMemoryUsageTracker::new();
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let now = chrono::Utc::now().timestamp_micros();
 
         tracker
             .record_write(WriteSample {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal: SignalKind::Traces,
                 stream_name: None,
                 compressed_bytes: 128,
@@ -275,7 +264,7 @@ mod tests {
             .await;
 
         let rate = tracker
-            .current_rate(tenant_id, project_id, SignalKind::Traces, Operation::Ingest)
+            .current_rate(workspace_id.into(), SignalKind::Traces, Operation::Ingest)
             .await
             .unwrap();
         assert_eq!(rate.records_per_sec, 3);
@@ -283,8 +272,7 @@ mod tests {
 
         let used = tracker
             .period_used_bytes(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 Operation::Ingest,
                 now - 1,
@@ -298,15 +286,13 @@ mod tests {
     #[tokio::test]
     async fn aggregates_all_signals_for_period_usage_and_stored_bytes() {
         let tracker = InMemoryUsageTracker::new();
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let now = chrono::Utc::now().timestamp_micros();
 
         for (signal, compressed_bytes) in [(SignalKind::Traces, 100), (SignalKind::Logs, 50)] {
             tracker
                 .record_write(WriteSample {
-                    tenant_id,
-                    project_id,
+                    workspace_id: workspace_id.into(),
                     signal,
                     stream_name: None,
                     compressed_bytes,
@@ -321,8 +307,7 @@ mod tests {
 
         let used = tracker
             .period_used_bytes(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::All,
                 Operation::Ingest,
                 now - 1,
@@ -333,7 +318,7 @@ mod tests {
         assert_eq!(used, 150);
 
         let stored = tracker
-            .stored_compressed_bytes(tenant_id, project_id, SignalKind::All)
+            .stored_compressed_bytes(workspace_id.into(), SignalKind::All)
             .await
             .unwrap();
         assert_eq!(stored, 150);

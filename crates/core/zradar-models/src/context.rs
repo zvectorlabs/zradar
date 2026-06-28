@@ -1,19 +1,15 @@
 //! Request context — tenant and project identity for each incoming request.
+use crate::WorkspaceId;
 
-/// Carries the tenant and project identity resolved for each request.
-#[derive(Debug, Clone)]
+/// Carries the workspace identity resolved for each request.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestContext {
-    /// Tenant scope for data isolation.
-    pub tenant_id: String,
-    /// Project scope for data isolation.
-    pub project_id: String,
+    /// Workspace scope for data isolation.
+    pub workspace_id: WorkspaceId,
 }
 
-impl Default for RequestContext {
-    fn default() -> Self {
-        Self {
-            tenant_id: "default".to_string(),
-            project_id: "default".to_string(),
-        }
+impl RequestContext {
+    pub fn new(workspace_id: WorkspaceId) -> Self {
+        Self { workspace_id }
     }
 }

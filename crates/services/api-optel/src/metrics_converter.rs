@@ -92,8 +92,7 @@ impl OtlpMetricsConverter {
                                     metric_name: metric_name.clone(),
                                     metric_type: "HISTOGRAM".to_string(),
                                     timestamp: dp.time_unix_nano as i64,
-                                    tenant_id: context.tenant_id.clone(),
-                                    project_id: context.project_id.clone(),
+                                    workspace_id: context.workspace_id.to_string(),
                                     value: dp.sum.unwrap_or(0.0),
                                     count: dp.count as i64,
                                     sum: dp.sum.unwrap_or(0.0),
@@ -142,8 +141,7 @@ fn number_dp_to_metric(
         metric_name: metric_name.to_string(),
         metric_type: metric_type.to_string(),
         timestamp: dp.time_unix_nano as i64,
-        tenant_id: context.tenant_id.clone(),
-        project_id: context.project_id.clone(),
+        workspace_id: context.workspace_id.to_string(),
         value,
         count: 1,
         sum: value,
@@ -169,8 +167,7 @@ fn histogram_dp_to_metric(
         metric_name: metric_name.to_string(),
         metric_type: "HISTOGRAM".to_string(),
         timestamp: dp.time_unix_nano as i64,
-        tenant_id: context.tenant_id.clone(),
-        project_id: context.project_id.clone(),
+        workspace_id: context.workspace_id.to_string(),
         value: if dp.count > 0 {
             sum / dp.count as f64
         } else {
@@ -199,8 +196,7 @@ fn summary_dp_to_metric(
         metric_name: metric_name.to_string(),
         metric_type: "SUMMARY".to_string(),
         timestamp: dp.time_unix_nano as i64,
-        tenant_id: context.tenant_id.clone(),
-        project_id: context.project_id.clone(),
+        workspace_id: context.workspace_id.to_string(),
         value: if dp.count > 0 {
             dp.sum / dp.count as f64
         } else {

@@ -18,7 +18,7 @@ pub fn policy_router(
             routing::get(list_policies).put(upsert_policies),
         )
         .route(
-            "/api/v1/admin/policies/effective/:project_id",
+            "/api/v1/admin/policies/effective/:workspace_id",
             routing::get(get_effective_policy),
         )
         .route("/api/v1/admin/policies/:id", routing::delete(delete_policy))

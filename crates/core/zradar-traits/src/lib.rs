@@ -26,8 +26,8 @@ pub use file_lease::{FileLease, FileLeaseRegistry};
 // Re-export repository traits
 pub use repositories::{
     AnalyticsReader, AuditLogFilters, AuditLogPage, AuditLogRepository, FileListRepository,
-    RetentionPolicyRepository, SettingsRepository, StorageUsageDailySnapshot, StorageUsageDelta,
-    StorageUsageRepository, TelemetryReader, TelemetryWriter,
+    SettingsRepository, StorageUsageDailySnapshot, StorageUsageDelta, StorageUsageRepository,
+    TelemetryReader, TelemetryWriter,
 };
 
 // Re-export entity types

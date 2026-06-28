@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant, interval};
 use tracing::{debug, warn};
 use uuid::Uuid;
+use zradar_models::WorkspaceId;
 use zradar_policy::{
     BlockCode, DecisionAuditEvent, DecisionSummary, IngestRateRecord, Operation, PolicyError,
     QuerySample, QueryUsageRecord, RateSample, RetentionUsageBucket, SignalKind, ThresholdEvent,
@@ -407,18 +408,16 @@ impl ThresholdSink for PostgresThresholdSink {
         sqlx::query(
             r#"
             INSERT INTO threshold_dedupe (
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 operation,
                 limit_kind,
                 threshold_pct,
                 period_start,
                 emitted_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 operation,
                 limit_kind,
@@ -427,8 +426,7 @@ impl ThresholdSink for PostgresThresholdSink {
             ) DO NOTHING
             "#,
         )
-        .bind(event.tenant_id)
-        .bind(event.project_id)
+        .bind(event.workspace_id)
         .bind(signal_kind(event.signal))
         .bind(operation_kind(event.operation))
         .bind(event.limit_kind)
@@ -449,8 +447,7 @@ impl zradar_policy::DecisionAuditSink for PostgresDecisionAuditSink {
         sqlx::query(
             r#"
             INSERT INTO policy_decisions_audit (
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 operation,
                 decision,
@@ -459,11 +456,10 @@ impl zradar_policy::DecisionAuditSink for PostgresDecisionAuditSink {
                 limit_value,
                 block_code,
                 created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
-        .bind(event.tenant_id)
-        .bind(event.project_id)
+        .bind(event.workspace_id)
         .bind(signal_kind(event.signal))
         .bind(operation_kind(event.operation))
         .bind(decision_summary(event.decision))
@@ -490,8 +486,7 @@ impl PostgresUsageReader {
 impl UsageReader for PostgresUsageReader {
     async fn current_rate(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
     ) -> Result<RateSample, PolicyError> {
@@ -507,13 +502,11 @@ impl UsageReader for PostgresUsageReader {
                             COALESCE(SUM(records), 0)::bigint AS records_per_sec,
                             COALESCE(SUM(compressed_bytes), 0)::bigint AS bytes_per_sec
                         FROM ingestion_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND flushed_at >= $3
+                        WHERE workspace_id = $1
+                          AND flushed_at >= $2
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(cutoff)
                     .fetch_one(self.client.pool())
                     .await
@@ -524,14 +517,12 @@ impl UsageReader for PostgresUsageReader {
                             COALESCE(SUM(records), 0)::bigint AS records_per_sec,
                             COALESCE(SUM(compressed_bytes), 0)::bigint AS bytes_per_sec
                         FROM ingestion_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND signal_kind = $3
-                          AND flushed_at >= $4
+                        WHERE workspace_id = $1
+                          AND signal_kind = $2
+                          AND flushed_at >= $3
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(signal_kind(signal))
                     .bind(cutoff)
                     .fetch_one(self.client.pool())
@@ -552,13 +543,11 @@ impl UsageReader for PostgresUsageReader {
                             COUNT(*)::bigint AS records_per_sec,
                             COALESCE(SUM(bytes_scanned), 0)::bigint AS bytes_per_sec
                         FROM query_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND submitted_at >= $3
+                        WHERE workspace_id = $1
+                          AND submitted_at >= $2
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(cutoff)
                     .fetch_one(self.client.pool())
                     .await
@@ -569,14 +558,12 @@ impl UsageReader for PostgresUsageReader {
                             COUNT(*)::bigint AS records_per_sec,
                             COALESCE(SUM(bytes_scanned), 0)::bigint AS bytes_per_sec
                         FROM query_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND signal_kind = $3
-                          AND submitted_at >= $4
+                        WHERE workspace_id = $1
+                          AND signal_kind = $2
+                          AND submitted_at >= $3
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(signal_kind(signal))
                     .bind(cutoff)
                     .fetch_one(self.client.pool())
@@ -601,8 +588,7 @@ impl UsageReader for PostgresUsageReader {
 
     async fn period_used_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         operation: Operation,
         period_start: i64,
@@ -615,14 +601,12 @@ impl UsageReader for PostgresUsageReader {
                         r#"
                         SELECT COALESCE(SUM(compressed_bytes), 0)::bigint AS used_bytes
                         FROM ingestion_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND flushed_at >= $3
-                          AND ($4::bigint IS NULL OR flushed_at < $4)
+                        WHERE workspace_id = $1
+                          AND flushed_at >= $2
+                          AND ($3::bigint IS NULL OR flushed_at < $3)
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(period_start)
                     .bind(period_end)
                     .fetch_one(self.client.pool())
@@ -632,15 +616,13 @@ impl UsageReader for PostgresUsageReader {
                         r#"
                         SELECT COALESCE(SUM(compressed_bytes), 0)::bigint AS used_bytes
                         FROM ingestion_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND signal_kind = $3
-                          AND flushed_at >= $4
-                          AND ($5::bigint IS NULL OR flushed_at < $5)
+                        WHERE workspace_id = $1
+                          AND signal_kind = $2
+                          AND flushed_at >= $3
+                          AND ($4::bigint IS NULL OR flushed_at < $4)
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(signal_kind(signal))
                     .bind(period_start)
                     .bind(period_end)
@@ -657,14 +639,12 @@ impl UsageReader for PostgresUsageReader {
                         r#"
                         SELECT COALESCE(SUM(bytes_scanned), 0)::bigint AS used_bytes
                         FROM query_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND submitted_at >= $3
-                          AND ($4::bigint IS NULL OR submitted_at < $4)
+                        WHERE workspace_id = $1
+                          AND submitted_at >= $2
+                          AND ($3::bigint IS NULL OR submitted_at < $3)
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(period_start)
                     .bind(period_end)
                     .fetch_one(self.client.pool())
@@ -674,15 +654,13 @@ impl UsageReader for PostgresUsageReader {
                         r#"
                         SELECT COALESCE(SUM(bytes_scanned), 0)::bigint AS used_bytes
                         FROM query_events
-                        WHERE tenant_id = $1
-                          AND project_id = $2
-                          AND signal_kind = $3
-                          AND submitted_at >= $4
-                          AND ($5::bigint IS NULL OR submitted_at < $5)
+                        WHERE workspace_id = $1
+                          AND signal_kind = $2
+                          AND submitted_at >= $3
+                          AND ($4::bigint IS NULL OR submitted_at < $4)
                         "#,
                     )
-                    .bind(tenant_id)
-                    .bind(project_id)
+                    .bind(workspace_id.into_inner())
                     .bind(signal_kind(signal))
                     .bind(period_start)
                     .bind(period_end)
@@ -699,8 +677,7 @@ impl UsageReader for PostgresUsageReader {
 
     async fn stored_compressed_bytes(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
     ) -> Result<i64, PolicyError> {
         let row = if signal == SignalKind::All {
@@ -708,13 +685,11 @@ impl UsageReader for PostgresUsageReader {
                 r#"
                 SELECT COALESCE(SUM(compressed_size), 0)::bigint AS stored_bytes
                 FROM file_list
-                WHERE tenant_id = $1
-                  AND project_id = $2
+                WHERE workspace_id = $1
                   AND deleted = false
                 "#,
             )
-            .bind(tenant_id)
-            .bind(project_id)
+            .bind(workspace_id.into_inner())
             .fetch_one(self.client.pool())
             .await
         } else {
@@ -722,14 +697,12 @@ impl UsageReader for PostgresUsageReader {
                 r#"
                 SELECT COALESCE(SUM(compressed_size), 0)::bigint AS stored_bytes
                 FROM file_list
-                WHERE tenant_id = $1
-                  AND project_id = $2
-                  AND signal_type = $3
+                WHERE workspace_id = $1
+                  AND signal_type = $2
                   AND deleted = false
                 "#,
             )
-            .bind(tenant_id)
-            .bind(project_id)
+            .bind(workspace_id.into_inner())
             .bind(signal_kind(signal))
             .fetch_one(self.client.pool())
             .await
@@ -741,8 +714,7 @@ impl UsageReader for PostgresUsageReader {
 
     async fn retention_buckets(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
     ) -> Result<Vec<RetentionUsageBucket>, PolicyError> {
         let now = chrono::Utc::now().timestamp_micros();
@@ -753,20 +725,18 @@ impl UsageReader for PostgresUsageReader {
                 r#"
                 SELECT
                     signal_type,
-                    GREATEST((($3::bigint - max_ts) / $4::bigint), 0)::bigint AS bucket_index,
+                    GREATEST((($2::bigint - max_ts) / $3::bigint), 0)::bigint AS bucket_index,
                     COALESCE(SUM(compressed_size), 0)::bigint AS compressed_bytes,
                     COALESCE(SUM(records), 0)::bigint AS records,
                     COUNT(*)::bigint AS file_count
                 FROM file_list
-                WHERE tenant_id = $1
-                  AND project_id = $2
+                WHERE workspace_id = $1
                   AND deleted = false
                 GROUP BY signal_type, bucket_index
                 ORDER BY signal_type, bucket_index
                 "#,
             )
-            .bind(tenant_id)
-            .bind(project_id)
+            .bind(workspace_id.into_inner())
             .bind(now)
             .bind(bucket_micros)
             .fetch_all(self.client.pool())
@@ -776,21 +746,19 @@ impl UsageReader for PostgresUsageReader {
                 r#"
                 SELECT
                     signal_type,
-                    GREATEST((($4::bigint - max_ts) / $5::bigint), 0)::bigint AS bucket_index,
+                    GREATEST((($3::bigint - max_ts) / $4::bigint), 0)::bigint AS bucket_index,
                     COALESCE(SUM(compressed_size), 0)::bigint AS compressed_bytes,
                     COALESCE(SUM(records), 0)::bigint AS records,
                     COUNT(*)::bigint AS file_count
                 FROM file_list
-                WHERE tenant_id = $1
-                  AND project_id = $2
-                  AND signal_type = $3
+                WHERE workspace_id = $1
+                  AND signal_type = $2
                   AND deleted = false
                 GROUP BY signal_type, bucket_index
                 ORDER BY signal_type, bucket_index
                 "#,
             )
-            .bind(tenant_id)
-            .bind(project_id)
+            .bind(workspace_id.into_inner())
             .bind(signal_kind(signal))
             .bind(now)
             .bind(bucket_micros)
@@ -819,8 +787,7 @@ impl UsageReader for PostgresUsageReader {
 impl UsageAnalyticsReader for PostgresUsageReader {
     async fn usage_daily(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         start_micros: Option<i64>,
         end_micros: Option<i64>,
@@ -831,8 +798,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
         let rows = sqlx::query(
             r#"
             SELECT
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 'ingest' AS operation,
                 day::text AS day,
@@ -841,15 +807,13 @@ impl UsageAnalyticsReader for PostgresUsageReader {
                 0::bigint AS query_count,
                 file_count
             FROM ingestion_daily
-            WHERE tenant_id = $1
-              AND project_id = $2
-              AND ($3::text IS NULL OR signal_kind = $3)
-              AND ($4::bigint IS NULL OR day >= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
-              AND ($5::bigint IS NULL OR day <= (to_timestamp($5::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+            WHERE workspace_id = $1
+              AND ($2::text IS NULL OR signal_kind = $2)
+              AND ($3::bigint IS NULL OR day >= (to_timestamp($3::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+              AND ($4::bigint IS NULL OR day <= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
             UNION ALL
             SELECT
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 'query' AS operation,
                 day::text AS day,
@@ -858,16 +822,14 @@ impl UsageAnalyticsReader for PostgresUsageReader {
                 query_count,
                 0::bigint AS file_count
             FROM query_usage_daily
-            WHERE tenant_id = $1
-              AND project_id = $2
-              AND ($3::text IS NULL OR signal_kind = $3)
-              AND ($4::bigint IS NULL OR day >= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
-              AND ($5::bigint IS NULL OR day <= (to_timestamp($5::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+            WHERE workspace_id = $1
+              AND ($2::text IS NULL OR signal_kind = $2)
+              AND ($3::bigint IS NULL OR day >= (to_timestamp($3::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+              AND ($4::bigint IS NULL OR day <= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
             ORDER BY day DESC, signal_kind, operation
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_filter)
         .bind(start_micros)
         .bind(end_micros)
@@ -880,8 +842,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
                 let signal_kind = row.get::<String, _>("signal_kind");
                 let operation = row.get::<String, _>("operation");
                 Ok(UsageDailyRecord {
-                    tenant_id: row.get("tenant_id"),
-                    project_id: row.get("project_id"),
+                    workspace_id: row.get("workspace_id"),
                     signal: parse_signal_kind(&signal_kind)?,
                     operation: parse_operation_kind(&operation)?,
                     day: row.get("day"),
@@ -896,8 +857,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
 
     async fn ingest_rate(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         window_start_micros: i64,
         window_end_micros: i64,
@@ -910,23 +870,20 @@ impl UsageAnalyticsReader for PostgresUsageReader {
         let rows = sqlx::query(
             r#"
             SELECT
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 COALESCE(SUM(records), 0)::bigint AS records,
                 COALESCE(SUM(compressed_bytes), 0)::bigint AS compressed_bytes
             FROM ingestion_events
-            WHERE tenant_id = $1
-              AND project_id = $2
-              AND ($3::text IS NULL OR signal_kind = $3)
-              AND flushed_at >= $4
-              AND flushed_at < $5
-            GROUP BY tenant_id, project_id, signal_kind
+            WHERE workspace_id = $1
+              AND ($2::text IS NULL OR signal_kind = $2)
+              AND flushed_at >= $3
+              AND flushed_at < $4
+            GROUP BY workspace_id, signal_kind
             ORDER BY signal_kind
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_filter)
         .bind(window_start_micros)
         .bind(window_end_micros)
@@ -940,8 +897,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
                 let records = row.get::<i64, _>("records");
                 let compressed_bytes = row.get::<i64, _>("compressed_bytes");
                 Ok(IngestRateRecord {
-                    tenant_id: row.get("tenant_id"),
-                    project_id: row.get("project_id"),
+                    workspace_id: row.get("workspace_id"),
                     signal: parse_signal_kind(&signal_kind)?,
                     records_per_sec: u64::try_from(records / window_seconds).unwrap_or(0),
                     bytes_per_sec: u64::try_from(compressed_bytes / window_seconds).unwrap_or(0),
@@ -954,8 +910,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
 
     async fn query_usage(
         &self,
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: Option<SignalKind>,
         window_start_micros: i64,
         window_end_micros: i64,
@@ -966,25 +921,22 @@ impl UsageAnalyticsReader for PostgresUsageReader {
         let rows = sqlx::query(
             r#"
             SELECT
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 COALESCE(SUM(bytes_scanned), 0)::bigint AS bytes_scanned,
                 COALESCE(SUM(rows_scanned), 0)::bigint AS rows_scanned,
                 COUNT(*)::bigint AS query_count,
                 AVG(query_time_ms)::double precision AS avg_query_time_ms
             FROM query_events
-            WHERE tenant_id = $1
-              AND project_id = $2
-              AND ($3::text IS NULL OR signal_kind = $3)
-              AND submitted_at >= $4
-              AND submitted_at < $5
-            GROUP BY tenant_id, project_id, signal_kind
+            WHERE workspace_id = $1
+              AND ($2::text IS NULL OR signal_kind = $2)
+              AND submitted_at >= $3
+              AND submitted_at < $4
+            GROUP BY workspace_id, signal_kind
             ORDER BY signal_kind
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_filter)
         .bind(window_start_micros)
         .bind(window_end_micros)
@@ -996,8 +948,7 @@ impl UsageAnalyticsReader for PostgresUsageReader {
             .map(|row| {
                 let signal_kind = row.get::<String, _>("signal_kind");
                 Ok(QueryUsageRecord {
-                    tenant_id: row.get("tenant_id"),
-                    project_id: row.get("project_id"),
+                    workspace_id: row.get("workspace_id"),
                     signal: parse_signal_kind(&signal_kind)?,
                     bytes_scanned: row.get("bytes_scanned"),
                     rows_scanned: row.get("rows_scanned"),
@@ -1054,8 +1005,7 @@ async fn insert_write_samples(
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO ingestion_events (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             stream_name,
             compressed_bytes,
@@ -1069,8 +1019,7 @@ async fn insert_write_samples(
     );
 
     builder.push_values(samples, |mut b, sample| {
-        b.push_bind(sample.tenant_id)
-            .push_bind(sample.project_id)
+        b.push_bind(sample.workspace_id)
             .push_bind(signal_kind(sample.signal))
             .push_bind(sample.stream_name.as_deref())
             .push_bind(sample.compressed_bytes)
@@ -1100,8 +1049,7 @@ async fn insert_query_samples(
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO query_events (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             bytes_scanned,
             rows_scanned,
@@ -1113,8 +1061,7 @@ async fn insert_query_samples(
     );
 
     builder.push_values(samples, |mut b, sample| {
-        b.push_bind(sample.tenant_id)
-            .push_bind(sample.project_id)
+        b.push_bind(sample.workspace_id)
             .push_bind(signal_kind(sample.signal))
             .push_bind(sample.bytes_scanned)
             .push_bind(sample.rows_scanned)
@@ -1132,8 +1079,7 @@ async fn insert_query_samples(
 }
 
 struct IngestionDailyAggregate {
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal_kind: &'static str,
     day_micros: i64,
     compressed_bytes: i64,
@@ -1144,8 +1090,7 @@ struct IngestionDailyAggregate {
 }
 
 struct QueryDailyAggregate {
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal_kind: &'static str,
     day_micros: i64,
     bytes_scanned: i64,
@@ -1155,8 +1100,7 @@ struct QueryDailyAggregate {
 }
 
 struct MonthlyUsageAggregate {
-    tenant_id: Uuid,
-    project_id: Uuid,
+    workspace_id: WorkspaceId,
     signal_kind: &'static str,
     operation: &'static str,
     period_start_micros: i64,
@@ -1176,8 +1120,7 @@ async fn upsert_ingestion_daily(
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO ingestion_daily (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             day,
             compressed_bytes,
@@ -1193,7 +1136,7 @@ async fn upsert_ingestion_daily(
 
     builder.push(
         r#"
-        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        ON CONFLICT (workspace_id, signal_kind, day)
         DO UPDATE SET
             compressed_bytes = ingestion_daily.compressed_bytes + EXCLUDED.compressed_bytes,
             original_bytes = ingestion_daily.original_bytes + EXCLUDED.original_bytes,
@@ -1209,16 +1152,15 @@ async fn upsert_ingestion_daily(
 }
 
 fn aggregate_ingestion_daily(samples: &[WriteSample]) -> Vec<IngestionDailyAggregate> {
-    let mut aggregates = HashMap::<(Uuid, Uuid, &'static str, i64), IngestionDailyAggregate>::new();
+    let mut aggregates = HashMap::<(Uuid, &'static str, i64), IngestionDailyAggregate>::new();
 
     for sample in samples {
         let signal_kind = signal_kind(sample.signal);
         let day_micros = day_start_micros(sample.flushed_at);
         let entry = aggregates
-            .entry((sample.tenant_id, sample.project_id, signal_kind, day_micros))
+            .entry((sample.workspace_id.into(), signal_kind, day_micros))
             .or_insert(IngestionDailyAggregate {
-                tenant_id: sample.tenant_id,
-                project_id: sample.project_id,
+                workspace_id: sample.workspace_id,
                 signal_kind,
                 day_micros,
                 compressed_bytes: 0,
@@ -1253,9 +1195,7 @@ fn push_ingestion_daily_values(
             builder.push(", ");
         }
         builder.push("(");
-        builder.push_bind(aggregate.tenant_id);
-        builder.push(", ");
-        builder.push_bind(aggregate.project_id);
+        builder.push_bind(aggregate.workspace_id);
         builder.push(", ");
         builder.push_bind(aggregate.signal_kind);
         builder.push(", (to_timestamp(");
@@ -1286,8 +1226,7 @@ async fn upsert_query_usage_daily(
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO query_usage_daily (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             day,
             bytes_scanned,
@@ -1302,7 +1241,7 @@ async fn upsert_query_usage_daily(
 
     builder.push(
         r#"
-        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        ON CONFLICT (workspace_id, signal_kind, day)
         DO UPDATE SET
             bytes_scanned = query_usage_daily.bytes_scanned + EXCLUDED.bytes_scanned,
             rows_scanned = query_usage_daily.rows_scanned + EXCLUDED.rows_scanned,
@@ -1317,16 +1256,15 @@ async fn upsert_query_usage_daily(
 }
 
 fn aggregate_query_daily(samples: &[QuerySample]) -> Vec<QueryDailyAggregate> {
-    let mut aggregates = HashMap::<(Uuid, Uuid, &'static str, i64), QueryDailyAggregate>::new();
+    let mut aggregates = HashMap::<(Uuid, &'static str, i64), QueryDailyAggregate>::new();
 
     for sample in samples {
         let signal_kind = signal_kind(sample.signal);
         let day_micros = day_start_micros(sample.submitted_at);
         let entry = aggregates
-            .entry((sample.tenant_id, sample.project_id, signal_kind, day_micros))
+            .entry((sample.workspace_id.into(), signal_kind, day_micros))
             .or_insert(QueryDailyAggregate {
-                tenant_id: sample.tenant_id,
-                project_id: sample.project_id,
+                workspace_id: sample.workspace_id,
                 signal_kind,
                 day_micros,
                 bytes_scanned: 0,
@@ -1357,9 +1295,7 @@ fn push_query_daily_values(
             builder.push(", ");
         }
         builder.push("(");
-        builder.push_bind(aggregate.tenant_id);
-        builder.push(", ");
-        builder.push_bind(aggregate.project_id);
+        builder.push_bind(aggregate.workspace_id);
         builder.push(", ");
         builder.push_bind(aggregate.signal_kind);
         builder.push(", (to_timestamp(");
@@ -1394,13 +1330,12 @@ async fn upsert_ingest_query_monthly_for_queries(
 
 fn aggregate_monthly_usage_for_writes(samples: &[WriteSample]) -> Vec<MonthlyUsageAggregate> {
     let mut aggregates =
-        HashMap::<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
+        HashMap::<(Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
 
     for sample in samples {
         aggregate_monthly_usage(
             &mut aggregates,
-            sample.tenant_id,
-            sample.project_id,
+            sample.workspace_id,
             sample.signal,
             Operation::Ingest,
             sample.flushed_at,
@@ -1413,13 +1348,12 @@ fn aggregate_monthly_usage_for_writes(samples: &[WriteSample]) -> Vec<MonthlyUsa
 
 fn aggregate_monthly_usage_for_queries(samples: &[QuerySample]) -> Vec<MonthlyUsageAggregate> {
     let mut aggregates =
-        HashMap::<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
+        HashMap::<(Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>::new();
 
     for sample in samples {
         aggregate_monthly_usage(
             &mut aggregates,
-            sample.tenant_id,
-            sample.project_id,
+            sample.workspace_id,
             sample.signal,
             Operation::Query,
             sample.submitted_at,
@@ -1431,9 +1365,8 @@ fn aggregate_monthly_usage_for_queries(samples: &[QuerySample]) -> Vec<MonthlyUs
 }
 
 fn aggregate_monthly_usage(
-    aggregates: &mut HashMap<(Uuid, Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>,
-    tenant_id: Uuid,
-    project_id: Uuid,
+    aggregates: &mut HashMap<(Uuid, SignalKind, Operation, i64), MonthlyUsageAggregate>,
+    workspace_id: WorkspaceId,
     signal: SignalKind,
     operation: Operation,
     observed_at: i64,
@@ -1441,16 +1374,9 @@ fn aggregate_monthly_usage(
 ) {
     let period_start_micros = month_start_micros(observed_at);
     let entry = aggregates
-        .entry((
-            tenant_id,
-            project_id,
-            signal,
-            operation,
-            period_start_micros,
-        ))
+        .entry((workspace_id.into(), signal, operation, period_start_micros))
         .or_insert(MonthlyUsageAggregate {
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind: signal_kind(signal),
             operation: operation_kind(operation),
             period_start_micros,
@@ -1473,8 +1399,7 @@ async fn upsert_monthly_usage_aggregates(
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO ingest_query_monthly (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             operation,
             period_start,
@@ -1490,7 +1415,7 @@ async fn upsert_monthly_usage_aggregates(
 
     builder.push(
         r#"
-        ON CONFLICT (tenant_id, project_id, signal_kind, operation, period_start)
+        ON CONFLICT (workspace_id, signal_kind, operation, period_start)
         DO UPDATE SET
             used_bytes = ingest_query_monthly.used_bytes + EXCLUDED.used_bytes,
             updated_at = GREATEST(ingest_query_monthly.updated_at, EXCLUDED.updated_at)
@@ -1513,9 +1438,7 @@ fn push_monthly_usage_values(
             builder.push(", ");
         }
         builder.push("(");
-        builder.push_bind(aggregate.tenant_id);
-        builder.push(", ");
-        builder.push_bind(aggregate.project_id);
+        builder.push_bind(aggregate.workspace_id);
         builder.push(", ");
         builder.push_bind(aggregate.signal_kind);
         builder.push(", ");
@@ -1597,8 +1520,7 @@ mod tests {
     use super::*;
 
     fn write_sample(
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         compressed_bytes: i64,
         original_bytes: Option<i64>,
@@ -1606,8 +1528,7 @@ mod tests {
         flushed_at: i64,
     ) -> WriteSample {
         WriteSample {
-            tenant_id,
-            project_id,
+            workspace_id,
             signal,
             stream_name: None,
             compressed_bytes,
@@ -1620,16 +1541,14 @@ mod tests {
     }
 
     fn query_sample(
-        tenant_id: Uuid,
-        project_id: Uuid,
+        workspace_id: WorkspaceId,
         signal: SignalKind,
         bytes_scanned: i64,
         rows_scanned: Option<i64>,
         submitted_at: i64,
     ) -> QuerySample {
         QuerySample {
-            tenant_id,
-            project_id,
+            workspace_id,
             signal,
             bytes_scanned,
             rows_scanned,
@@ -1671,8 +1590,7 @@ mod tests {
     fn threshold_dedupe_uses_period_or_hour_bucket() {
         let emitted_at = (5 * 3_600 * 1_000_000) + 123_456;
         let mut event = ThresholdEvent {
-            tenant_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            workspace_id: WorkspaceId::new(),
             signal: SignalKind::Traces,
             operation: Operation::Ingest,
             limit_kind: "rate".to_string(),
@@ -1691,13 +1609,11 @@ mod tests {
 
     #[test]
     fn aggregate_ingestion_daily_groups_by_tenant_project_signal_day() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let day = 2 * 86_400 * 1_000_000;
         let aggregates = aggregate_ingestion_daily(&[
             write_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 10,
                 Some(20),
@@ -1705,8 +1621,7 @@ mod tests {
                 day + 1,
             ),
             write_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 15,
                 None,
@@ -1714,8 +1629,7 @@ mod tests {
                 day + 2,
             ),
             write_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Logs,
                 7,
                 Some(9),
@@ -1739,27 +1653,18 @@ mod tests {
 
     #[test]
     fn aggregate_query_daily_groups_by_tenant_project_signal_day() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let day = 3 * 86_400 * 1_000_000;
         let aggregates = aggregate_query_daily(&[
             query_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Metrics,
                 10,
                 Some(3),
                 day + 1,
             ),
-            query_sample(
-                tenant_id,
-                project_id,
-                SignalKind::Metrics,
-                15,
-                None,
-                day + 2,
-            ),
-            query_sample(tenant_id, project_id, SignalKind::Logs, 7, Some(1), day + 3),
+            query_sample(workspace_id.into(), SignalKind::Metrics, 15, None, day + 2),
+            query_sample(workspace_id.into(), SignalKind::Logs, 7, Some(1), day + 3),
         ]);
 
         assert_eq!(aggregates.len(), 2);
@@ -1776,8 +1681,7 @@ mod tests {
 
     #[test]
     fn rollup_value_builders_do_not_insert_separators_inside_timestamp_expression() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let day = 86_400 * 1_000_000;
         let mut ingestion_builder: QueryBuilder<Postgres> =
             QueryBuilder::new("INSERT INTO ingestion_daily");
@@ -1789,8 +1693,7 @@ mod tests {
         push_ingestion_daily_values(
             &mut ingestion_builder,
             &[IngestionDailyAggregate {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal_kind: "traces",
                 day_micros: day,
                 compressed_bytes: 1,
@@ -1803,8 +1706,7 @@ mod tests {
         push_query_daily_values(
             &mut query_builder,
             &[QueryDailyAggregate {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal_kind: "traces",
                 day_micros: day,
                 bytes_scanned: 1,
@@ -1816,8 +1718,7 @@ mod tests {
         push_monthly_usage_values(
             &mut monthly_builder,
             &[MonthlyUsageAggregate {
-                tenant_id,
-                project_id,
+                workspace_id: workspace_id.into(),
                 signal_kind: "traces",
                 operation: "ingest",
                 period_start_micros: day,
@@ -1840,8 +1741,7 @@ mod tests {
 
     #[test]
     fn aggregate_monthly_usage_groups_by_operation_and_month() {
-        let tenant_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
         let may_1 = chrono::DateTime::parse_from_rfc3339("2024-05-01T00:00:00Z")
             .unwrap()
             .timestamp_micros();
@@ -1854,8 +1754,7 @@ mod tests {
 
         let writes = aggregate_monthly_usage_for_writes(&[
             write_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 10,
                 Some(10),
@@ -1863,8 +1762,7 @@ mod tests {
                 may_15,
             ),
             write_sample(
-                tenant_id,
-                project_id,
+                workspace_id.into(),
                 SignalKind::Traces,
                 15,
                 Some(15),
@@ -1873,8 +1771,8 @@ mod tests {
             ),
         ]);
         let queries = aggregate_monthly_usage_for_queries(&[
-            query_sample(tenant_id, project_id, SignalKind::Traces, 9, None, may_15),
-            query_sample(tenant_id, project_id, SignalKind::Traces, 11, None, may_20),
+            query_sample(workspace_id.into(), SignalKind::Traces, 9, None, may_15),
+            query_sample(workspace_id.into(), SignalKind::Traces, 11, None, may_20),
         ]);
 
         assert_eq!(writes.len(), 1);

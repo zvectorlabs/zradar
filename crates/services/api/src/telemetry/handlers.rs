@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
 };
 use std::sync::Arc;
-use uuid::Uuid;
+use zradar_models::WorkspaceId;
 
 use super::{service::QueryService, types::*};
 use crate::errors::Result;
@@ -16,7 +16,7 @@ use crate::http::{AuthContext, Capability};
     get,
     path = "/api/v1/traces",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
         ("name" = Option<String>, Query, description = "Trace name filter"),
@@ -45,9 +45,9 @@ pub async fn query_traces(
     Query(mut filters): Query<TraceQueryFilters>,
 ) -> Result<Json<PaginatedResponse<TraceSummary>>> {
     auth.require(Capability::ReadTraces)?;
-    filters.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let traces = service.query_traces(tenant_id, filters).await?;
+    filters.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let traces = service.query_traces(workspace_id.into(), filters).await?;
     Ok(Json(traces))
 }
 
@@ -73,7 +73,7 @@ pub async fn get_trace(
 ) -> Result<Json<TraceDetail>> {
     auth.require(Capability::ReadTraces)?;
     let trace = service
-        .get_trace(auth.tenant_uuid()?, auth.project_uuid()?, &trace_id)
+        .get_trace(auth.workspace_uuid()?.into(), &trace_id)
         .await?;
     Ok(Json(trace))
 }
@@ -100,7 +100,7 @@ pub async fn get_span(
 ) -> Result<Json<SpanDetail>> {
     auth.require(Capability::ReadTraces)?;
     let span = service
-        .get_span(auth.tenant_uuid()?, auth.project_uuid()?, &span_id)
+        .get_span(auth.workspace_uuid()?.into(), &span_id)
         .await?;
     Ok(Json(span))
 }
@@ -110,7 +110,7 @@ pub async fn get_span(
     get,
     path = "/api/v1/spans",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
         ("trace_id" = Option<String>, Query, description = "Filter by trace ID"),
@@ -140,9 +140,9 @@ pub async fn query_spans(
     Query(mut filters): Query<SpanQueryFilters>,
 ) -> Result<Json<PaginatedResponse<SpanDetail>>> {
     auth.require(Capability::ReadTraces)?;
-    filters.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let spans = service.query_spans(tenant_id, filters).await?;
+    filters.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let spans = service.query_spans(workspace_id.into(), filters).await?;
     Ok(Json(spans))
 }
 
@@ -151,7 +151,7 @@ pub async fn query_spans(
     get,
     path = "/api/v1/analytics",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
         ("bucket" = Option<String>, Query, description = "Time bucket"),
@@ -170,9 +170,9 @@ pub async fn get_analytics(
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<AnalyticsResult>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_analytics(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service.get_analytics(workspace_id.into(), query).await?;
     Ok(Json(results))
 }
 
@@ -181,7 +181,7 @@ pub async fn get_analytics(
     get,
     path = "/api/v1/analytics/metrics",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
     ),
@@ -198,9 +198,11 @@ pub async fn get_metrics_summary(
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<MetricsSummary>> {
     auth.require(Capability::ReadMetrics)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let summary = service.get_metrics_summary(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let summary = service
+        .get_metrics_summary(workspace_id.into(), query)
+        .await?;
     Ok(Json(summary))
 }
 
@@ -209,7 +211,7 @@ pub async fn get_metrics_summary(
     get,
     path = "/api/v1/analytics/top-endpoints",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
         ("limit" = Option<u32>, Query, description = "Number of results"),
@@ -227,9 +229,11 @@ pub async fn get_top_endpoints(
     Query(mut query): Query<TopNQuery>,
 ) -> Result<Json<Vec<TopEndpoint>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_top_endpoints(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_top_endpoints(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -238,7 +242,7 @@ pub async fn get_top_endpoints(
     get,
     path = "/api/v1/analytics/errors",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start" = String, Query, description = "Start time (ISO 8601)"),
         ("end" = String, Query, description = "End time (ISO 8601)"),
     ),
@@ -255,9 +259,11 @@ pub async fn get_error_breakdown(
     Query(mut query): Query<ErrorAnalyticsQuery>,
 ) -> Result<Json<Vec<ErrorBreakdown>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_error_breakdown(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_error_breakdown(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -267,9 +273,11 @@ pub async fn get_llm_analytics(
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<LlmAnalytics>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_llm_analytics(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_llm_analytics(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -279,9 +287,11 @@ pub async fn get_agent_analytics(
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<Vec<AgentAnalytics>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_agent_analytics(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_agent_analytics(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -291,9 +301,11 @@ pub async fn get_guardrails_analytics(
     Query(mut query): Query<AnalyticsQuery>,
 ) -> Result<Json<GuardrailsAnalytics>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let result = service.get_guardrails_analytics(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let result = service
+        .get_guardrails_analytics(workspace_id.into(), query)
+        .await?;
     Ok(Json(result))
 }
 
@@ -303,9 +315,11 @@ pub async fn get_storage_usage(
     Query(mut query): Query<StorageUsageQuery>,
 ) -> Result<Json<Vec<StorageUsage>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_storage_usage(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_storage_usage(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -315,9 +329,11 @@ pub async fn get_storage_usage_daily(
     Query(mut query): Query<StorageUsageDailyQuery>,
 ) -> Result<Json<Vec<StorageUsageDaily>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_storage_usage_daily(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service
+        .get_storage_usage_daily(workspace_id.into(), query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -327,9 +343,9 @@ pub async fn get_quota_status(
     Query(mut query): Query<QuotaStatusQuery>,
 ) -> Result<Json<Vec<zradar_policy::QuotaStatus>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let status = service.get_quota_status(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let status = service.get_quota_status(workspace_id.into(), query).await?;
     Ok(Json(status))
 }
 
@@ -339,9 +355,9 @@ pub async fn get_usage_daily(
     Query(mut query): Query<UsageDailyQuery>,
 ) -> Result<Json<Vec<zradar_policy::UsageDailyRecord>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_usage_daily(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service.get_usage_daily(workspace_id.into(), query).await?;
     Ok(Json(results))
 }
 
@@ -351,9 +367,9 @@ pub async fn get_ingest_rate(
     Query(mut query): Query<IngestRateQuery>,
 ) -> Result<Json<Vec<zradar_policy::IngestRateRecord>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_ingest_rate(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service.get_ingest_rate(workspace_id.into(), query).await?;
     Ok(Json(results))
 }
 
@@ -363,9 +379,9 @@ pub async fn get_query_usage(
     Query(mut query): Query<QueryUsageQuery>,
 ) -> Result<Json<Vec<zradar_policy::QueryUsageRecord>>> {
     auth.require(Capability::ReadDashboards)?;
-    query.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let results = service.get_query_usage(tenant_id, query).await?;
+    query.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let results = service.get_query_usage(workspace_id.into(), query).await?;
     Ok(Json(results))
 }
 
@@ -374,7 +390,7 @@ pub async fn get_query_usage(
     get,
     path = "/api/v1/logs",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
         ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
         ("severity" = Option<String>, Query, description = "Severity filter"),
@@ -398,9 +414,9 @@ pub async fn query_logs(
     Query(mut filters): Query<LogQueryFilters>,
 ) -> Result<Json<PaginatedResponse<LogDetail>>> {
     auth.require(Capability::ReadLogs)?;
-    filters.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let logs = service.query_logs(tenant_id, filters).await?;
+    filters.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let logs = service.query_logs(workspace_id.into(), filters).await?;
     Ok(Json(logs))
 }
 
@@ -426,7 +442,7 @@ pub async fn get_log(
 ) -> Result<Json<LogDetail>> {
     auth.require(Capability::ReadLogs)?;
     let log = service
-        .get_log(auth.tenant_uuid()?, auth.project_uuid()?, &log_id)
+        .get_log(auth.workspace_uuid()?.into(), &log_id)
         .await?;
     Ok(Json(log))
 }
@@ -436,7 +452,7 @@ pub async fn get_log(
     get,
     path = "/api/v1/metrics",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
         ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
         ("metric_name" = Option<String>, Query, description = "Metric name filter"),
@@ -457,9 +473,9 @@ pub async fn query_metrics(
     Query(mut filters): Query<MetricQueryFilters>,
 ) -> Result<Json<PaginatedResponse<MetricDetail>>> {
     auth.require(Capability::ReadMetrics)?;
-    filters.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let metrics = service.query_metrics(tenant_id, filters).await?;
+    filters.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let metrics = service.query_metrics(workspace_id.into(), filters).await?;
     Ok(Json(metrics))
 }
 
@@ -468,7 +484,7 @@ pub async fn query_metrics(
     get,
     path = "/api/v1/metrics/series",
     params(
-        ("project_id" = String, Query, description = "Project ID"),
+        ("workspace_id" = String, Query, description = "Project ID"),
         ("metric_name" = String, Query, description = "Metric name"),
         ("start_time" = Option<String>, Query, description = "Start time (ISO 8601)"),
         ("end_time" = Option<String>, Query, description = "End time (ISO 8601)"),
@@ -489,13 +505,15 @@ pub async fn query_metric_series(
     Query(mut filters): Query<MetricSeriesFilters>,
 ) -> Result<Json<Vec<MetricSeriesPoint>>> {
     auth.require(Capability::ReadMetrics)?;
-    filters.project_id = auth.project_id().to_string();
-    let tenant_id = auth.tenant_uuid()?;
-    let series = service.query_metric_series(tenant_id, filters).await?;
+    filters.workspace_id = auth.workspace_id().to_string();
+    let workspace_id = auth.workspace_uuid()?;
+    let series = service
+        .query_metric_series(workspace_id.into(), filters)
+        .await?;
     Ok(Json(series))
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct ProjectIdParam {
-    pub project_id: Uuid,
+    pub workspace_id: WorkspaceId,
 }

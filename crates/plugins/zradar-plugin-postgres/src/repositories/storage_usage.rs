@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use sqlx::{Executor, Postgres, QueryBuilder, Row};
 use std::sync::Arc;
+use zradar_models::WorkspaceId;
 use zradar_traits::{StorageUsageDailySnapshot, StorageUsageDelta, StorageUsageRepository};
 
 pub struct PostgresStorageUsageRepository {
@@ -62,8 +63,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn get_ingestion_daily(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<(i64, i64)> {
@@ -73,14 +73,12 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 COALESCE(compressed_bytes, 0)::bigint AS compressed_bytes,
                 COALESCE(file_count, 0)::bigint       AS file_count
             FROM ingestion_daily
-            WHERE tenant_id   = $1
-              AND project_id  = $2
-              AND signal_kind = $3
-              AND day         = $4
+            WHERE workspace_id = $1
+              AND signal_kind = $2
+              AND day         = $3
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(day)
         .fetch_optional(self.client.pool())
@@ -99,8 +97,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn get_cleanup_daily(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<(i64, i64)> {
@@ -110,14 +107,12 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 COALESCE(compressed_bytes, 0)::bigint AS compressed_bytes,
                 COALESCE(file_count, 0)::bigint       AS file_count
             FROM storage_cleanup_daily
-            WHERE tenant_id   = $1
-              AND project_id  = $2
-              AND signal_kind = $3
-              AND day         = $4
+            WHERE workspace_id = $1
+              AND signal_kind = $2
+              AND day         = $3
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(day)
         .fetch_optional(self.client.pool())
@@ -136,8 +131,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn get_previous_snapshot(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
     ) -> anyhow::Result<Option<(i64, i64)>> {
@@ -146,15 +140,13 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
             r#"
             SELECT compressed_bytes, file_count
             FROM retention_storage_daily
-            WHERE tenant_id   = $1
-              AND project_id  = $2
-              AND signal_kind = $3
+            WHERE workspace_id = $1
+              AND signal_kind = $2
               AND bucket_index = 0
-              AND day = $4
+              AND day = $3
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(prev_day)
         .fetch_optional(self.client.pool())
@@ -171,8 +163,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn upsert_storage_snapshot(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         day: NaiveDate,
         compressed_bytes: i64,
@@ -182,18 +173,17 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
         sqlx::query(
             r#"
             INSERT INTO retention_storage_daily
-                (tenant_id, project_id, signal_kind, bucket_index, day,
+                (workspace_id, signal_kind, bucket_index, day,
                  compressed_bytes, file_count, captured_at)
-            VALUES ($1, $2, $3, 0, $4, $5, $6, $7)
-            ON CONFLICT (tenant_id, project_id, signal_kind, bucket_index, day)
+            VALUES ($1, $2, 0, $3, $4, $5, $6)
+            ON CONFLICT (workspace_id, signal_kind, bucket_index, day)
             DO UPDATE SET
                 compressed_bytes = EXCLUDED.compressed_bytes,
                 file_count       = EXCLUDED.file_count,
                 captured_at      = EXCLUDED.captured_at
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(day)
         .bind(compressed_bytes)
@@ -208,8 +198,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn get_current_file_stats(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: &str,
         before_micros: i64,
     ) -> anyhow::Result<(i64, i64)> {
@@ -219,15 +208,13 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 COALESCE(SUM(compressed_size), 0)::bigint AS compressed_bytes,
                 COUNT(*)::bigint AS file_count
             FROM file_list
-            WHERE tenant_id   = $1
-              AND project_id  = $2
-              AND signal_type = $3
+            WHERE workspace_id = $1
+              AND signal_type = $2
               AND deleted     = false
-              AND created_at  < $4
+              AND created_at  < $3
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(before_micros)
         .fetch_one(self.client.pool())
@@ -242,8 +229,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
     async fn query_storage_usage_daily(
         &self,
-        tenant_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        workspace_id: WorkspaceId,
         signal_kind: Option<&str>,
         start_micros: Option<i64>,
         end_micros: Option<i64>,
@@ -251,8 +237,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
         let rows = sqlx::query(
             r#"
             SELECT
-                tenant_id,
-                project_id,
+                workspace_id,
                 signal_kind,
                 day::text AS day,
                 compressed_bytes,
@@ -260,18 +245,16 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
                 captured_at,
                 false AS estimated_today
             FROM retention_storage_daily
-            WHERE tenant_id = $1
-              AND project_id = $2
+            WHERE workspace_id = $1
               AND bucket_index = 0
               AND day < CURRENT_DATE
-              AND ($3::text IS NULL OR signal_kind = $3)
-              AND ($4::bigint IS NULL OR day >= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
-              AND ($5::bigint IS NULL OR day <= (to_timestamp($5::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+              AND ($2::text IS NULL OR signal_kind = $2)
+              AND ($3::bigint IS NULL OR day >= (to_timestamp($3::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
+              AND ($4::bigint IS NULL OR day <= (to_timestamp($4::double precision / 1000000.0) AT TIME ZONE 'UTC')::date)
             ORDER BY day DESC, signal_kind
             "#,
         )
-        .bind(tenant_id)
-        .bind(project_id)
+        .bind(workspace_id.into_inner())
         .bind(signal_kind)
         .bind(start_micros)
         .bind(end_micros)
@@ -286,15 +269,10 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 
         let today = chrono::Utc::now().date_naive();
         if includes_day(start_micros, end_micros, today) {
-            let today_rows = derive_storage_usage_daily_rows(
-                &self.client,
-                tenant_id,
-                project_id,
-                signal_kind,
-                today,
-            )
-            .await
-            .context("Failed to derive today's storage usage snapshot")?;
+            let today_rows =
+                derive_storage_usage_daily_rows(&self.client, workspace_id, signal_kind, today)
+                    .await
+                    .context("Failed to derive today's storage usage snapshot")?;
 
             snapshots.extend(
                 today_rows
@@ -316,7 +294,7 @@ impl StorageUsageRepository for PostgresStorageUsageRepository {
 ///
 /// Accepts any [`Executor`] so it can run inside or outside a transaction.
 /// On conflict it accumulates the delta (additive upsert), making it safe to
-/// retry: a duplicate call for the same `(tenant, project, signal, day)` key
+/// retry: a duplicate call for the same `(workspace_id, signal, day)` key
 /// simply adds to the existing row rather than double-counting — callers must
 /// ensure they do not call this more than once per cleanup batch for the same
 /// key without also retrying the matching `delete_entries`.
@@ -331,8 +309,7 @@ where
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         INSERT INTO storage_cleanup_daily (
-            tenant_id,
-            project_id,
+            workspace_id,
             signal_kind,
             day,
             compressed_bytes,
@@ -343,8 +320,7 @@ where
     );
 
     builder.push_values(deltas, |mut row, delta| {
-        row.push_bind(delta.tenant_id)
-            .push_bind(delta.project_id)
+        row.push_bind(delta.workspace_id)
             .push_bind(&delta.signal_kind)
             .push_bind(delta.day)
             .push_bind(delta.compressed_bytes.max(0))
@@ -354,7 +330,7 @@ where
 
     builder.push(
         r#"
-        ON CONFLICT (tenant_id, project_id, signal_kind, day)
+        ON CONFLICT (workspace_id, signal_kind, day)
         DO UPDATE SET
             compressed_bytes = storage_cleanup_daily.compressed_bytes
                 + EXCLUDED.compressed_bytes,
@@ -374,8 +350,7 @@ where
 
 fn storage_usage_daily_snapshot_from_row(row: sqlx::postgres::PgRow) -> StorageUsageDailySnapshot {
     StorageUsageDailySnapshot {
-        tenant_id: row.get("tenant_id"),
-        project_id: row.get("project_id"),
+        workspace_id: row.get("workspace_id"),
         signal_kind: row.get("signal_kind"),
         day: row.get("day"),
         compressed_bytes: row.get("compressed_bytes"),
@@ -403,58 +378,50 @@ fn includes_day(
 
 pub async fn derive_storage_usage_daily_rows(
     client: &PostgresClient,
-    tenant_id: uuid::Uuid,
-    project_id: uuid::Uuid,
+    workspace_id: WorkspaceId,
     signal_filter: Option<&str>,
     day: NaiveDate,
 ) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
     sqlx::query(
         r#"
         WITH params AS (
-            SELECT $4::date AS snapshot_day,
-                   ($4::date - INTERVAL '1 day')::date AS previous_day,
-                   $5::bigint AS captured_at
+            SELECT $3::date AS snapshot_day,
+                   ($3::date - INTERVAL '1 day')::date AS previous_day,
+                   $4::bigint AS captured_at
         ),
         previous AS (
-            SELECT r.tenant_id,
-                   r.project_id,
+            SELECT r.workspace_id,
                    r.signal_kind,
                    r.compressed_bytes,
                    r.file_count
             FROM retention_storage_daily r, params p
-            WHERE r.tenant_id = $1
-              AND r.project_id = $2
+            WHERE r.workspace_id = $1
               AND r.bucket_index = 0
               AND r.day = p.previous_day
-              AND ($3::text IS NULL OR r.signal_kind = $3)
+              AND ($2::text IS NULL OR r.signal_kind = $2)
         ),
         added AS (
-            SELECT tenant_id,
-                   project_id,
+            SELECT workspace_id,
                    signal_kind,
                    compressed_bytes,
                    file_count
             FROM ingestion_daily i, params p
-            WHERE i.tenant_id = $1
-              AND i.project_id = $2
+            WHERE i.workspace_id = $1
               AND i.day = p.snapshot_day
-              AND ($3::text IS NULL OR i.signal_kind = $3)
+              AND ($2::text IS NULL OR i.signal_kind = $2)
         ),
         removed AS (
-            SELECT tenant_id,
-                   project_id,
+            SELECT workspace_id,
                    signal_kind,
                    compressed_bytes,
                    file_count
             FROM storage_cleanup_daily c, params p
-            WHERE c.tenant_id = $1
-              AND c.project_id = $2
+            WHERE c.workspace_id = $1
               AND c.day = p.snapshot_day
-              AND ($3::text IS NULL OR c.signal_kind = $3)
+              AND ($2::text IS NULL OR c.signal_kind = $2)
         ),
         incremental AS (
-            SELECT p.tenant_id,
-                   p.project_id,
+            SELECT p.workspace_id,
                    p.signal_kind,
                    GREATEST(
                        COALESCE(p.compressed_bytes, 0)
@@ -469,33 +436,29 @@ pub async fn derive_storage_usage_daily_rows(
                        0
                    )::bigint AS file_count
             FROM previous p
-            LEFT JOIN added a USING (tenant_id, project_id, signal_kind)
-            LEFT JOIN removed r USING (tenant_id, project_id, signal_kind)
+            LEFT JOIN added a USING (workspace_id, signal_kind)
+            LEFT JOIN removed r USING (workspace_id, signal_kind)
         ),
         bootstrap AS (
-            SELECT f.tenant_id,
-                   f.project_id,
+            SELECT f.workspace_id,
                    f.signal_type AS signal_kind,
                    COALESCE(SUM(f.compressed_size), 0)::bigint AS compressed_bytes,
                    COUNT(*)::bigint AS file_count
             FROM file_list f
-            LEFT JOIN previous p ON f.tenant_id = p.tenant_id 
-                                AND f.project_id = p.project_id 
+            LEFT JOIN previous p ON f.workspace_id = p.workspace_id 
                                 AND f.signal_type = p.signal_kind
-            WHERE f.tenant_id = $1
-              AND f.project_id = $2
+            WHERE f.workspace_id = $1
               AND f.deleted = false
-              AND ($3::text IS NULL OR f.signal_type = $3)
-              AND p.tenant_id IS NULL
-            GROUP BY f.tenant_id, f.project_id, f.signal_type
+              AND ($2::text IS NULL OR f.signal_type = $2)
+              AND p.workspace_id IS NULL
+            GROUP BY f.workspace_id, f.signal_type
         ),
         source AS (
             SELECT * FROM incremental
             UNION ALL
             SELECT * FROM bootstrap
         )
-        SELECT s.tenant_id,
-               s.project_id,
+        SELECT s.workspace_id,
                s.signal_kind,
                p.snapshot_day::text AS day,
                s.compressed_bytes,
@@ -506,8 +469,7 @@ pub async fn derive_storage_usage_daily_rows(
         ORDER BY s.signal_kind
         "#,
     )
-    .bind(tenant_id)
-    .bind(project_id)
+    .bind(workspace_id.into_inner())
     .bind(signal_filter)
     .bind(day)
     .bind(chrono::Utc::now().timestamp_micros())
