@@ -17,7 +17,6 @@ use zradar_models::{RequestContext, Span};
 use zradar_traits::{ContentCapturePolicy, NoopContentCapturePolicy};
 
 use crate::conventions::{AttrView, AttributeConvention, default_conventions};
-use crate::otlp_util::any_value_to_json;
 use crate::span_events::apply_span_events;
 use crate::span_links::apply_span_links;
 
@@ -192,29 +191,10 @@ impl OtlpConverter {
         // OQ27 with a truncation marker on overflow.
         apply_span_links(&otlp_span.links, &mut span_data);
 
-        // Build the JSON attribute catch-all from the borrowed slice.
-        //
-        // NOTE (Phase 0 PR3): we currently mirror EVERY attribute into the
-        // JSON column, matching the pre-refactor behavior at
-        // `converter.rs:86-96`. The `AttrView` tracks consumed keys via
-        // `mark_consumed`, but Phase 1 will be the one to actually drop
-        // already-mapped keys from the JSON blob — that's a semantic change
-        // out of scope for this pure-refactor PR.
-        let mut attributes_map = serde_json::Map::new();
-        for attr in &otlp_span.attributes {
-            if let Some(value) = &attr.value {
-                attributes_map.insert(attr.key.clone(), any_value_to_json(value));
-            }
-        }
-
-        // Detect span type from attributes
-        use std::collections::HashMap;
-        let attributes_hashmap: HashMap<String, serde_json::Value> = attributes_map
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        // Detect the semantic span type from the borrowed attribute view —
+        // zero-copy, no intermediate `serde_json::Map`.
         span_data.span_type = crate::SpanTypeMapper::detect_type(
-            &attributes_hashmap,
+            &view,
             duration_ns,
             &span_data.span_name,
             &span_data.service_name,
@@ -243,37 +223,38 @@ impl OtlpConverter {
             span_data.status_message = status.message;
         }
 
-        // Store all attributes as JSON
-        span_data.attributes = serde_json::to_string(&attributes_map)?;
-
-        // Apply content capture policy: when disabled, strip all prompt/completion
-        // content from every storage location so it cannot leak via any column.
-        if let Ok(workspace_id) = span_data.workspace_id.parse::<uuid::Uuid>()
-            && !self
+        // Content-capture decision, made once. An unparseable workspace keeps
+        // all attributes, matching the prior behavior (the old code only
+        // stripped inside `if let Ok(workspace_id) = parse`).
+        let capture_enabled = match span_data.workspace_id.parse::<uuid::Uuid>() {
+            Ok(workspace_id) => self
                 .content_capture_policy
-                .capture_enabled(workspace_id.into())
-        {
-            // Clear first-class columns.
+                .capture_enabled(workspace_id.into()),
+            Err(_) => true,
+        };
+
+        // Build the JSON attribute catch-all directly from the borrowed OTLP
+        // slice — no intermediate `serde_json::Map`, no per-attribute key/value
+        // clones. (NOTE Phase 0 PR3: every attribute is still mirrored into the
+        // JSON column; dropping already-mapped keys is a future Phase 1 change.)
+        // When capture is disabled, prompt/completion content keys are skipped
+        // during serialization rather than re-parsed out afterward.
+        span_data.attributes =
+            crate::otlp_util::attrs_to_json_filtered(&otlp_span.attributes, |k| {
+                !capture_enabled
+                    && (k.starts_with("gen_ai.content.")
+                        || k == "llm.input"
+                        || k == "llm.output"
+                        || k == "gen_ai.prompt"
+                        || k == "gen_ai.completion")
+            });
+
+        // When capture is disabled, also clear the first-class content columns
+        // and strip prompt/completion events so content cannot leak via any path.
+        if !capture_enabled {
             span_data.llm_input = String::new();
             span_data.llm_output = String::new();
 
-            // Strip gen_ai.content.* / llm.input / llm.output from attributes JSON.
-            if let Ok(mut attrs) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
-                &span_data.attributes,
-            ) {
-                attrs.retain(|k, _| {
-                    !k.starts_with("gen_ai.content.")
-                        && k != "llm.input"
-                        && k != "llm.output"
-                        && k != "gen_ai.prompt"
-                        && k != "gen_ai.completion"
-                });
-                span_data.attributes =
-                    serde_json::to_string(&attrs).unwrap_or_else(|_| "{}".to_string());
-            }
-
-            // Strip gen_ai.content.prompt / gen_ai.content.completion events
-            // from the events JSON so they cannot leak via the events column.
             if let Ok(mut events) =
                 serde_json::from_str::<Vec<serde_json::Value>>(&span_data.events)
             {

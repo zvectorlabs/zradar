@@ -13,12 +13,24 @@ use crate::helpers::ApiClient;
 
 /// Default poll timeout used by the convenience helpers below.
 ///
-/// Set to 0 so tests fail immediately on the first miss rather than waiting.
-/// Raise this only if a test genuinely requires async propagation time.
-pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(0);
+/// Ingest is always WAL-backed (no synchronous direct path), so every
+/// read-after-write needs async propagation time: OTLP ack → WAL flush
+/// (`ingestor.wal.flush_interval_ms`) → Parquet → query. Polling succeeds as
+/// soon as the data lands, so the fast path stays fast; this is only the
+/// upper bound before a genuinely-missing result is declared a failure.
+///
+/// 10s (not a tighter value) because the full suite runs ~170 tests in
+/// parallel, all contending on the shared WAL flusher + DataFusion read path;
+/// heavier analytics aggregations need headroom under that load.
+pub const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Default interval between poll attempts.
-pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+///
+/// Kept close to `ingestor.wal.flush_interval_ms` (25ms in the test config):
+/// WAL-backed data typically lands ~25–50ms after ack, so a coarse interval
+/// would make every read-after-write test idle most of a tick. 50ms catches
+/// the flush on the first or second poll while keeping request volume low.
+pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Poll `check` repeatedly until it returns `Ok(Some(T))`, then return that
 /// value.  Returns an error if `timeout` elapses without success.

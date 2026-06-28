@@ -46,8 +46,7 @@ flowchart TD
     SDK --> GRPC --> OPTEL
     ADM --> HTTP --> API
 
-    OPTEL -->|write| PAR
-    OPTEL -.->|wal.enabled| WALC --> PAR
+    OPTEL -->|append + fsync| WALC --> PAR
 
     API --> RET & POL & PAR
 
@@ -92,7 +91,7 @@ flowchart TD
         WB --> FW
     end
 
-    subgraph DURABLE["WAL mode  (wal.enabled = true)"]
+    subgraph DURABLE["WAL  (mandatory — every ingest is durably appended first)"]
         direction LR
         WT["WalTelemetryWriter\nwraps TelemetryWriter slot"]
         WAL["Wal  append-only segments"]
@@ -118,8 +117,8 @@ flowchart TD
     OT --> G1
     G5 --> TW
 
-    TW -->|"write_buffer = true"| WB
-    TW -.->|"wal.enabled = true"| WT
+    TW -->|"always (WAL mandatory)"| WT
+    WF -.->|"write_buffer = true"| WB
 
     FW --> PFW
     WF --> PFW
@@ -330,30 +329,27 @@ sequenceDiagram
     Conv-->>OtlpSvc: Vec<Span> / Vec<Metric> / Vec<LogRecord>
 
     OtlpSvc->>TW: insert_spans / insert_metrics / insert_logs(records)
-    Note over TW: Concrete type is ParquetTelemetryWriter (buffered/direct)<br/>or WalTelemetryWriter (when wal.enabled = true)
+    Note over TW: otlp_writer is ALWAYS WalTelemetryWriter — WAL is mandatory (no direct path)
 
-    alt write_buffer enabled (normal mode)
-        TW->>WB: push(tenant_id, project_id, signal_type, stream_name, records)
-        Note over WB: DashMap keyed by (tenant, project, signal, stream, hour)
-        loop Every flush_interval_secs OR slot size > write_buffer_size_bytes
-            FW->>WB: drain eligible slots
-            WB-->>FW: Vec<RecordSlot>
-            FW->>PFW: write_spans / write_metrics / write_logs(records)
+    TW->>TW: Wal.append(record) + handle.durable() — fsync before returning
+    OtlpSvc-->>Client: gRPC OK  (returned once WAL fsync completes)
+
+    loop WalFlusher polls WAL every flush_interval_ms  (background, post-ack)
+        TW->>PFW: insert_batch → ParquetTelemetryWriter
+        alt write_buffer enabled (default)
+            PFW->>WB: push(records) — DashMap keyed by (workspace, signal, stream, hour)
+            loop flush_interval_secs OR slot size > write_buffer_size_bytes
+                FW->>WB: drain eligible slots
+                WB-->>FW: Vec<RecordSlot>
+                FW->>PFW: write_spans / write_metrics / write_logs(records)
+            end
+        else direct write (write_buffer disabled, e.g. tests)
+            PFW->>PFW: write immediately
         end
-    else WAL mode (wal.enabled = true)
-        TW->>TW: Wal.append(record) + handle.durable() — fsync before returning
-        Note over TW: gRPC OK is held until WAL fsync completes
-        loop WalFlusher polls WAL
-            TW->>PFW: flush WAL records to Parquet
-        end
+        PFW->>PFW: Arrow RecordBatch → .par temp file → rename → .parquet
+        PFW->>FL: register_file(FileListEntry { location=local, min_ts, max_ts, … })
+        PFW->>FL: upsert_stream_stats(workspace_id, signal_type, stream_name)
     end
-
-    PFW->>PFW: Arrow RecordBatch → .par temp file → rename → .parquet
-    PFW->>FL: register_file(FileListEntry { location=local, min_ts, max_ts, … })
-    PFW->>FL: upsert_stream_stats(tenant_id, project_id, signal_type, stream_name)
-    FL-->>PFW: file_id
-
-    OtlpSvc-->>Client: gRPC OK
 
     loop Every file_push_interval_secs (background)
         FM->>FL: query_files(location=local, deleted=false)

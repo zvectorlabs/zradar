@@ -54,7 +54,21 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
     }
 
     let traces_url = "/api/v1/traces".to_string();
-    wait_for_items_default(&env.client, &traces_url).await?;
+    // Wait until all 3 ingested traces are queryable before cleanup. Otherwise
+    // a trace still in the WAL when cleanup runs would flush afterward and
+    // break the "all deleted" assertion (WAL-async ingest).
+    let client = &env.client;
+    let url = traces_url.as_str();
+    poll_until(
+        || async {
+            let body: serde_json::Value = client.get(url).await?.json().await?;
+            let total = body["total"].as_i64().unwrap_or(0);
+            Ok((total >= 3).then_some(()))
+        },
+        DEFAULT_POLL_TIMEOUT,
+        DEFAULT_POLL_INTERVAL,
+    )
+    .await?;
 
     let before_json: serde_json::Value = env.client.get(&traces_url).await?.json().await?;
     let total_before = before_json["total"].as_i64().unwrap_or(0);
@@ -133,7 +147,30 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
     }
 
     let traces_url = "/api/v1/traces".to_string();
-    wait_for_items_default(&env.client, &traces_url).await?;
+    // Wait until BOTH recent traces are actually queryable before running
+    // cleanup. A weaker "any item present" wait can let cleanup and the
+    // assertion below run before the second recent trace has flushed
+    // (WAL-async ingest), so assert on exactly what the test checks.
+    let client = &env.client;
+    let url = traces_url.as_str();
+    poll_until(
+        || async {
+            let body: serde_json::Value = client.get(url).await?.json().await?;
+            let recent = body["items"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|t| t["service_name"].as_str() == Some("new-service"))
+                        .count()
+                })
+                .unwrap_or(0);
+            Ok((recent >= 2).then_some(()))
+        },
+        DEFAULT_POLL_TIMEOUT,
+        DEFAULT_POLL_INTERVAL,
+    )
+    .await?;
 
     // Run cleanup with 7-day retention
     let cleanup_resp = env

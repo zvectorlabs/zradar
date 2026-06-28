@@ -44,7 +44,6 @@ use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, Key
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
 use zradar_models::RequestContext;
-use zradar_models::WorkspaceId;
 
 fn kv_str(k: &str, v: &str) -> KeyValue {
     KeyValue {
@@ -87,11 +86,14 @@ fn nat_simple_workflow_input() -> ResourceSpans {
     }
 }
 
-/// Recorded baseline on 2026-06-26 against the `nat_simple_workflow` shape
-/// (4 attributes, 1 span) — measured `count_total = 44`. Cap set to 55 — a
-/// ~25% (11-allocation) cushion that absorbs single-allocation refactors
-/// and toolchain allocator noise without letting a meaningful regression
-/// hide.
+/// Recorded baseline against the `nat_simple_workflow` shape (4 attributes,
+/// 1 span). Originally `count_total = 44` (cap 55, 2026-06-26); reduced to
+/// **27** on 2026-06-28 when the converter stopped building an intermediate
+/// `serde_json::Map` for attributes — it now streams the JSON via
+/// `attrs_to_json_filtered` and classifies via `detect_type` over the borrowed
+/// `AttrView`. Cap retightened to 35 — a ~30% cushion over 27 that absorbs
+/// single-allocation refactors and allocator noise without letting a
+/// meaningful regression hide.
 ///
 /// Measurement detail: the cloned `ResourceSpans` is built **outside**
 /// `measure`, so the input-clone allocations are not charged to the
@@ -106,12 +108,12 @@ fn nat_simple_workflow_input() -> ResourceSpans {
 /// explaining why the convention pipeline now allocates more.
 ///
 /// **Do not silently bump.** Every increase here is a contract widening.
-const OQ15_BASELINE_MAX_ALLOCS: u64 = 55;
+const OQ15_BASELINE_MAX_ALLOCS: u64 = 35;
 
 #[test]
 fn convert_one_span_total_alloc_budget_within_baseline() {
     let ctx = RequestContext {
-        workspace_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil().into(),
     };
     let converter = OtlpConverter::new();
     let input = nat_simple_workflow_input();
@@ -158,7 +160,7 @@ fn convert_one_span_alloc_count_is_stable_across_calls() {
     // Catches "lazy init" allocations that would only show up on the first
     // call (e.g. lazy_static, OnceCell, interned strings).
     let ctx = RequestContext {
-        workspace_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil().into(),
     };
     let converter = OtlpConverter::new();
     let input = nat_simple_workflow_input();

@@ -8,7 +8,7 @@ pub mod telemetry;
 
 pub use audit_log::{AuditLogFilters, AuditLogPage, AuditLogRepository};
 pub use file_list::FileListRepository;
-pub use settings::SettingsRepository;
+pub use settings::{CachedSettingsRepository, SettingsRepository};
 pub use storage_usage::{StorageUsageDailySnapshot, StorageUsageDelta, StorageUsageRepository};
 pub use telemetry::{AnalyticsReader, TelemetryReader, TelemetryWriter};
 
