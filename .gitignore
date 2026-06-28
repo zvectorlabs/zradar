@@ -21,7 +21,6 @@ config.toml.backup
 *.log
 
 # Generated files
-Cargo.lock
 
 # Data directories (preserve structure but ignore contents)
 data/trace-batches/*
