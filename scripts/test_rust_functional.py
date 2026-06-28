@@ -52,7 +52,7 @@ class TestRunner:
 
     def pg_healthy(self):
         try:
-            res = subprocess.run([self.ctr, "exec", self.pg_name, "pg_isready", "-U", "zradar_test", "-q"],
+            res = subprocess.run([self.ctr, "exec", self.pg_name, "psql", "-U", "zradar_test", "-d", "zradar_test", "-c", "SELECT 1;"],
                                  capture_output=True)
             return res.returncode == 0
         except Exception:
