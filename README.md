@@ -26,8 +26,7 @@ Traditional APM tools aren't built for non-deterministic LLM chains. Zradar focu
 The fastest way to try zradar is via Docker. Run the server and expose the ingestion (OTLP) and query APIs:
 
 ```bash
-docker build -t zradar .
-docker run -d -p 4317:4317 -p 8081:8081 --name zradar zradar
+docker run -d -p 4317:4317 -p 8081:8081 --name zradar ghcr.io/zvectorlabs/zradar:latest
 ```
 
 - **OTLP gRPC Ingestion:** `localhost:4317` (Send your traces, metrics, and logs here)
