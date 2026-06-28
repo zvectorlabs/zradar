@@ -257,15 +257,38 @@ class TestRunner:
         test_env["TEST_GRPC_URL"] = self.test_grpc_url
         test_env["TEST_API_KEY"] = "zk_test_default"
 
-        cargo_test_args = ["cargo", "test", "--package", "zradar-functional-tests", "--test", "functional_tests"]
-        
-        if self.args.list:
-            cargo_test_args.extend(["--", "--include-ignored", "--list"])
-        elif self.args.filter:
-            cargo_test_args.extend([self.args.filter, "--", "--include-ignored", "--nocapture", "--test-threads=1"])
+        threads = os.environ.get("FUNCTIONAL_TEST_THREADS", "4")
+
+        if shutil.which("cargo-nextest"):
+            # nextest: the `ci` profile (see .config/nextest.toml) retries
+            # load-dependent flakes and reports all failures in one pass;
+            # --run-ignored all picks up the #[ignore] functional tests.
+            base = [
+                "cargo", "nextest", "run",
+                "--package", "zradar-functional-tests",
+                "--test", "functional_tests",
+                "--profile", "ci", "--run-ignored", "all",
+            ]
+            if self.args.list:
+                cargo_test_args = [
+                    "cargo", "nextest", "list",
+                    "--package", "zradar-functional-tests",
+                    "--test", "functional_tests", "--run-ignored", "all",
+                ]
+            elif self.args.filter:
+                # --no-capture streams output and runs serially (one test).
+                cargo_test_args = base + [self.args.filter, "--no-capture"]
+            else:
+                cargo_test_args = base + ["--test-threads", threads]
         else:
-            threads = os.environ.get("FUNCTIONAL_TEST_THREADS", "4")
-            cargo_test_args.extend(["--", "--include-ignored", "--nocapture", f"--test-threads={threads}"])
+            # Fallback: stock cargo test when cargo-nextest is not installed.
+            cargo_test_args = ["cargo", "test", "--package", "zradar-functional-tests", "--test", "functional_tests"]
+            if self.args.list:
+                cargo_test_args.extend(["--", "--include-ignored", "--list"])
+            elif self.args.filter:
+                cargo_test_args.extend([self.args.filter, "--", "--include-ignored", "--nocapture", "--test-threads=1"])
+            else:
+                cargo_test_args.extend(["--", "--include-ignored", "--nocapture", f"--test-threads={threads}"])
 
         # Run test process
         try:
