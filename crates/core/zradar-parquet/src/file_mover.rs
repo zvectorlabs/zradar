@@ -229,7 +229,7 @@ mod tests {
 
     use super::*;
     use std::sync::Mutex;
-    
+
     use zradar_models::{FileListEntry, NewFileListEntry, StreamStats, StreamStatsUpdate};
 
     struct MockBlockStorage {

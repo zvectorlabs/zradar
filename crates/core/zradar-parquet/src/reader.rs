@@ -307,7 +307,7 @@ mod tests {
 
     use super::*;
     use std::sync::Arc;
-    
+
     use zradar_models::{
         FileListEntry, FileListFilter, NewFileListEntry, StreamStats, StreamStatsUpdate,
     };
