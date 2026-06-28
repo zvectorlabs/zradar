@@ -1,5 +1,5 @@
 # Rust
-/target/
+target/
 /target-just/
 **/*.rs.bk
 *.pdb
@@ -38,3 +38,4 @@ data-test/
 
 .lenv
 target-just/
+zradar-plans/
