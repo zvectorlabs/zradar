@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_VERSION: "1.93.0"
+  CARGO_TERM_COLOR: always
+  # Fast builds: mold linker + sccache. Set at the env level so both direct
+  # cargo steps and `just` recipes use them (the justfile honors existing
+  # RUSTFLAGS / RUSTC_WRAPPER). mold is installed below before any build.
+  RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Install just + nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --exclude zradar-functional-tests --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude zradar-functional-tests
+
+      # The script starts its own Postgres container via Docker (preinstalled on
+      # ubuntu runners) and runs the suite under nextest (ci profile = retries).
+      - name: Functional tests
+        run: just functional-tests

@@ -1,0 +1,26 @@
+# cargo-nextest configuration.
+#
+# Install:  cargo install cargo-nextest --locked   (or: cargo binstall cargo-nextest)
+# Run:      cargo nextest run            (unit tests, via `just test`)
+#           cargo nextest run --profile ci --run-ignored all   (functional, in CI)
+#
+# nextest runs each test in its own process across a parallel pool, which is
+# faster than `cargo test` for the multi-crate workspace, and adds retries +
+# slow-test timeouts that `cargo test` lacks.
+
+[profile.default]
+# Local: fail fast, no retries — a failing unit test is a real bug.
+retries = 0
+# Flag tests that run unusually long (helps catch accidental sleeps/hangs).
+slow-timeout = { period = "30s", terminate-after = 4 }
+# Show output for failures only.
+failure-output = "immediate-final"
+
+# CI / functional profile: the functional suite shares one server + WAL flusher,
+# so a few tests are load-dependent. Retry them instead of failing the run, and
+# keep going so every failure surfaces in one pass.
+[profile.ci]
+retries = 2
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 3 }
+failure-output = "immediate-final"

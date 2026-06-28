@@ -7,6 +7,15 @@ set windows-shell := ["powershell.exe", "-c"]
 # If CARGO_TARGET_DIR is set in the shell environment, use it. Otherwise, default to "target".
 export CARGO_TARGET_DIR := env("CARGO_TARGET_DIR", "target")
 
+# Opt-in fast builds: `ZRADAR_FAST_BUILD=1 just <recipe>` links with mold and
+# caches compiles with sccache (Linux/macOS; both must be installed). Off by
+# default so default builds need no extra tooling, and any RUSTFLAGS /
+# RUSTC_WRAPPER you already set is honored. Compile/link dominates build time,
+# so this is the real speedup for the whole `just test`/`check`/`build` cycle.
+fast_build := env("ZRADAR_FAST_BUILD", "")
+export RUSTFLAGS := env("RUSTFLAGS", if fast_build == "" { "" } else { "-C link-arg=-fuse-ld=mold" })
+export RUSTC_WRAPPER := env("RUSTC_WRAPPER", if fast_build == "" { "" } else { "sccache" })
+
 # Show available recipes by default
 default:
     @just --list
