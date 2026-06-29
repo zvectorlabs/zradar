@@ -59,25 +59,24 @@ def simulate_llm_call(tracer):
     
     with tracer.start_as_current_span("llm.completion") as span:
         # Standard OTLP attributes
-        span.set_attribute("llm.vendor", "openai")
-        span.set_attribute("llm.model", "gpt-4")
-        span.set_attribute("llm.temperature", 0.7)
-        span.set_attribute("llm.max_tokens", 1000)
+        span.set_attribute("gen_ai.system", "openai")
+        span.set_attribute("gen_ai.request.model", "gpt-4")
+        span.set_attribute("gen_ai.request.temperature", 0.7)
+        span.set_attribute("gen_ai.request.max_tokens", 1000)
         
         # Custom LLM-specific attributes
-        span.set_attribute("llm.prompt.tokens", 45)
-        span.set_attribute("llm.completion.tokens", 123)
-        span.set_attribute("llm.total.tokens", 168)
+        span.set_attribute("gen_ai.usage.input_tokens", 45)
+        span.set_attribute("gen_ai.usage.output_tokens", 123)
+        span.set_attribute("gen_ai.usage.total_tokens", 168)
         
         # Cost tracking
-        span.set_attribute("llm.cost.input", 0.0014)  # $0.0014
-        span.set_attribute("llm.cost.output", 0.0037)  # $0.0037
-        span.set_attribute("llm.cost.total", 0.0051)
+        span.set_attribute("llm.cost.prompt_usd", 0.0014)  # $0.0014
+        span.set_attribute("llm.cost.completion_usd", 0.0037)  # $0.0037
+        span.set_attribute("llm.cost.total_usd", 0.0051)
         
         # Request/response metadata
-        span.set_attribute("llm.request.id", "req_123abc")
-        span.set_attribute("llm.response.id", "resp_456def")
-        span.set_attribute("llm.finish_reason", "stop")
+        span.set_attribute("gen_ai.response.id", "resp_456def")
+        span.set_attribute("gen_ai.response.finish_reasons", "stop")
         
         # Simulate processing time
         time.sleep(0.5)
@@ -101,11 +100,11 @@ def simulate_embedding_call(tracer):
     """Simulate an embedding generation call"""
     
     with tracer.start_as_current_span("llm.embedding") as span:
-        span.set_attribute("llm.vendor", "openai")
-        span.set_attribute("llm.model", "text-embedding-ada-002")
+        span.set_attribute("gen_ai.system", "openai")
+        span.set_attribute("gen_ai.request.model", "text-embedding-ada-002")
         span.set_attribute("embedding.dimensions", 1536)
         span.set_attribute("embedding.input.tokens", 20)
-        span.set_attribute("llm.cost.total", 0.0002)
+        span.set_attribute("llm.cost.total_usd", 0.0002)
         
         time.sleep(0.2)
         print("✅ Simulated embedding call")
@@ -115,8 +114,8 @@ def simulate_error_scenario(tracer):
     """Simulate an error case with proper instrumentation"""
     
     with tracer.start_as_current_span("llm.completion.failed") as span:
-        span.set_attribute("llm.vendor", "openai")
-        span.set_attribute("llm.model", "gpt-4")
+        span.set_attribute("gen_ai.system", "openai")
+        span.set_attribute("gen_ai.request.model", "gpt-4")
         
         try:
             # Simulate an error
@@ -154,11 +153,11 @@ def simulate_complex_workflow(tracer):
         
         # Step 3: Generate answer
         with tracer.start_as_current_span("step.generate_answer") as answer_span:
-            answer_span.set_attribute("llm.vendor", "openai")
-            answer_span.set_attribute("llm.model", "gpt-4")
+            answer_span.set_attribute("gen_ai.system", "openai")
+            answer_span.set_attribute("gen_ai.request.model", "gpt-4")
             answer_span.set_attribute("context.chunks", 3)
-            answer_span.set_attribute("llm.total.tokens", 500)
-            answer_span.set_attribute("llm.cost.total", 0.015)
+            answer_span.set_attribute("gen_ai.usage.total_tokens", 500)
+            answer_span.set_attribute("llm.cost.total_usd", 0.015)
             time.sleep(0.3)
         
         root_span.set_attribute("workflow.duration_ms", 500)

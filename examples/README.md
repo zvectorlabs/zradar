@@ -92,40 +92,38 @@ zradar supports rich LLM observability. Here are the recommended attributes:
 ### Model Information
 ```javascript
 {
-  'llm.vendor': 'openai',           // LLM provider
-  'llm.model': 'gpt-4',             // Model name
-  'llm.temperature': 0.7,           // Temperature setting
-  'llm.max_tokens': 1000,           // Max tokens
-  'llm.top_p': 0.95,                // Top-p sampling
-  'llm.stream': false,              // Streaming enabled?
+  'gen_ai.system': 'openai',                 // LLM provider
+  'gen_ai.request.model': 'gpt-4',           // Model name
+  'gen_ai.request.temperature': 0.7,         // Temperature setting
+  'gen_ai.request.max_tokens': 1000,         // Max tokens
+  'gen_ai.request.top_p': 0.95,              // Top-p sampling
+  'gen_ai.request.stream': false,            // Streaming enabled?
 }
 ```
 
 ### Token Usage
 ```javascript
 {
-  'llm.prompt.tokens': 50,          // Input tokens
-  'llm.completion.tokens': 150,     // Output tokens
-  'llm.total.tokens': 200,          // Total tokens
+  'gen_ai.usage.input_tokens': 50,           // Input tokens
+  'gen_ai.usage.output_tokens': 150,         // Output tokens
+  'gen_ai.usage.total_tokens': 200,          // Total tokens
 }
 ```
 
 ### Cost Tracking
 ```javascript
 {
-  'llm.cost.input': 0.0015,         // Input cost (USD)
-  'llm.cost.output': 0.0045,        // Output cost (USD)
-  'llm.cost.total': 0.006,          // Total cost (USD)
+  'llm.cost.prompt_usd': 0.0015,             // Input cost (USD)
+  'llm.cost.completion_usd': 0.0045,         // Output cost (USD)
+  'llm.cost.total_usd': 0.006,               // Total cost (USD)
 }
 ```
 
 ### Response Metadata
 ```javascript
 {
-  'llm.request.id': 'req_abc123',   // Request ID
-  'llm.response.id': 'resp_def456', // Response ID
-  'llm.finish_reason': 'stop',      // Why completion finished
-  'llm.stop_reason': 'end_turn',    // Alternative (Anthropic)
+  'gen_ai.response.id': 'resp_def456',       // Response ID
+  'gen_ai.response.finish_reasons': 'stop',  // Why completion finished
 }
 ```
 
