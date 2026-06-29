@@ -38,7 +38,7 @@ fn kv_str(k: &str, v: &str) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::StringValue(v.to_string())),
         }),
-        ..Default::default()
+        key_strindex: 0,
     }
 }
 
@@ -48,7 +48,7 @@ fn kv_int(k: &str, v: i64) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::IntValue(v)),
         }),
-        ..Default::default()
+        key_strindex: 0,
     }
 }
 
@@ -58,7 +58,7 @@ fn kv_bool(k: &str, v: bool) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::BoolValue(v)),
         }),
-        ..Default::default()
+        key_strindex: 0,
     }
 }
 
@@ -69,7 +69,7 @@ fn resource_with_service(name: &str) -> Resource {
             kv_str("deployment.environment", "fixture"),
         ],
         dropped_attributes_count: 0,
-        ..Default::default()
+        entity_refs: vec![],
     }
 }
 
@@ -510,7 +510,7 @@ fn evaluator_score() -> (ExportLogsServiceRequest, serde_json::Value) {
                 value: Some(AnyValue {
                     value: Some(any_value::Value::DoubleValue(0.92)),
                 }),
-                ..Default::default()
+                key_strindex: 0,
             },
         ],
         trace_id,
