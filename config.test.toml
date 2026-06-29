@@ -22,7 +22,7 @@ batch_timeout_seconds = 10
 # PostgreSQL configuration (Control Plane) - Test Database
 # Uses port 9011 mapped from docker-compose.test.yml
 [postgres]
-max_connections = 20
+max_connections = 80
 
 # Admin API configuration - Test port 9015
 [admin_api]

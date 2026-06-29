@@ -263,7 +263,10 @@ class TestRunner:
         test_env["TEST_OTLP_HTTP_URL"] = self.test_otlp_http_url
         test_env["TEST_API_KEY"] = "zk_test_default"
 
-        threads = os.environ.get("FUNCTIONAL_TEST_THREADS", "4")
+        # Scale default threads based on CPU count, capped at 12 to avoid DB pool exhaustion
+        cpu_count = os.cpu_count() or 4
+        default_threads = str(min(12, max(4, cpu_count // 2)))
+        threads = os.environ.get("FUNCTIONAL_TEST_THREADS", default_threads)
 
         if shutil.which("cargo-nextest"):
             # nextest: the `functional` profile (see .config/nextest.toml) retries
