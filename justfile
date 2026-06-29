@@ -452,7 +452,7 @@ check:
 
 # Check licenses, advisories, and dependency sources
 deny:
-    cargo deny check
+    cargo deny check 2>/dev/null
 
 # Lint code (clippy + cargo-deny)
 lint: deny
