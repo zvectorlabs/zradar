@@ -1,31 +1,31 @@
-area: storage:
+storage:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/core/zradar-parquet/**"
           - "crates/plugins/zradar-plugin-s3/**"
           - "crates/core/zradar-retention/**"
 
-area: ingestion:
+ingestion:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/services/api-optel/**"
 
-area: query-api:
+query-api:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/services/api/**"
 
-area: plugin:
+plugin:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/plugins/**"
 
-area: auth:
+auth:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/auth/**"
 
-area: core:
+core:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/core/zradar-models/**"
