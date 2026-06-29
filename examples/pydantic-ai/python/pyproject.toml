@@ -1,0 +1,21 @@
+[project]
+name = "zradar-example-pydantic-ai"
+version = "0.1.0"
+description = "Pydantic-AI agent example with OTel spans exported to zradar"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-ai>=0.0.14",
+    "pydantic>=2.7",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.30"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

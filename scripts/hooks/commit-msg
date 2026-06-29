@@ -1,18 +1,75 @@
 #!/bin/sh
+# commit-msg hook — enforces commit message format
+#
+# Rules (all enforced):
+#   1. Subject must follow Conventional Commits format
+#   2. Subject must be ≤ 70 characters
+#   3. Body lines (if present) must be bullet points starting with "- "
+#   4. Body must have at most 5 bullet points
+#
+# Trailer lines (e.g. "Co-Authored-By: ...") are exempt from bullet checks.
 
 commit_msg_file=$1
-commit_msg=$(cat "$commit_msg_file")
+tmpbody=$(mktemp)
+trap 'rm -f "$tmpbody"' EXIT
 
-# Regex for Conventional Commits
-# type(scope): subject
-# Types: feat, fix, docs, style, refactor, perf, test, chore, build, ci
-regex="^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?: .+$"
+# Strip git comment lines
+msg=$(grep -v "^#" "$commit_msg_file")
 
-if ! echo "$commit_msg" | grep -qE "$regex"; then
-  echo "Error: Commit message does not follow Conventional Commits standard."
-  echo "Format: <type>(<scope>): <subject>"
-  echo "Example: feat(auth): add social login"
+# Subject line (first line)
+subject=$(printf '%s\n' "$msg" | head -1)
+
+# ── 1. Conventional Commits format ───────────────────────────────────────────
+conv_regex="^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?: .+"
+if ! printf '%s' "$subject" | grep -qE "$conv_regex"; then
+  echo ""
+  echo "commit-msg: subject must follow Conventional Commits format"
+  echo "  format : <type>(<scope>): <description>"
+  echo "  types  : feat fix docs style refactor perf test chore build ci"
+  echo "  example: feat(ingest): add MCP span type detection"
+  echo ""
   exit 1
+fi
+
+# ── 2. Subject ≤ 70 characters ───────────────────────────────────────────────
+subject_len=$(printf '%s' "$subject" | wc -m | tr -d ' ')
+if [ "$subject_len" -gt 70 ]; then
+  echo ""
+  echo "commit-msg: subject is ${subject_len} characters (max 70)"
+  echo "  $subject"
+  echo ""
+  exit 1
+fi
+
+# ── 3 & 4. Body: bullet points only, max 5 ───────────────────────────────────
+printf '%s\n' "$msg" | tail -n +3 > "$tmpbody"
+
+if grep -qE '[^[:space:]]' "$tmpbody" 2>/dev/null; then
+  # Find non-blank, non-trailer, non-bullet lines
+  # Trailers: lines matching "Key: value" or "Key-Name: value <...>"
+  bad=$(grep -vE "^[[:space:]]*$|^- |^[A-Za-z][A-Za-z0-9-]*: " "$tmpbody" 2>/dev/null || true)
+  if [ -n "$bad" ]; then
+    echo ""
+    echo "commit-msg: body lines must be bullet points starting with '- '"
+    printf '%s\n' "$bad" | sed 's/^/  /'
+    echo ""
+    echo "  example:"
+    echo "    feat(storage): add S3 multipart upload"
+    echo ""
+    echo "    - adds chunked upload for files > 100 MB"
+    echo "    - respects existing retention policy on bucket"
+    echo ""
+    exit 1
+  fi
+
+  bullet_count=$(grep -cE "^- " "$tmpbody" 2>/dev/null || echo 0)
+  if [ "$bullet_count" -gt 5 ]; then
+    echo ""
+    echo "commit-msg: body has ${bullet_count} bullet points (max 5)"
+    echo "  keep it concise — summarise related points into one bullet"
+    echo ""
+    exit 1
+  fi
 fi
 
 exit 0

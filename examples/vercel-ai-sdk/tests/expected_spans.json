@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "vercel_ai.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "gen_ai.request.model": "string",
+        "agent.tool_calls": "int"
+      }
+    },
+    {
+      "name": "vercel_ai.tool.get_time",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.args": "string"
+      }
+    }
+  ]
+}

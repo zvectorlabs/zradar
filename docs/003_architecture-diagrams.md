@@ -1,6 +1,6 @@
 # zradar Architecture Diagrams
 
-Six diagrams covering component structure, write path, read path, and background jobs.
+Seven diagrams covering component structure, conventions pipeline, write path, read path, and background jobs.
 
 ---
 
@@ -29,7 +29,7 @@ flowchart TD
         PAR["zradar-parquet\nWrite buffer · Parquet I/O · Caching · FileMover"]
         RET["zradar-retention\nQuery enforcement · Cleanup"]
         POL["zradar-policy\nQuota · Usage tracking"]
-        WALC["zradar-wal  (optional)\nDurability"]
+        WALC["zradar-wal  (mandatory)\nfsynced before gRPC OK"]
     end
 
     subgraph PLG["Plugins"]
@@ -60,7 +60,49 @@ flowchart TD
 
 ---
 
-## 2. Write Path Architecture
+## 2. Conventions Pipeline
+
+How OTLP span attributes are mapped to `Span` model fields inside `api-optel`. Each `AttributeConvention` runs in priority order against a zero-copy `AttrView` of the raw OTLP attributes.
+
+```mermaid
+flowchart TD
+    subgraph INPUT["OtlpConverter input"]
+        RAW["Raw OTLP ResourceSpans\n(protobuf attributes)"]
+        AV["AttrView\nzero-copy index over attributes"]
+        RAW --> AV
+    end
+
+    subgraph PIPELINE["default_conventions() — priority order"]
+        direction TB
+        C1["① OpenInferenceConvention"]
+        C2["② GuardrailsConvention\nrail.* / action.*"]
+        C3["③ AgentConvention\nagent.* / user_id / session_id"]
+        C4["④ VertexConvention\ngcp.vertex.agent.*"]
+        C5["⑤ LlmConvention\nllm.* (model, usage, cost)"]
+        C6["⑥ GenAiV1_29Convention\ngen_ai.usage.* / gen_ai.response.*"]
+        C7["⑦ NatConvention"]
+        C8["⑧ AiqConvention"]
+        C9["⑨ PromptConvention\nprompt.*"]
+        C10["⑩ SamplingParamsConvention"]
+        C11["⑪ ToolConvention\ntool.*"]
+        C12["⑫ ResourceConvention"]
+        C13["⑬ GenAiLegacyConvention\nlegacy gen_ai.*"]
+        C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
+    end
+
+    subgraph OUTPUT["Result"]
+        SPAN["Span struct\nknown fields populated\nunknown attrs → catch-all JSON column"]
+    end
+
+    AV -->|"borrowed &AttrView"| C1
+    C13 --> SPAN
+```
+
+To add a new convention (e.g. MCP): create `conventions/mcp.rs`, implement `AttributeConvention`, register in `default_conventions()` at the appropriate position.
+
+---
+
+## 3. Write Path Architecture
 
 Data flow from OTLP ingestion through the guard chain, write buffer, and on to durable storage.
 
@@ -117,7 +159,7 @@ flowchart TD
     OT --> G1
     G5 --> TW
 
-    TW -->|"always (WAL mandatory)"| WT
+    TW -->|"always — WAL is the only write path"| WT
     WF -.->|"write_buffer = true"| WB
 
     FW --> PFW

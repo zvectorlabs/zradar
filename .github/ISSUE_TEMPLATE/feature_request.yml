@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a feature request, check the [open issues](https://github.com/zvectorlabs/zradar/issues) and [discussions](https://github.com/zvectorlabs/zradar/discussions) to see if it has been raised already.
+        For large changes that affect the API, data model, or plugin interface, consider opening an [RFC](https://github.com/zvectorlabs/zradar/issues/new?template=rfc.yml) instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the gap or pain point. What are you trying to do that you can't do today?
+      placeholder: When debugging a long agent run (2000+ spans), I have no way to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like to see. Rough sketches or pseudocode are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: What workarounds have you tried? Why don't they fully solve the problem?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of zradar does this touch?
+      options:
+        - Ingestion (OTLP gRPC)
+        - Query / Analytics API
+        - Storage (Parquet / S3)
+        - Retention policies
+        - Plugin system
+        - SDK / instrumentation examples
+        - Docker / deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a PR for this

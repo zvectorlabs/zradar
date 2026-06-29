@@ -21,6 +21,155 @@ default:
     @just --list
 
 # =============================================================================
+# BOOTSTRAP (first-time setup)
+# =============================================================================
+
+# Install all required tools and git hooks — run once after cloning
+bootstrap:
+    #!/usr/bin/env python3
+    import subprocess, shutil
+
+    def run(cmd):
+        subprocess.run(cmd, check=True)
+
+    def check(cmd):
+        return shutil.which(cmd) is not None
+
+    print("==> Installing cargo tools")
+    tools = [
+        ("cargo-nextest", ["cargo", "install", "cargo-nextest", "--locked"]),
+        ("sqlx",          ["cargo", "install", "sqlx-cli", "--no-default-features", "--features", "postgres", "--locked"]),
+        ("cargo-deny",    ["cargo", "install", "cargo-deny", "--locked"]),
+    ]
+    for binary, install_cmd in tools:
+        if check(binary):
+            print(f"  ✓ {binary} already installed")
+        else:
+            print(f"  → installing {binary}...")
+            run(install_cmd)
+            print(f"  ✓ {binary} installed")
+
+    print("==> Installing git hooks")
+    run(["just", "hook"])
+
+    print()
+    print("✓ Bootstrap complete. Run 'just doctor' to verify, then 'just dev' to start.")
+
+# Check environment and auto-fix anything installable via cargo
+doctor:
+    #!/usr/bin/env python3
+    import subprocess, sys, shutil, os
+
+    REQUIRED_RUST = (1, 93, 0)
+    ok = True
+
+    def which(cmd):
+        return shutil.which(cmd) is not None
+
+    def run(cmd):
+        subprocess.run(cmd, check=True)
+
+    def ver(cmd):
+        try:
+            return subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT).strip().split("\n")[0]
+        except Exception:
+            return "?"
+
+    # ── Rust toolchain ────────────────────────────────────────────────────────
+    print("==> Rust toolchain")
+    try:
+        out = subprocess.check_output(["rustc", "--version"], text=True).strip()
+        parts = out.split()[1].split(".")
+        version = tuple(int(x.split("-")[0]) for x in parts[:3])
+        if version < REQUIRED_RUST:
+            print(f"  ✗ {out} — need >= {'.'.join(str(x) for x in REQUIRED_RUST)}")
+            print("    Fix: rustup override set 1.93.0")
+            ok = False
+        else:
+            print(f"  ✓ {out}")
+    except FileNotFoundError:
+        print("  ✗ rustc not found")
+        print("    Fix: curl https://sh.rustup.rs -sSf | sh")
+        ok = False
+
+    # ── Cargo tools (auto-install if missing) ─────────────────────────────────
+    print("==> Cargo tools")
+    cargo_tools = [
+        ("cargo-nextest", ["cargo", "install", "cargo-nextest", "--locked"]),
+        ("sqlx",          ["cargo", "install", "sqlx-cli", "--no-default-features", "--features", "postgres", "--locked"]),
+        ("cargo-deny",    ["cargo", "install", "cargo-deny", "--locked"]),
+    ]
+    for binary, install_cmd in cargo_tools:
+        if which(binary):
+            print(f"  ✓ {binary} ({ver([binary, '--version'])})")
+        else:
+            print(f"  ○ {binary} not found — installing...")
+            try:
+                run(install_cmd)
+                print(f"  ✓ {binary} installed")
+            except subprocess.CalledProcessError:
+                print(f"  ✗ {binary} install failed — check cargo output above")
+                ok = False
+
+    # ── System tools (must be installed by user) ──────────────────────────────
+    print("==> System tools")
+    system_tools = {
+        "docker":  {
+            "linux": "sudo apt install docker.io  OR  https://docs.docker.com/engine/install/",
+            "darwin": "brew install --cask docker  OR  https://docs.docker.com/desktop/mac/",
+        },
+        "python3": {
+            "linux": "sudo apt install python3",
+            "darwin": "brew install python3",
+        },
+    }
+    import platform
+    plat = "darwin" if platform.system() == "Darwin" else "linux"
+    for binary, instructions in system_tools.items():
+        if which(binary):
+            print(f"  ✓ {binary} ({ver([binary, '--version'])})")
+        else:
+            print(f"  ✗ {binary} not found")
+            print(f"    Install: {instructions[plat]}")
+            ok = False
+
+    # ── Optional fast-build tools ─────────────────────────────────────────────
+    print("==> Optional fast-build tools")
+    for tool in ["mold", "sccache"]:
+        if which(tool):
+            print(f"  ✓ {tool} — activate with ZRADAR_FAST_BUILD=1")
+        else:
+            print(f"  ○ {tool} not installed (optional)")
+            print(f"    Install: sudo apt install {tool}  OR  brew install {tool}")
+
+    # ── Git hooks ─────────────────────────────────────────────────────────────
+    print("==> Git hooks")
+    try:
+        git_common = subprocess.check_output(
+            ["git", "rev-parse", "--git-common-dir"], text=True
+        ).strip()
+    except Exception:
+        git_common = ".git"
+    hooks_installed = all(
+        os.path.exists(os.path.join(git_common, "hooks", h)) and
+        os.access(os.path.join(git_common, "hooks", h), os.X_OK)
+        for h in ["pre-commit", "commit-msg"]
+    )
+    if hooks_installed:
+        print("  ✓ pre-commit and commit-msg hooks installed")
+    else:
+        print("  ○ hooks not installed — running: just hook")
+        run(["just", "hook"])
+        print("  ✓ hooks installed")
+
+    print()
+    if ok:
+        print("✓ All checks passed.")
+    else:
+        print("✗ Some checks failed — see above for fix instructions.")
+        sys.exit(1)
+
+# =============================================================================
 # DEVELOPMENT (Default Mode)
 # =============================================================================
 
@@ -238,12 +387,17 @@ sqlx-prepare:
 # Install/Update git hooks
 hook:
     #!/usr/bin/env python3
-    import os, shutil, filecmp, stat
+    import os, shutil, filecmp, stat, subprocess
     print("🪝 Checking git hooks...")
-    os.makedirs(".git/hooks", exist_ok=True)
+    # Use --git-common-dir so this works in both normal clones and git worktrees
+    git_common = subprocess.check_output(
+        ["git", "rev-parse", "--git-common-dir"], text=True
+    ).strip()
+    hooks_dir = os.path.join(git_common, "hooks")
+    os.makedirs(hooks_dir, exist_ok=True)
     for hook in ["pre-commit", "commit-msg"]:
         src = f"scripts/hooks/{hook}"
-        dst = f".git/hooks/{hook}"
+        dst = os.path.join(hooks_dir, hook)
         if not os.path.exists(src):
             continue
         if not os.path.exists(dst) or not filecmp.cmp(src, dst, shallow=False):
@@ -303,6 +457,77 @@ lint:
 fix:
     cargo fix --allow-dirty --allow-staged
     cargo clippy --fix --allow-dirty --allow-staged
+
+# =============================================================================
+# EXAMPLES — agent framework E2E tests (requires: just dev running)
+# =============================================================================
+
+# Run a single framework example against the running dev stack
+# Convention: examples/<provider>/<language>/example.py|ts
+# Usage: just example langchain
+example framework:
+    #!/usr/bin/env python3
+    import subprocess, sys, os
+    fw = "{{framework}}"
+    base = f"examples/{fw}"
+
+    # All examples follow <provider>/<language>/example.* convention
+    py_path = f"{base}/python/example.py"
+    ts_path = f"{base}/typescript/example.ts"
+
+    if os.path.exists(py_path):
+        print(f"==> Running {fw} Python example")
+        subprocess.run(["uv", "run", "example.py"],
+                       cwd=f"{base}/python", check=True,
+                       env={**os.environ, "ZRADAR_API_KEY": os.environ.get("ZRADAR_API_KEY", "zk_dev_example")})
+    elif os.path.exists(ts_path):
+        ts_dir = f"{base}/typescript"
+        print(f"==> Running {fw} TypeScript example")
+        subprocess.run(["pnpm", "install", "--silent"], cwd=ts_dir, check=True)
+        subprocess.run(["pnpm", "start"], cwd=ts_dir, check=True,
+                       env={**os.environ, "ZRADAR_API_KEY": os.environ.get("ZRADAR_API_KEY", "zk_dev_example")})
+    else:
+        print(f"✗ No python/example.py or typescript/example.ts found for: {fw}")
+        sys.exit(1)
+
+# Run a framework example and validate spans arrived in zradar
+# Requires: just dev running
+# Usage: just example-test langchain
+example-test framework:
+    just example {{framework}}
+    python3 scripts/validate_spans.py --framework {{framework}}
+
+# Run all framework examples and validate spans
+# Requires: just dev running
+example-test-all:
+    #!/usr/bin/env python3
+    import subprocess, sys
+    frameworks = [
+        "langchain", "openai-agents", "openai", "pydantic-ai",
+        "crewai", "llamaindex", "anthropic", "google-adk",
+        "vercel-ai-sdk", "mastra",
+    ]  # all follow <provider>/<language>/example.* convention
+    failed = []
+    for fw in frameworks:
+        print(f"\n{'='*60}")
+        print(f"Testing: {fw}")
+        print('='*60)
+        r = subprocess.run(["just", "example-test", fw])
+        if r.returncode != 0:
+            failed.append(fw)
+    if failed:
+        print(f"\n✗ Failed: {', '.join(failed)}")
+        sys.exit(1)
+    print("\n✓ All framework examples passed.")
+
+# Regenerate expected_spans.json snapshot for a framework (run after intentional format changes)
+# Usage: just example-update-snapshot langchain
+example-update-snapshot framework:
+    python3 scripts/validate_spans.py --framework {{framework}} --update-snapshot
+
+# Check all example SDK dependencies for available updates on PyPI/npm
+sdk-check:
+    python3 scripts/check_sdk_versions.py
 
 # Helper to ensure SQLx cache exists
 [private]

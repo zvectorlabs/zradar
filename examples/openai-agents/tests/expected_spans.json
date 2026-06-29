@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "openai_agents.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "agent.name": "string"
+      }
+    },
+    {
+      "name": "openai_agents.tool.check_stock",
+      "required_attributes": {
+        "tool.name": "string"
+      }
+    }
+  ]
+}

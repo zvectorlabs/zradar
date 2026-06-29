@@ -1,0 +1,19 @@
+[project]
+name = "zradar-example-crewai"
+version = "0.1.0"
+description = "CrewAI multi-agent example with OTel spans exported to zradar"
+requires-python = ">=3.11"
+dependencies = [
+    "crewai>=0.80",
+    "langchain-community>=0.3",
+    "langchain-openai>=0.2",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

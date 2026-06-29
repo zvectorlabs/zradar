@@ -35,6 +35,7 @@ members = [
 version = "0.8.1"
 edition = "2024"
 rust-version = "1.93.0"
+license = "Apache-2.0"
 
 # Shared workspace dependencies
 [workspace.dependencies]

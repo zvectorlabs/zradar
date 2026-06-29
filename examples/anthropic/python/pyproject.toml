@@ -1,0 +1,18 @@
+[project]
+name = "zradar-example-anthropic"
+version = "0.1.0"
+description = "Anthropic Claude SDK agent example with zradar OTel tracing"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+    "grpcio>=1.60",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
