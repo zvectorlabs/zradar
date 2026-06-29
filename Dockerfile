@@ -16,6 +16,7 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY proto ./proto
 
 RUN sed -i '/"test_functional",/d' Cargo.toml
 
