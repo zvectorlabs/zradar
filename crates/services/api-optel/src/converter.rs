@@ -515,9 +515,11 @@ mod tests {
                     value: Some(AnyValue {
                         value: Some(Value::StringValue(v.to_string())),
                     }),
+                    ..Default::default()
                 })
                 .collect(),
             dropped_attributes_count: 0,
+            ..Default::default()
         }
     }
 
@@ -570,8 +572,10 @@ mod tests {
                 value: Some(AnyValue {
                     value: Some(Value::IntValue(42)),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
         assert_eq!(
             extract_resource_string(Some(&r), "deployment.environment"),

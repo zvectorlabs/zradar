@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 /// HTTP client for API testing with API key authentication.
+#[derive(Clone)]
 pub struct ApiClient {
     client: Client,
     base_url: String,

@@ -41,6 +41,9 @@ class TestRunner:
         self.test_database_url = f"postgresql://zradar_test:test_pass_123@localhost:{self.pg_port}/zradar_test"
         self.test_api_url = "http://localhost:9015"
         self.test_grpc_url = "http://localhost:9016"
+        self.test_query_grpc_url = "http://localhost:9017"
+        self.test_admin_grpc_url = "http://localhost:9018"
+        self.test_otlp_http_url = "http://localhost:9019"
         
         self.cargo_target_dir = os.path.abspath(os.environ.get("CARGO_TARGET_DIR", "target"))
         binary_ext = ".exe" if os.name == 'nt' else ""
@@ -209,7 +212,7 @@ class TestRunner:
         server_env["DATABASE_URL"] = self.test_database_url
         server_env["QUERY_API_PORT"] = "9015"
         server_env["ZVRADAR_TEST_MODE"] = "1"
-        server_env["RUST_LOG"] = "info,zradar=debug"
+        server_env["RUST_LOG"] = "warn"
         
         try:
             # Inherit stdout/stderr to prevent the OS pipe buffer from filling up and hanging the process
@@ -255,19 +258,24 @@ class TestRunner:
         test_env["TEST_DATABASE_URL"] = self.test_database_url
         test_env["TEST_API_URL"] = self.test_api_url
         test_env["TEST_GRPC_URL"] = self.test_grpc_url
+        test_env["TEST_QUERY_GRPC_URL"] = self.test_query_grpc_url
+        test_env["TEST_ADMIN_GRPC_URL"] = self.test_admin_grpc_url
+        test_env["TEST_OTLP_HTTP_URL"] = self.test_otlp_http_url
         test_env["TEST_API_KEY"] = "zk_test_default"
 
         threads = os.environ.get("FUNCTIONAL_TEST_THREADS", "4")
 
         if shutil.which("cargo-nextest"):
-            # nextest: the `ci` profile (see .config/nextest.toml) retries
-            # load-dependent flakes and reports all failures in one pass;
-            # --run-ignored all picks up the #[ignore] functional tests.
+            # nextest: the `functional` profile (see .config/nextest.toml) retries
+            # load-dependent flakes, allows longer dual-transport tests, and
+            # reports all failures in one pass; --run-ignored all picks up the
+            # #[ignore] functional tests.
+            profile = os.environ.get("FUNCTIONAL_NEXTEST_PROFILE", "functional")
             base = [
                 "cargo", "nextest", "run",
                 "--package", "zradar-functional-tests",
                 "--test", "functional_tests",
-                "--profile", "ci", "--run-ignored", "all",
+                "--profile", profile, "--run-ignored", "all",
             ]
             if self.args.list:
                 cargo_test_args = [

@@ -20,6 +20,9 @@ pub mod policy;
 /// HTTP layer
 pub mod http;
 
+/// gRPC transport layer
+pub mod grpc;
+
 /// Error types
 pub mod errors;
 

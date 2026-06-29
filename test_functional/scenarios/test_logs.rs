@@ -11,11 +11,7 @@ use crate::*;
 // ============================================================================
 
 /// Ingest a log entry and verify it can be retrieved via REST
-#[tokio::test]
-#[ignore]
-async fn test_log_ingestion_and_retrieval() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_log_ingestion_and_retrieval_body(env: TestEnv) -> Result<()> {
     // severity_number 9 = INFO
     let request = env
         .otlp
@@ -37,12 +33,13 @@ async fn test_log_ingestion_and_retrieval() -> Result<()> {
     Ok(())
 }
 
-/// Severity number is correctly mapped to severity text
-#[tokio::test]
-#[ignore]
-async fn test_log_severity_mapping() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_log_ingestion_and_retrieval,
+    test_log_ingestion_and_retrieval_body
+);
 
+/// Severity number is correctly mapped to severity text
+async fn test_log_severity_mapping_body(env: TestEnv) -> Result<()> {
     let cases: &[(&str, i32)] = &[("DEBUG", 5), ("INFO", 9), ("WARN", 13), ("ERROR", 17)];
 
     for (expected_severity, severity_number) in cases {
@@ -78,12 +75,10 @@ async fn test_log_severity_mapping() -> Result<()> {
     Ok(())
 }
 
-/// Filter logs by severity returns only matching entries
-#[tokio::test]
-#[ignore]
-async fn test_log_severity_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_log_severity_mapping, test_log_severity_mapping_body);
 
+/// Filter logs by severity returns only matching entries
+async fn test_log_severity_filter_body(env: TestEnv) -> Result<()> {
     // INFO = 9, ERROR = 17
     env.otlp
         .export_logs(env.otlp.build_log_request("filter-svc", 9, "info message"))
@@ -112,12 +107,10 @@ async fn test_log_severity_filter() -> Result<()> {
     Ok(())
 }
 
-/// Filter logs by service_name
-#[tokio::test]
-#[ignore]
-async fn test_log_service_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_log_severity_filter, test_log_severity_filter_body);
 
+/// Filter logs by service_name
+async fn test_log_service_name_filter_body(env: TestEnv) -> Result<()> {
     env.otlp
         .export_logs(env.otlp.build_log_request("svc-alpha", 9, "from alpha"))
         .await?;
@@ -140,12 +133,13 @@ async fn test_log_service_name_filter() -> Result<()> {
     Ok(())
 }
 
-/// Logs with trace_id are linked: filtering by trace_id returns only those logs
-#[tokio::test]
-#[ignore]
-async fn test_log_trace_id_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_log_service_name_filter,
+    test_log_service_name_filter_body
+);
 
+/// Logs with trace_id are linked: filtering by trace_id returns only those logs
+async fn test_log_trace_id_filter_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -182,12 +176,10 @@ async fn test_log_trace_id_filter() -> Result<()> {
     Ok(())
 }
 
-/// Full-text search via search_text filter
-#[tokio::test]
-#[ignore]
-async fn test_log_search_text_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_log_trace_id_filter, test_log_trace_id_filter_body);
 
+/// Full-text search via search_text filter
+async fn test_log_search_text_filter_body(env: TestEnv) -> Result<()> {
     env.otlp
         .export_logs(
             env.otlp
@@ -218,12 +210,13 @@ async fn test_log_search_text_filter() -> Result<()> {
     Ok(())
 }
 
-/// Retrieve a specific log by its ID
-#[tokio::test]
-#[ignore]
-async fn test_get_log_by_id() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_log_search_text_filter,
+    test_log_search_text_filter_body
+);
 
+/// Retrieve a specific log by its ID
+async fn test_get_log_by_id_body(env: TestEnv) -> Result<()> {
     let request = env
         .otlp
         .build_log_request("id-test-svc", 9, "fetchable log message");
@@ -260,10 +253,10 @@ async fn test_get_log_by_id() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(test_get_log_by_id, test_get_log_by_id_body);
+
 /// Logs from different workspaces are isolated (workspace isolation)
-#[tokio::test]
-#[ignore]
-async fn test_logs_workspace_isolation() -> Result<()> {
+async fn test_logs_workspace_isolation_body(_env: TestEnv) -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
 
@@ -287,6 +280,11 @@ async fn test_logs_workspace_isolation() -> Result<()> {
     println!("✅ Logs workspace isolation verified");
     Ok(())
 }
+
+dual_transport_test!(
+    test_logs_workspace_isolation,
+    test_logs_workspace_isolation_body
+);
 
 // ============================================================================
 // Negative Tests

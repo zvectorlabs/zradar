@@ -7,10 +7,7 @@ use crate::helpers::DbClient;
 #[allow(unused_imports)]
 use crate::*;
 
-#[tokio::test]
-#[ignore]
-async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_parquet_metadata_written_for_all_signals_body(env: TestEnv) -> Result<()> {
     let db = DbClient::from_env().await?;
 
     let trace_id = TestDataGenerator::trace_id();
@@ -106,9 +103,12 @@ async fn test_parquet_metadata_written_for_all_signals() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_all_signal_workspace_isolation() -> Result<()> {
+dual_transport_test!(
+    test_parquet_metadata_written_for_all_signals,
+    test_parquet_metadata_written_for_all_signals_body
+);
+
+async fn test_all_signal_workspace_isolation_body(_env: TestEnv) -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
 
@@ -201,3 +201,8 @@ async fn test_all_signal_workspace_isolation() -> Result<()> {
     println!("✅ All-signal workspace isolation verified");
     Ok(())
 }
+
+dual_transport_test!(
+    test_all_signal_workspace_isolation,
+    test_all_signal_workspace_isolation_body
+);

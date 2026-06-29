@@ -1,13 +1,9 @@
-//! Query API E2E tests
+//! Query API E2E tests (HTTP + gRPC via dual_transport_test!)
 
 #[allow(unused_imports)]
 use crate::*;
 
-#[tokio::test]
-#[ignore]
-async fn test_query_spans_with_filters() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_query_spans_with_filters_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let service_name = TestDataGenerator::service_name();
 
@@ -26,7 +22,6 @@ async fn test_query_spans_with_filters() -> Result<()> {
         .build_multi_span_trace(&service_name, &trace_id, span_defs);
     env.otlp.export_traces(request).await?;
 
-    // Poll until all 3 spans appear
     let trace_id_hex = hex::encode(trace_id);
     let query_path = format!("/api/v1/spans?trace_id={}", trace_id_hex);
     let data = wait_for_items_default(&env.client, &query_path).await?;
@@ -50,7 +45,6 @@ async fn test_query_spans_with_filters() -> Result<()> {
         );
     }
 
-    // Test filtering by operation name (data is already stored, no extra wait needed)
     let filtered_path = format!(
         "/api/v1/spans?trace_id={}&operation_name=db.query",
         trace_id_hex
@@ -73,15 +67,16 @@ async fn test_query_spans_with_filters() -> Result<()> {
         );
     }
 
-    println!("✅ Span query test passed");
+    println!("✅ Span query test passed over {}", env.transport.label());
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_query_traces_with_attribute_filters() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_query_spans_with_filters,
+    test_query_spans_with_filters_body
+);
 
+async fn test_query_traces_with_attribute_filters_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -89,7 +84,6 @@ async fn test_query_traces_with_attribute_filters() -> Result<()> {
         .send_test_trace("test-service", &trace_id, &span_id, "test.operation")
         .await?;
 
-    // Poll until the trace appears in the time-ranged query
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
@@ -114,15 +108,19 @@ async fn test_query_traces_with_attribute_filters() -> Result<()> {
         .expect("Expected 'items' array in response");
     assert!(!items.is_empty(), "Expected at least 1 trace");
 
-    println!("✅ Attribute filter query structure test passed");
+    println!(
+        "✅ Attribute filter query structure test passed over {}",
+        env.transport.label()
+    );
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_error_analytics() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_query_traces_with_attribute_filters,
+    test_query_traces_with_attribute_filters_body
+);
 
+async fn test_error_analytics_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
@@ -131,7 +129,6 @@ async fn test_error_analytics() -> Result<()> {
         .send_test_trace(&service_name, &trace_id, &span_id, "test.operation")
         .await?;
 
-    // Ensure the trace is ingested before querying analytics
     let trace_id_hex = hex::encode(trace_id);
     wait_for_trace_default(&env.client, &trace_id_hex).await?;
 
@@ -181,8 +178,17 @@ async fn test_error_analytics() -> Result<()> {
             "Each error breakdown should include numeric percentage"
         );
     }
-    println!("Found {} error types", breakdowns.len());
+    println!(
+        "Found {} error types over {}",
+        breakdowns.len(),
+        env.transport.label()
+    );
 
-    println!("✅ Error analytics test passed");
+    println!(
+        "✅ Error analytics test passed over {}",
+        env.transport.label()
+    );
     Ok(())
 }
+
+dual_transport_test!(test_error_analytics, test_error_analytics_body);

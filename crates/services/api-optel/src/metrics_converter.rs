@@ -266,6 +266,7 @@ mod tests {
             value: Some(ProtoAnyValue {
                 value: Some(AnyValue::StringValue("my-service".to_string())),
             }),
+            ..Default::default()
         };
         assert_eq!(
             extract_string_attr(&[kv], "service.name"),

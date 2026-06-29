@@ -52,6 +52,7 @@ fn kv_str(k: &str, v: &str) -> KeyValue {
         value: Some(OtlpAnyValue {
             value: Some(AnyValue::StringValue(v.to_string())),
         }),
+        ..Default::default()
     }
 }
 
@@ -117,7 +118,11 @@ async fn ingest(
 /// Note: `/api/v1/spans` items do not expose `workspace_id` on each row, so
 /// we cannot assert workspace ownership here. Isolation is validated by the
 /// cross-workspace empty assertions in `run_axis_isolation`.
-async fn wait_until_visible(client: &ApiClient, url: &str, ctx: &str) -> Result<Vec<Value>> {
+async fn wait_until_visible(
+    client: &TransportApiClient,
+    url: &str,
+    ctx: &str,
+) -> Result<Vec<Value>> {
     wait_for_items_default(client, url)
         .await
         .with_context(|| format!("{ctx}: GET {url} did not return any items"))
@@ -127,7 +132,7 @@ async fn wait_until_visible(client: &ApiClient, url: &str, ctx: &str) -> Result<
 /// the positive `wait_until_visible` calls above already established that
 /// ingest is complete on both workspaces, so any leakage would already be
 /// observable.
-async fn assert_empty_for(client: &ApiClient, url: &str, ctx: &str) -> Result<()> {
+async fn assert_empty_for(client: &TransportApiClient, url: &str, ctx: &str) -> Result<()> {
     let resp = client.get(url).await?;
     let status = resp.status();
     if !status.is_success() {
@@ -158,7 +163,9 @@ async fn assert_empty_for(client: &ApiClient, url: &str, ctx: &str) -> Result<()
 /// axes where the attribute lives in OTLP outside the simple
 /// "workspace-A puts X, workspace-B puts Y" pattern — e.g. `environment` rides on
 /// the Resource, not the Span's attributes.
+#[allow(clippy::too_many_arguments)] // Test helper needs parameters for both test workspaces + dimensions
 async fn run_axis_isolation(
+    transport: Transport,
     axis_filter_param: &str,
     alpha_value: &str,
     bravo_value: &str,
@@ -167,8 +174,8 @@ async fn run_axis_isolation(
     env_a_env: &str,
     env_b_env: &str,
 ) -> Result<()> {
-    let env_a = TestEnv::setup().await?;
-    let env_b = TestEnv::setup().await?;
+    let env_a = TestEnv::setup_with_transport(transport).await?;
+    let env_b = TestEnv::setup_with_transport(transport).await?;
     assert_ne!(
         env_a.workspace_id, env_b.workspace_id,
         "TestEnv must give independent workspace_ids"
@@ -224,10 +231,9 @@ async fn run_axis_isolation(
 // Per-axis isolation tests
 // ===========================================================================
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_rail_type() -> Result<()> {
+async fn test_workspace_isolation_rail_type_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "rail_type",
         "input",
         "output",
@@ -239,10 +245,14 @@ async fn test_workspace_isolation_rail_type() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_action_name() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_rail_type,
+    test_workspace_isolation_rail_type_body
+);
+
+async fn test_workspace_isolation_action_name_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "action_name",
         "summarize_alpha",
         "summarize_bravo",
@@ -254,10 +264,14 @@ async fn test_workspace_isolation_action_name() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_workflow_run_id() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_action_name,
+    test_workspace_isolation_action_name_body
+);
+
+async fn test_workspace_isolation_workflow_run_id_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "workflow_run_id",
         "wf-alpha-iso",
         "wf-bravo-iso",
@@ -269,10 +283,14 @@ async fn test_workspace_isolation_workflow_run_id() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_framework() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_workflow_run_id,
+    test_workspace_isolation_workflow_run_id_body
+);
+
+async fn test_workspace_isolation_framework_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "framework",
         "langchain_alpha",
         "langgraph_bravo",
@@ -284,10 +302,14 @@ async fn test_workspace_isolation_framework() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_tool_name() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_framework,
+    test_workspace_isolation_framework_body
+);
+
+async fn test_workspace_isolation_tool_name_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "tool_name",
         "calculator_alpha",
         "websearch_bravo",
@@ -299,10 +321,14 @@ async fn test_workspace_isolation_tool_name() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_invocation_id() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_tool_name,
+    test_workspace_isolation_tool_name_body
+);
+
+async fn test_workspace_isolation_invocation_id_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "invocation_id",
         "inv-alpha-001",
         "inv-bravo-001",
@@ -314,10 +340,14 @@ async fn test_workspace_isolation_invocation_id() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_llm_response_model() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_invocation_id,
+    test_workspace_isolation_invocation_id_body
+);
+
+async fn test_workspace_isolation_llm_response_model_body(env: TestEnv) -> Result<()> {
     run_axis_isolation(
+        env.transport,
         "llm_response_model",
         "gpt-4-alpha",
         "gpt-4-bravo",
@@ -329,13 +359,17 @@ async fn test_workspace_isolation_llm_response_model() -> Result<()> {
     .await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_environment() -> Result<()> {
+dual_transport_test!(
+    test_workspace_isolation_llm_response_model,
+    test_workspace_isolation_llm_response_model_body
+);
+
+async fn test_workspace_isolation_environment_body(env: TestEnv) -> Result<()> {
     // `environment` is a *resource* attribute (deployment.environment), not a
     // span attribute. The helper already places it on the Resource; the
     // span_attrs vectors stay empty.
     run_axis_isolation(
+        env.transport,
         "environment",
         "prod-alpha",
         "prod-bravo",
@@ -347,6 +381,11 @@ async fn test_workspace_isolation_environment() -> Result<()> {
     .await
 }
 
+dual_transport_test!(
+    test_workspace_isolation_environment,
+    test_workspace_isolation_environment_body
+);
+
 // ===========================================================================
 // Coarse-grained baseline — no filter at all
 // ===========================================================================
@@ -355,9 +394,7 @@ async fn test_workspace_isolation_environment() -> Result<()> {
 /// without any axis filter, workspace A's traces must not appear in workspace B's
 /// `/api/v1/traces` listing. This guards against bugs in the very base workspace
 /// filter — every per-axis assertion above implicitly depends on this.
-#[tokio::test]
-#[ignore]
-async fn test_workspace_isolation_baseline_traces_listing() -> Result<()> {
+async fn test_workspace_isolation_baseline_traces_listing_body(_env: TestEnv) -> Result<()> {
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
     assert_ne!(env_a.workspace_id, env_b.workspace_id);
@@ -401,6 +438,11 @@ async fn test_workspace_isolation_baseline_traces_listing() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_workspace_isolation_baseline_traces_listing,
+    test_workspace_isolation_baseline_traces_listing_body
+);
+
 // ===========================================================================
 // Logs / scores workspace isolation
 // ===========================================================================
@@ -408,9 +450,7 @@ async fn test_workspace_isolation_baseline_traces_listing() -> Result<()> {
 /// Evaluator scores ride through `/api/v1/logs` (an evaluator emits each
 /// score as an OTLP log). Cross-workspace queries must not surface another
 /// workspace's score logs.
-#[tokio::test]
-#[ignore]
-async fn test_score_log_workspace_isolation() -> Result<()> {
+async fn test_score_log_workspace_isolation_body(_env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 
@@ -480,3 +520,8 @@ async fn test_score_log_workspace_isolation() -> Result<()> {
     }
     Ok(())
 }
+
+dual_transport_test!(
+    test_score_log_workspace_isolation,
+    test_score_log_workspace_isolation_body
+);

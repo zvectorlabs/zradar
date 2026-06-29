@@ -76,6 +76,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(Value::StringValue(v.to_string())),
             }),
+            ..Default::default()
         }
     }
 
@@ -85,6 +86,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(Value::IntValue(v)),
             }),
+            ..Default::default()
         }
     }
 
@@ -94,6 +96,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(Value::BoolValue(v)),
             }),
+            ..Default::default()
         }
     }
 

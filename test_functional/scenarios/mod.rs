@@ -1,4 +1,5 @@
 //! Test scenarios organized by feature area
+#![allow(unused_mut)] // dual_transport_test! macro may not use all env parameters in all variants
 
 pub mod test_analytics;
 pub mod test_audit_logging;

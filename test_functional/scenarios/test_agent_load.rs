@@ -27,11 +27,7 @@ type SpanDefRef<'a> = (&'a str, &'a [u8; 8], Option<&'a [u8; 8]>);
 // ============================================================================
 
 /// Test 1: Agent root span with 100 TOOL child spans (high fan-out).
-#[tokio::test]
-#[ignore]
-async fn test_agent_with_100_tool_calls() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_agent_with_100_tool_calls_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let root_span_id = TestDataGenerator::span_id();
 
@@ -153,6 +149,11 @@ async fn test_agent_with_100_tool_calls() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_agent_with_100_tool_calls,
+    test_agent_with_100_tool_calls_body
+);
+
 /// Test 2: Root agent delegates to a sub-agent, each with tool calls.
 ///
 /// ```text
@@ -164,11 +165,7 @@ async fn test_agent_with_100_tool_calls() -> Result<()> {
 ///  │    └── GENERATION "summarize"
 ///  └── GENERATION "final-answer"
 /// ```
-#[tokio::test]
-#[ignore]
-async fn test_agent_delegates_to_sub_agent_with_tools() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_agent_delegates_to_sub_agent_with_tools_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let planner_id = TestDataGenerator::span_id();
     let plan_step_id = TestDataGenerator::span_id();
@@ -379,6 +376,11 @@ async fn test_agent_delegates_to_sub_agent_with_tools() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_agent_delegates_to_sub_agent_with_tools,
+    test_agent_delegates_to_sub_agent_with_tools_body
+);
+
 /// Test 3: Three levels of agent delegation with tool calls.
 ///
 /// ```text
@@ -392,11 +394,7 @@ async fn test_agent_delegates_to_sub_agent_with_tools() -> Result<()> {
 ///  ├── GENERATION "synthesize"
 ///  └── TOOL "send_report"
 /// ```
-#[tokio::test]
-#[ignore]
-async fn test_multi_level_agent_delegation() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_multi_level_agent_delegation_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let coordinator_id = TestDataGenerator::span_id();
     let analyst_id = TestDataGenerator::span_id();
@@ -654,6 +652,11 @@ async fn test_multi_level_agent_delegation() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_multi_level_agent_delegation,
+    test_multi_level_agent_delegation_body
+);
+
 /// Test 4: Agent with tool error and retry.
 ///
 /// ```text
@@ -662,11 +665,7 @@ async fn test_multi_level_agent_delegation() -> Result<()> {
 ///  ├── GENERATION "replan"
 ///  └── TOOL "api_call_retry" (status = OK)
 /// ```
-#[tokio::test]
-#[ignore]
-async fn test_agent_with_tool_error_and_retry() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_agent_with_tool_error_and_retry_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let assistant_id = TestDataGenerator::span_id();
     let api_call_id = TestDataGenerator::span_id();
@@ -791,16 +790,17 @@ async fn test_agent_with_tool_error_and_retry() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_agent_with_tool_error_and_retry,
+    test_agent_with_tool_error_and_retry_body
+);
+
 // ============================================================================
 // Load Tests
 // ============================================================================
 
 /// Test 5: Sequential throughput — 200 single-span traces.
-#[tokio::test]
-#[ignore]
-async fn test_load_sequential_traces() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_load_sequential_traces_body(env: TestEnv) -> Result<()> {
     let service_name = TestDataGenerator::service_name();
     let count = 200;
     let mut last_trace_id = None;
@@ -850,12 +850,13 @@ async fn test_load_sequential_traces() -> Result<()> {
     Ok(())
 }
 
-/// Test 6: Concurrent throughput — 100 traces in parallel.
-#[tokio::test]
-#[ignore]
-async fn test_load_concurrent_traces() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_load_sequential_traces,
+    test_load_sequential_traces_body
+);
 
+/// Test 6: Concurrent throughput — 100 traces in parallel.
+async fn test_load_concurrent_traces_body(env: TestEnv) -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
@@ -919,12 +920,13 @@ async fn test_load_concurrent_traces() -> Result<()> {
     Ok(())
 }
 
-/// Test 7: Concurrent multi-span traces — 20 traces × 10 children each.
-#[tokio::test]
-#[ignore]
-async fn test_load_concurrent_multi_span_traces() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_load_concurrent_traces,
+    test_load_concurrent_traces_body
+);
 
+/// Test 7: Concurrent multi-span traces — 20 traces × 10 children each.
+async fn test_load_concurrent_multi_span_traces_body(env: TestEnv) -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
@@ -1019,12 +1021,13 @@ async fn test_load_concurrent_multi_span_traces() -> Result<()> {
     Ok(())
 }
 
-/// Test 8: Concurrent agent trees — 10 traces × 50 TOOL children with attributes.
-#[tokio::test]
-#[ignore]
-async fn test_load_concurrent_agent_trees() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_load_concurrent_multi_span_traces,
+    test_load_concurrent_multi_span_traces_body
+);
 
+/// Test 8: Concurrent agent trees — 10 traces × 50 TOOL children with attributes.
+async fn test_load_concurrent_agent_trees_body(env: TestEnv) -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let workspace_id = env.workspace_id;
@@ -1140,16 +1143,17 @@ async fn test_load_concurrent_agent_trees() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_load_concurrent_agent_trees,
+    test_load_concurrent_agent_trees_body
+);
+
 // ============================================================================
 // Agent Attribute Filter Tests
 // ============================================================================
 
 /// Test filtering spans by agent_name
-#[tokio::test]
-#[ignore]
-async fn test_filter_spans_by_agent_name() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_filter_spans_by_agent_name_body(env: TestEnv) -> Result<()> {
     // Create traces with different agent names
     let agents = vec![
         ("planner", "gpt-4"),
@@ -1224,12 +1228,13 @@ async fn test_filter_spans_by_agent_name() -> Result<()> {
     Ok(())
 }
 
-/// Test filtering spans by llm_model
-#[tokio::test]
-#[ignore]
-async fn test_filter_spans_by_llm_model() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_filter_spans_by_agent_name,
+    test_filter_spans_by_agent_name_body
+);
 
+/// Test filtering spans by llm_model
+async fn test_filter_spans_by_llm_model_body(env: TestEnv) -> Result<()> {
     // Create traces with different LLM models
     let models = vec!["gpt-4", "claude-3", "llama-2"];
     let mut trace_ids = Vec::new();
@@ -1300,12 +1305,13 @@ async fn test_filter_spans_by_llm_model() -> Result<()> {
     Ok(())
 }
 
-/// Test filtering spans by session_id
-#[tokio::test]
-#[ignore]
-async fn test_filter_spans_by_session_id() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_filter_spans_by_llm_model,
+    test_filter_spans_by_llm_model_body
+);
 
+/// Test filtering spans by session_id
+async fn test_filter_spans_by_session_id_body(env: TestEnv) -> Result<()> {
     // Create traces with different session IDs
     let sessions = vec!["session-123", "session-456", "session-789"];
     let mut trace_ids = Vec::new();
@@ -1376,12 +1382,13 @@ async fn test_filter_spans_by_session_id() -> Result<()> {
     Ok(())
 }
 
-/// Test filtering traces by agent_name (if implemented)
-#[tokio::test]
-#[ignore]
-async fn test_filter_traces_by_agent_name() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_filter_spans_by_session_id,
+    test_filter_spans_by_session_id_body
+);
 
+/// Test filtering traces by agent_name (if implemented)
+async fn test_filter_traces_by_agent_name_body(env: TestEnv) -> Result<()> {
     // Create traces with different agent names
     let agents = vec![
         ("planner", "gpt-4"),
@@ -1433,12 +1440,13 @@ async fn test_filter_traces_by_agent_name() -> Result<()> {
     Ok(())
 }
 
-/// Test filtering traces by llm_model (if implemented)
-#[tokio::test]
-#[ignore]
-async fn test_filter_traces_by_llm_model() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_filter_traces_by_agent_name,
+    test_filter_traces_by_agent_name_body
+);
 
+/// Test filtering traces by llm_model (if implemented)
+async fn test_filter_traces_by_llm_model_body(env: TestEnv) -> Result<()> {
     // Create traces with different LLM models
     let models = vec!["gpt-4", "claude-3", "llama-2"];
     let mut trace_ids = Vec::new();
@@ -1484,12 +1492,13 @@ async fn test_filter_traces_by_llm_model() -> Result<()> {
     Ok(())
 }
 
-/// Test filtering traces by session_id (if implemented)
-#[tokio::test]
-#[ignore]
-async fn test_filter_traces_by_session_id() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_filter_traces_by_llm_model,
+    test_filter_traces_by_llm_model_body
+);
 
+/// Test filtering traces by session_id (if implemented)
+async fn test_filter_traces_by_session_id_body(env: TestEnv) -> Result<()> {
     // Create traces with different session IDs
     let sessions = vec!["session-123", "session-456", "session-789"];
     let mut trace_ids = Vec::new();
@@ -1534,3 +1543,8 @@ async fn test_filter_traces_by_session_id() -> Result<()> {
     println!("✅ Trace session ID filter test passed");
     Ok(())
 }
+
+dual_transport_test!(
+    test_filter_traces_by_session_id,
+    test_filter_traces_by_session_id_body
+);

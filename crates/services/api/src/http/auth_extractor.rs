@@ -1,13 +1,7 @@
 //! Axum extractor that resolves the request authorization and builds `AuthContext`.
 //!
-//! All Admin HTTP auth flows through `Arc<dyn AdminAuthorizer>`, which is injected
-//! as a router extension. The authorizer receives the original request headers and
-//! returns a resolved `AdminAuth` containing tenant/project context and capability keys.
-//!
-//! Standalone builds inject `ApiKeyAdminAuthorizer` (config API keys, no capabilities).
-//! Platform wrapper builds inject a gateway authorizer that reads trusted headers and
-//! resolves capabilities from the gateway context. Both paths flow through the same
-//! `AuthContext` type — no branching in this crate.
+//! Query routes inject `Arc<dyn QueryAuthorizer>`; admin routes inject
+//! `Arc<dyn AdminAuthorizer>`. Both share the same extractor and `AuthContext` type.
 
 use axum::{
     Extension,
@@ -18,11 +12,10 @@ use axum::{
 use std::sync::Arc;
 use uuid::Uuid;
 use zradar_models::RequestContext;
-use zradar_traits::AdminAuthorizer;
+use zradar_traits::{AdminAuthorizer, QueryAuthorizer};
 
 use crate::errors::{ControlError, Result as ApiResult};
 
-// Re-export so `use crate::http::Capability` continues to work in handlers.
 pub use zradar_traits::Capability;
 
 /// Auth mode marker injected as an axum extension by the router.
@@ -183,32 +176,36 @@ where
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Extension(authorizer): Extension<Arc<dyn AdminAuthorizer>> =
-            Extension::from_request_parts(parts, state)
-                .await
-                .map_err(|_| AuthError("AdminAuthorizer not configured".to_string()))?;
-
         let Extension(mode): Extension<AuthMode> = Extension::from_request_parts(parts, state)
             .await
             .map_err(|_| AuthError("Auth mode not configured".to_string()))?;
 
-        // Pass the full original request headers so gateway authorizers can
-        // read x-tenant-id, x-project-id, x-zradar-capabilities etc.
-        let admin_auth = authorizer
-            .authorize(&parts.headers)
-            .await
-            .map_err(|_| AuthError("Invalid credentials".to_string()))?;
+        let resolution = if let Some(query) = parts.extensions.get::<Arc<dyn QueryAuthorizer>>() {
+            query
+                .authorize(&parts.headers)
+                .await
+                .map_err(|_| AuthError("Invalid credentials".to_string()))?
+        } else if let Some(admin) = parts.extensions.get::<Arc<dyn AdminAuthorizer>>() {
+            admin
+                .authorize(&parts.headers)
+                .await
+                .map_err(|_| AuthError("Invalid credentials".to_string()))?
+        } else {
+            return Err(AuthError(
+                "QueryAuthorizer or AdminAuthorizer not configured".to_string(),
+            ));
+        };
 
         // Convert wire capability keys into strongly-typed Capability values.
         // Unknown keys are silently dropped — forward-compatible with new scopes.
-        let capabilities = admin_auth
+        let capabilities = resolution
             .capability_keys
             .iter()
             .filter_map(|key| parse_capability_key(key))
             .collect();
 
         Ok(AuthContext {
-            ctx: admin_auth.context,
+            ctx: resolution.context,
             mode,
             capabilities,
         })

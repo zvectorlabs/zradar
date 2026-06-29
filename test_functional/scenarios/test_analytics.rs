@@ -17,11 +17,7 @@ struct MetricsSummary {
     error_rate: f64,
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_analytics_endpoints() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_analytics_endpoints_body(env: TestEnv) -> Result<()> {
     // Send 3 success traces
     for i in 0..3 {
         let trace_id = TestDataGenerator::trace_id();
@@ -72,7 +68,8 @@ async fn test_analytics_endpoints() -> Result<()> {
             if resp.status() != 200 {
                 return Ok(None);
             }
-            let series: Vec<AnalyticsResult> = resp.json().await?;
+            let json = resp.json().await?;
+            let series: Vec<AnalyticsResult> = serde_json::from_value(json)?;
             let total: f64 = series.iter().map(|p| p.value).sum();
             if total >= 4.0 { Ok(Some(())) } else { Ok(None) }
         },
@@ -84,7 +81,8 @@ async fn test_analytics_endpoints() -> Result<()> {
     // Now fetch and verify final analytics state
     let series_response = env.client.get(&analytics_url).await?;
     assert_eq!(series_response.status(), 200);
-    let series: Vec<AnalyticsResult> = series_response.json().await?;
+    let json = series_response.json().await?;
+    let series: Vec<AnalyticsResult> = serde_json::from_value(json)?;
     assert!(!series.is_empty(), "Should have analytics data");
     let total_count: f64 = series.iter().map(|p| p.value).sum();
     assert_eq!(total_count, 4.0, "Should have 4 total traces");
@@ -92,10 +90,13 @@ async fn test_analytics_endpoints() -> Result<()> {
     // Get metrics summary
     let metrics_response = env.client.get("/api/v1/analytics/metrics?").await?;
     assert_eq!(metrics_response.status(), 200);
-    let metrics: MetricsSummary = metrics_response.json().await?;
+    let json = metrics_response.json().await?;
+    let metrics: MetricsSummary = serde_json::from_value(json)?;
     assert_eq!(metrics.total_traces, 4);
     assert_eq!(metrics.error_rate, 0.25, "Error rate should be 0.25 (25%)");
 
     println!("✅ Analytics endpoints work correctly with data");
     Ok(())
 }
+
+dual_transport_test!(test_analytics_endpoints, test_analytics_endpoints_body);

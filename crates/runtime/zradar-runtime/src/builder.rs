@@ -1,10 +1,8 @@
 //! [`ZradarRuntimeBuilder`] — owns server startup, accepts pluggable auth.
 //!
 //! Call sites:
-//! - OSS `zradar-server/src/main.rs` — builds [`ConfigAuthenticator`] +
-//!   [`ApiKeyAdminAuthorizer`] and passes them in.
-//! - External platform wrapper binaries — supply their own `Authenticator` and
-//!   `AdminAuthorizer` implementations and pass them in without modifying this crate.
+//! - OSS `zradar-server/src/main.rs` — config-key `Authenticator` + query/admin authorizers.
+//! - External platform wrapper binaries — supply their own auth implementations.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +13,23 @@ use tracing::{error, info};
 
 use api::{
     audit::{AuditState, audit_router},
+    grpc::{
+        admin_proto::{
+            audit_service_server::AuditServiceServer, policy_service_server::PolicyServiceServer,
+            retention_service_server::RetentionServiceServer,
+            settings_service_server::SettingsServiceServer,
+        },
+        analytics_handler::AnalyticsHandler,
+        audit_handler::AuditHandler,
+        policy_handler::PolicyHandler,
+        query_handler::QueryHandler,
+        query_proto::{
+            analytics_service_server::AnalyticsServiceServer,
+            query_service_server::QueryServiceServer,
+        },
+        retention_handler::RetentionHandler,
+        settings_handler::SettingsHandler,
+    },
     http::{AuthMode, create_admin_router},
     policy::{PolicyState, policy_router},
     retention::{handlers::RetentionState, retention_router},
@@ -52,16 +67,19 @@ use zradar_retention::{
     CleanupJob, EnforcementStrategy, FileReclaimer, QueryEnforcer, RetentionConfigStore,
     StorageUsageDailyJob, WorkspaceRetentionConfig,
 };
-use zradar_traits::{AdminAuthorizer, Authenticator};
+use zradar_traits::{AdminAuthorizer, Authenticator, QueryAuthorizer};
 
-/// Authentication and admin-context strategies injected by the binary.
+/// Authentication strategies injected by the binary.
 ///
-/// - `otlp` — validates OTLP `Authorization: Bearer <token>`.
-/// - `admin` — validates Admin HTTP requests and resolves tenant/project/capabilities.
+/// - `otlp` — validates OTLP ingest bearer tokens.
+/// - `query` — validates read/query HTTP and gRPC (:8081) requests.
+/// - `admin` — validates admin HTTP and gRPC (:8082) requests.
 pub struct RuntimeAuth {
     /// OTLP authenticator. `None` = open ingest (no key required).
     pub otlp: Option<Arc<dyn Authenticator>>,
-    /// Admin HTTP authorizer.
+    /// Query/read-path authorizer (HTTP query routes, gRPC :8081).
+    pub query: Arc<dyn QueryAuthorizer>,
+    /// Admin/mutation-path authorizer (HTTP admin routes, gRPC :8082).
     pub admin: Arc<dyn AdminAuthorizer>,
 }
 
@@ -232,6 +250,7 @@ impl ZradarRuntimeBuilder {
         let policy_overrides = self.policy_overrides;
         let RuntimeAuth {
             otlp: otlp_auth,
+            query: query_authorizer,
             admin: admin_authorizer,
         } = self.auth;
 
@@ -953,33 +972,28 @@ impl ZradarRuntimeBuilder {
 
         let auth_mode = AuthMode::Standalone;
 
+        let settings_state = Arc::new(SettingsState {
+            repository: settings_repo.clone(),
+            audit_log_repo: Some(audit_log_repo.clone()),
+        });
+        let policy_state = Arc::new(PolicyState {
+            store: policy_store.clone(),
+        });
+        let audit_state = Arc::new(AuditState {
+            repository: audit_log_repo.clone(),
+        });
+
         // Pass AdminAuthorizer directly to each router. The `AuthContext` extractor
         // calls `authorizer.authorize(&parts.headers)` with the original request
         // headers, preserving all trusted context headers set by gateway wrappers.
-        let admin_api = create_admin_router(query_service, admin_authorizer.clone(), auth_mode);
-        let retention_api = retention_router(retention_state, admin_authorizer.clone(), auth_mode);
-        let settings_api = settings_router(
-            Arc::new(SettingsState {
-                repository: settings_repo.clone(),
-                audit_log_repo: Some(audit_log_repo.clone()),
-            }),
-            admin_authorizer.clone(),
-            auth_mode,
-        );
-        let policy_api = policy_router(
-            Arc::new(PolicyState {
-                store: policy_store,
-            }),
-            admin_authorizer.clone(),
-            auth_mode,
-        );
-        let audit_api = audit_router(
-            Arc::new(AuditState {
-                repository: audit_log_repo,
-            }),
-            admin_authorizer,
-            auth_mode,
-        );
+        let admin_api =
+            create_admin_router(query_service.clone(), query_authorizer.clone(), auth_mode);
+        let retention_api =
+            retention_router(retention_state.clone(), admin_authorizer.clone(), auth_mode);
+        let settings_api =
+            settings_router(settings_state.clone(), admin_authorizer.clone(), auth_mode);
+        let policy_api = policy_router(policy_state.clone(), admin_authorizer.clone(), auth_mode);
+        let audit_api = audit_router(audit_state.clone(), admin_authorizer.clone(), auth_mode);
 
         let metrics_state = wal_metrics.clone();
         let usage_metrics_state = usage_tracker_metrics.clone();
@@ -1005,6 +1019,71 @@ impl ZradarRuntimeBuilder {
             .merge(policy_api)
             .merge(audit_api)
             .layer(CompressionLayer::new());
+
+        // =====================================================================
+        // Query gRPC server (port 8081)
+        // =====================================================================
+
+        let query_grpc_port = config.effective_query_grpc_port();
+        let query_grpc_addr: std::net::SocketAddr =
+            format!("0.0.0.0:{query_grpc_port}").parse().unwrap();
+
+        let query_handler = QueryHandler::new(query_service.clone(), query_authorizer.clone());
+        let analytics_handler =
+            AnalyticsHandler::new(query_service.clone(), query_authorizer.clone());
+
+        let query_reflection = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(api::grpc::query_proto::QUERY_FILE_DESCRIPTOR_SET)
+            .build_v1()
+            .expect("failed to build query reflection service");
+
+        let query_grpc_server = async move {
+            info!(port = query_grpc_port, "Starting Query gRPC server");
+            Server::builder()
+                .accept_http1(true)
+                .layer(tonic_web::GrpcWebLayer::new())
+                .add_service(QueryServiceServer::new(query_handler))
+                .add_service(AnalyticsServiceServer::new(analytics_handler))
+                .add_service(query_reflection)
+                .serve(query_grpc_addr)
+                .await
+                .map_err(|e| anyhow::anyhow!("Query gRPC server failed: {}", e))
+        };
+
+        // =====================================================================
+        // Admin gRPC server (port 8082)
+        // =====================================================================
+
+        let admin_grpc_port = config.effective_admin_grpc_port();
+        let admin_grpc_addr: std::net::SocketAddr =
+            format!("0.0.0.0:{admin_grpc_port}").parse().unwrap();
+
+        let retention_handler =
+            RetentionHandler::new(retention_state.clone(), admin_authorizer.clone());
+        let policy_handler = PolicyHandler::new(policy_state.clone(), admin_authorizer.clone());
+        let audit_handler = AuditHandler::new(audit_state.clone(), admin_authorizer.clone());
+        let settings_handler =
+            SettingsHandler::new(settings_state.clone(), admin_authorizer.clone());
+
+        let admin_reflection = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(api::grpc::admin_proto::ADMIN_FILE_DESCRIPTOR_SET)
+            .build_v1()
+            .expect("failed to build admin reflection service");
+
+        let admin_grpc_server = async move {
+            info!(port = admin_grpc_port, "Starting Admin gRPC server");
+            Server::builder()
+                .accept_http1(true)
+                .layer(tonic_web::GrpcWebLayer::new())
+                .add_service(RetentionServiceServer::new(retention_handler))
+                .add_service(PolicyServiceServer::new(policy_handler))
+                .add_service(AuditServiceServer::new(audit_handler))
+                .add_service(SettingsServiceServer::new(settings_handler))
+                .add_service(admin_reflection)
+                .serve(admin_grpc_addr)
+                .await
+                .map_err(|e| anyhow::anyhow!("Admin gRPC server failed: {}", e))
+        };
 
         // =====================================================================
         // Run servers
@@ -1067,9 +1146,11 @@ impl ZradarRuntimeBuilder {
         };
 
         info!("zradar is ready!");
-        info!("  OTLP gRPC:  localhost:{}", otlp_port);
-        info!("  OTLP/HTTP:  http://localhost:{}", otlp_http_port);
-        info!("  Admin API:  http://localhost:{}", admin_port);
+        info!("  OTLP gRPC:      localhost:{}", otlp_port);
+        info!("  OTLP/HTTP:      http://localhost:{}", otlp_http_port);
+        info!("  Admin API:      http://localhost:{}", admin_port);
+        info!("  Query gRPC:     localhost:{}", query_grpc_port);
+        info!("  Admin gRPC:     localhost:{}", admin_grpc_port);
 
         if let Some(otlp_http_server) = otlp_http_server {
             tokio::select! {
@@ -1088,6 +1169,16 @@ impl ZradarRuntimeBuilder {
                         error!("OTLP/HTTP server failed: {}", e);
                     }
                 }
+                result = query_grpc_server => {
+                    if let Err(e) = result {
+                        error!("Query gRPC server failed: {}", e);
+                    }
+                }
+                result = admin_grpc_server => {
+                    if let Err(e) = result {
+                        error!("Admin gRPC server failed: {}", e);
+                    }
+                }
             }
         } else {
             tokio::select! {
@@ -1099,6 +1190,16 @@ impl ZradarRuntimeBuilder {
                 result = admin_server => {
                     if let Err(e) = result {
                         error!("Admin API server failed: {}", e);
+                    }
+                }
+                result = query_grpc_server => {
+                    if let Err(e) = result {
+                        error!("Query gRPC server failed: {}", e);
+                    }
+                }
+                result = admin_grpc_server => {
+                    if let Err(e) = result {
+                        error!("Admin gRPC server failed: {}", e);
                     }
                 }
             }

@@ -42,10 +42,7 @@ fn test_auth_header(env: &TestEnv) -> String {
 // ---------------------------------------------------------------------------
 
 /// AC R1.1: POST /v1/traces with application/x-protobuf is accepted (200).
-#[tokio::test]
-#[ignore]
-async fn test_r1_1_otlp_http_traces_accepted() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_1_otlp_http_traces_accepted_body(env: TestEnv) -> Result<()> {
     let otlp_http_url =
         std::env::var("TEST_OTLP_HTTP_URL").unwrap_or_else(|_| "http://localhost:4318".to_string());
 
@@ -84,11 +81,13 @@ async fn test_r1_1_otlp_http_traces_accepted() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_1_otlp_http_traces_accepted,
+    test_r1_1_otlp_http_traces_accepted_body
+);
+
 /// AC R1.1: JSON body is rejected with 415.
-#[tokio::test]
-#[ignore]
-async fn test_r1_1_otlp_http_json_rejected() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_1_otlp_http_json_rejected_body(env: TestEnv) -> Result<()> {
     let otlp_http_url =
         std::env::var("TEST_OTLP_HTTP_URL").unwrap_or_else(|_| "http://localhost:4318".to_string());
 
@@ -111,15 +110,17 @@ async fn test_r1_1_otlp_http_json_rejected() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_1_otlp_http_json_rejected,
+    test_r1_1_otlp_http_json_rejected_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.2 — nat.* attribute namespace
 // ---------------------------------------------------------------------------
 
 /// AC R1.2: nat.workflow.run_id → workflow_run_id, nat.conversation.id → session_id.
-#[tokio::test]
-#[ignore]
-async fn test_r1_2_nat_attributes_mapped() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_2_nat_attributes_mapped_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -167,15 +168,17 @@ async fn test_r1_2_nat_attributes_mapped() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_2_nat_attributes_mapped,
+    test_r1_2_nat_attributes_mapped_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.2 — aiq.* canonical precedence over nat.*
 // ---------------------------------------------------------------------------
 
 /// AC R1.2: aiq.* overwrites nat.* for workflow_run_id and framework.
-#[tokio::test]
-#[ignore]
-async fn test_r1_2_aiq_overwrites_nat() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_2_aiq_overwrites_nat_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -215,15 +218,17 @@ async fn test_r1_2_aiq_overwrites_nat() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_2_aiq_overwrites_nat,
+    test_r1_2_aiq_overwrites_nat_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.3 — OTel GenAI 1.29 token conventions
 // ---------------------------------------------------------------------------
 
 /// AC R1.3: gen_ai.usage.input_tokens/output_tokens, gen_ai.response.model, gen_ai.provider.name.
-#[tokio::test]
-#[ignore]
-async fn test_r1_3_genai_1_29_token_mapping() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_3_genai_1_29_token_mapping_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -271,15 +276,17 @@ async fn test_r1_3_genai_1_29_token_mapping() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_3_genai_1_29_token_mapping,
+    test_r1_3_genai_1_29_token_mapping_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.4 — llm_response_model filter
 // ---------------------------------------------------------------------------
 
 /// AC R1.4: Querying spans by llm_response_model returns matching spans.
-#[tokio::test]
-#[ignore]
-async fn test_r1_4_llm_response_model_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_4_llm_response_model_filter_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -319,15 +326,17 @@ async fn test_r1_4_llm_response_model_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_4_llm_response_model_filter,
+    test_r1_4_llm_response_model_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.5 — llm_provider filter
 // ---------------------------------------------------------------------------
 
 /// AC R1.5: Querying spans by llm_provider returns matching spans.
-#[tokio::test]
-#[ignore]
-async fn test_r1_5_llm_provider_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_5_llm_provider_filter_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -364,15 +373,17 @@ async fn test_r1_5_llm_provider_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_5_llm_provider_filter,
+    test_r1_5_llm_provider_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.6 — span events allowlist (baseline test via unit-tested conventions)
 // ---------------------------------------------------------------------------
 
 /// AC R1.6: Spans with no events are stored cleanly (events field absent or null).
-#[tokio::test]
-#[ignore]
-async fn test_r1_6_no_events_stored_cleanly() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_6_no_events_stored_cleanly_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -407,15 +418,17 @@ async fn test_r1_6_no_events_stored_cleanly() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_6_no_events_stored_cleanly,
+    test_r1_6_no_events_stored_cleanly_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.7 — SpanDetail enriched fields in API response
 // ---------------------------------------------------------------------------
 
 /// AC R1.7: SpanDetail includes llm_provider, llm_response_model, prompt_tokens, completion_tokens.
-#[tokio::test]
-#[ignore]
-async fn test_r1_7_span_detail_enriched_fields() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_7_span_detail_enriched_fields_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -463,15 +476,17 @@ async fn test_r1_7_span_detail_enriched_fields() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_7_span_detail_enriched_fields,
+    test_r1_7_span_detail_enriched_fields_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.9 — Logs mixed attribute types round-trip intact
 // ---------------------------------------------------------------------------
 
 /// AC R1.9: Log records with string attributes are stored (covers the shared attrs_to_json path).
-#[tokio::test]
-#[ignore]
-async fn test_r1_9_logs_attributes_round_trip() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_9_logs_attributes_round_trip_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
 
     let req = env.otlp.build_log_request_with_attrs(
@@ -493,15 +508,17 @@ async fn test_r1_9_logs_attributes_round_trip() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_9_logs_attributes_round_trip,
+    test_r1_9_logs_attributes_round_trip_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.10 — status filter for spans
 // ---------------------------------------------------------------------------
 
 /// AC R1.10: status=ERROR filter returns only spans with ERROR status_code.
-#[tokio::test]
-#[ignore]
-async fn test_r1_10_span_status_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_10_span_status_filter_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let ok_span = TestDataGenerator::span_id();
     let err_span = TestDataGenerator::span_id();
@@ -549,15 +566,17 @@ async fn test_r1_10_span_status_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_10_span_status_filter,
+    test_r1_10_span_status_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.11 — operation_name filter
 // ---------------------------------------------------------------------------
 
 /// AC R1.11: operation_name filter on traces returns matching traces only.
-#[tokio::test]
-#[ignore]
-async fn test_r1_11_operation_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_11_operation_name_filter_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let root_span_id = TestDataGenerator::span_id();
     let matching_span_id = TestDataGenerator::span_id();
@@ -627,15 +646,17 @@ async fn test_r1_11_operation_name_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r1_11_operation_name_filter,
+    test_r1_11_operation_name_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC R1.12 — ContentCapturePolicy (NoopContentCapturePolicy default)
 // ---------------------------------------------------------------------------
 
 /// AC R1.12: Default capture enabled — span stored with llm fields present.
-#[tokio::test]
-#[ignore]
-async fn test_r1_12_content_capture_default_enabled() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r1_12_content_capture_default_enabled_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service = TestDataGenerator::service_name();
@@ -673,3 +694,8 @@ async fn test_r1_12_content_capture_default_enabled() -> Result<()> {
     println!("✅ R1.12: NoopContentCapturePolicy — capture enabled by default, span stored");
     Ok(())
 }
+
+dual_transport_test!(
+    test_r1_12_content_capture_default_enabled,
+    test_r1_12_content_capture_default_enabled_body
+);

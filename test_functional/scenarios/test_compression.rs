@@ -3,12 +3,7 @@
 #[allow(unused_imports)]
 use crate::*;
 
-#[tokio::test]
-#[ignore]
-async fn test_http_gzip_compression_on_telemetry() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
-    println!("🧪 Testing HTTP gzip compression on telemetry query...");
+async fn test_http_gzip_compression_on_telemetry_body(env: TestEnv) -> Result<()> {    println!("🧪 Testing HTTP gzip compression on telemetry query...");
 
     // Send a trace first
     let trace_id = TestDataGenerator::trace_id();
@@ -53,14 +48,13 @@ async fn test_http_gzip_compression_on_telemetry() -> Result<()> {
 
     println!("✅ HTTP gzip compression verified on telemetry endpoint!");
     Ok(())
+
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_grpc_gzip_compression() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_http_gzip_compression_on_telemetry, test_http_gzip_compression_on_telemetry_body);
 
-    println!("🧪 Testing gRPC gzip compression...");
+
+async fn test_grpc_gzip_compression_body(env: TestEnv) -> Result<()> {    println!("🧪 Testing gRPC gzip compression...");
 
     // Send a real trace with compression enabled
     let trace_id = TestDataGenerator::trace_id();
@@ -89,14 +83,13 @@ async fn test_grpc_gzip_compression() -> Result<()> {
     println!("   Data integrity: Verified");
 
     Ok(())
+
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_compression_roundtrip() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_grpc_gzip_compression, test_grpc_gzip_compression_body);
 
-    println!("🧪 Testing compression roundtrip (gRPC ingestion + HTTP query)...");
+
+async fn test_compression_roundtrip_body(env: TestEnv) -> Result<()> {    println!("🧪 Testing compression roundtrip (gRPC ingestion + HTTP query)...");
 
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -146,4 +139,8 @@ async fn test_compression_roundtrip() -> Result<()> {
     println!("   Data integrity: ✓");
 
     Ok(())
+
 }
+
+dual_transport_test!(test_compression_roundtrip, test_compression_roundtrip_body);
+

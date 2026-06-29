@@ -11,11 +11,7 @@ use crate::*;
 // ============================================================================
 
 /// Ingest a gauge metric and verify it can be retrieved via REST
-#[tokio::test]
-#[ignore]
-async fn test_gauge_metric_ingestion_and_retrieval() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_gauge_metric_ingestion_and_retrieval_body(env: TestEnv) -> Result<()> {
     let request = env
         .otlp
         .build_gauge_metric("test-service", "cpu.usage", 42.5);
@@ -41,12 +37,13 @@ async fn test_gauge_metric_ingestion_and_retrieval() -> Result<()> {
     Ok(())
 }
 
-/// Ingest a counter metric and verify metric_type is COUNTER
-#[tokio::test]
-#[ignore]
-async fn test_counter_metric_type() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_gauge_metric_ingestion_and_retrieval,
+    test_gauge_metric_ingestion_and_retrieval_body
+);
 
+/// Ingest a counter metric and verify metric_type is COUNTER
+async fn test_counter_metric_type_body(env: TestEnv) -> Result<()> {
     let request = env
         .otlp
         .build_counter_metric("test-service", "requests.total", 100.0);
@@ -61,12 +58,10 @@ async fn test_counter_metric_type() -> Result<()> {
     Ok(())
 }
 
-/// Ingest multiple different metric names and verify they are all stored
-#[tokio::test]
-#[ignore]
-async fn test_multiple_metric_names() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_counter_metric_type, test_counter_metric_type_body);
 
+/// Ingest multiple different metric names and verify they are all stored
+async fn test_multiple_metric_names_body(env: TestEnv) -> Result<()> {
     let metric_names = ["mem.usage", "disk.io", "net.bytes"];
     for name in &metric_names {
         let request = env.otlp.build_gauge_metric("test-service", name, 1.0);
@@ -84,12 +79,10 @@ async fn test_multiple_metric_names() -> Result<()> {
     Ok(())
 }
 
-/// Filter metrics by metric_name returns only matching metrics
-#[tokio::test]
-#[ignore]
-async fn test_metric_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_multiple_metric_names, test_multiple_metric_names_body);
 
+/// Filter metrics by metric_name returns only matching metrics
+async fn test_metric_name_filter_body(env: TestEnv) -> Result<()> {
     env.otlp
         .export_metrics(env.otlp.build_gauge_metric("svc", "metric.alpha", 1.0))
         .await?;
@@ -113,12 +106,10 @@ async fn test_metric_name_filter() -> Result<()> {
     Ok(())
 }
 
-/// Filter metrics by service_name returns only matching metrics
-#[tokio::test]
-#[ignore]
-async fn test_metric_service_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_metric_name_filter, test_metric_name_filter_body);
 
+/// Filter metrics by service_name returns only matching metrics
+async fn test_metric_service_name_filter_body(env: TestEnv) -> Result<()> {
     env.otlp
         .export_metrics(env.otlp.build_gauge_metric("service-a", "cpu.usage", 10.0))
         .await?;
@@ -141,12 +132,13 @@ async fn test_metric_service_name_filter() -> Result<()> {
     Ok(())
 }
 
-/// Metric series endpoint returns time-series points for a named metric
-#[tokio::test]
-#[ignore]
-async fn test_metric_series_query() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_metric_service_name_filter,
+    test_metric_service_name_filter_body
+);
 
+/// Metric series endpoint returns time-series points for a named metric
+async fn test_metric_series_query_body(env: TestEnv) -> Result<()> {
     // Send a few data points
     for i in 0..3 {
         let request = env
@@ -186,10 +178,10 @@ async fn test_metric_series_query() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(test_metric_series_query, test_metric_series_query_body);
+
 /// Metrics from different workspaces are isolated (workspace isolation)
-#[tokio::test]
-#[ignore]
-async fn test_metrics_workspace_isolation() -> Result<()> {
+async fn test_metrics_workspace_isolation_body(_env: TestEnv) -> Result<()> {
     // Provision two independent environments
     let env_a = TestEnv::setup().await?;
     let env_b = TestEnv::setup().await?;
@@ -217,6 +209,11 @@ async fn test_metrics_workspace_isolation() -> Result<()> {
     println!("✅ Metrics workspace isolation verified");
     Ok(())
 }
+
+dual_transport_test!(
+    test_metrics_workspace_isolation,
+    test_metrics_workspace_isolation_body
+);
 
 // ============================================================================
 // Negative Tests
@@ -254,11 +251,7 @@ async fn test_metrics_export_invalid_api_key_rejected() -> Result<()> {
 }
 
 /// Metrics series without metric_name returns 400/422
-#[tokio::test]
-#[ignore]
-async fn test_metric_series_requires_metric_name() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_metric_series_requires_metric_name_body(env: TestEnv) -> Result<()> {
     // Missing metric_name
     let url = "/api/v1/metrics/series".to_string();
     let response = env.client.get(&url).await?;
@@ -272,3 +265,8 @@ async fn test_metric_series_requires_metric_name() -> Result<()> {
     println!("✅ Metric series without metric_name correctly rejected");
     Ok(())
 }
+
+dual_transport_test!(
+    test_metric_series_requires_metric_name,
+    test_metric_series_requires_metric_name_body
+);

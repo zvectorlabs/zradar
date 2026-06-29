@@ -15,14 +15,10 @@ use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
 /// AC4.1: a span emitted with an OTLP `links` array of 3 entries must surface
 /// those links in the JSON `links` column on the response, with trace_id and
 /// span_id hex-encoded and link attributes preserved verbatim.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_1_span_links_preserved() -> Result<()> {
+async fn test_ac4_1_span_links_preserved_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::trace::v1::span::Link;
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
-
-    let env = TestEnv::setup().await?;
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -44,8 +40,10 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
                 value: Some(OtlpAnyValue {
                     value: Some(AnyValue::StringValue("retry".to_string())),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         },
         Link {
             trace_id: linked_trace_b.to_vec(),
@@ -53,6 +51,7 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
             trace_state: "vendor=opaque".to_string(),
             attributes: vec![],
             dropped_attributes_count: 0,
+            ..Default::default()
         },
         Link {
             trace_id: linked_trace_c.to_vec(),
@@ -60,6 +59,7 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
             trace_state: String::new(),
             attributes: vec![],
             dropped_attributes_count: 0,
+            ..Default::default()
         },
     ];
 
@@ -75,6 +75,7 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
                 value: Some(OtlpAnyValue {
                     value: Some(AnyValue::StringValue(service.clone())),
                 }),
+                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -134,16 +135,18 @@ async fn test_ac4_1_span_links_preserved() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_1_span_links_preserved,
+    test_ac4_1_span_links_preserved_body
+);
+
 /// AC4.1 negative-path: a span with no links surfaces an empty array — not
 /// AC4.1 neg / PR8 follow-up: a span with no links must surface as `null` on
 /// the wire (matching the `model_parameters` precedent), NOT as the literal
 /// empty array. The storage column stays non-null `"[]"`; the workspaceion
 /// layer (`parse_json_array`) maps the default to `None` so consumers can
 /// treat "no data" uniformly across links / events / model_parameters.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_1_span_without_links_returns_null() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_1_span_without_links_returns_null_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -181,6 +184,11 @@ async fn test_ac4_1_span_without_links_returns_null() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_1_span_without_links_returns_null,
+    test_ac4_1_span_without_links_returns_null_body
+);
+
 // ===========================================================================
 // AC4.2 — parent_span_id zero-hex normalized to root
 // ===========================================================================
@@ -188,13 +196,9 @@ async fn test_ac4_1_span_without_links_returns_null() -> Result<()> {
 /// AC4.2: a span sent with `parent_span_id = [0u8; 8]` (some collectors do
 /// this instead of empty bytes) must be recognized as a root span — the
 /// trace-detail response surfaces no parent_span_id (or empty).
-#[tokio::test]
-#[ignore]
-async fn test_ac4_2_parent_span_id_zero_hex_treated_as_root() -> Result<()> {
+async fn test_ac4_2_parent_span_id_zero_hex_treated_as_root_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
-
-    let env = TestEnv::setup().await?;
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -214,6 +218,7 @@ async fn test_ac4_2_parent_span_id_zero_hex_treated_as_root() -> Result<()> {
                 value: Some(OtlpAnyValue {
                     value: Some(AnyValue::StringValue(service.clone())),
                 }),
+                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -252,12 +257,14 @@ async fn test_ac4_2_parent_span_id_zero_hex_treated_as_root() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_2_parent_span_id_zero_hex_treated_as_root,
+    test_ac4_2_parent_span_id_zero_hex_treated_as_root_body
+);
+
 /// AC4.2 positive-control: a span with a real parent_span_id must NOT be
 /// flattened to root.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_2_real_parent_span_id_preserved() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_2_real_parent_span_id_preserved_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let parent_span_id = TestDataGenerator::span_id();
@@ -307,6 +314,11 @@ async fn test_ac4_2_real_parent_span_id_preserved() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_2_real_parent_span_id_preserved,
+    test_ac4_2_real_parent_span_id_preserved_body
+);
+
 // ===========================================================================
 // AC4.3 — llm.cache.hit populates llm_cache_hit
 // ===========================================================================
@@ -331,10 +343,7 @@ fn kv_bool(key: &str, val: bool) -> (String, OtlpAnyValue) {
 
 /// AC4.3: `llm.cache.hit=true` on a Guardrails LLM child must surface as
 /// `llm_cache_hit: true` on the SpanDetail.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_3_llm_cache_hit_true_populates_field() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_3_llm_cache_hit_true_populates_field_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -366,13 +375,15 @@ async fn test_ac4_3_llm_cache_hit_true_populates_field() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_3_llm_cache_hit_true_populates_field,
+    test_ac4_3_llm_cache_hit_true_populates_field_body
+);
+
 /// AC4.3 negative-path: when `llm.cache.hit` is absent, the column must
 /// surface as null — distinct from an explicit `false` (miss). The tri-state
 /// SMALLINT stores `-1` (unknown) for absent, which the API maps to null.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_3_llm_cache_hit_absent_returns_null() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_3_llm_cache_hit_absent_returns_null_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -405,13 +416,15 @@ async fn test_ac4_3_llm_cache_hit_absent_returns_null() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_3_llm_cache_hit_absent_returns_null,
+    test_ac4_3_llm_cache_hit_absent_returns_null_body
+);
+
 /// AC4.3 explicit-miss: `llm.cache.hit=false` must surface as `false`
 /// (NOT null) so cache-hit-rate analytics can count explicit misses. This is
 /// the case the old non-zero workspaceion collapsed into null.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_3_llm_cache_hit_false_populates_field() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_3_llm_cache_hit_false_populates_field_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -443,15 +456,17 @@ async fn test_ac4_3_llm_cache_hit_false_populates_field() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_3_llm_cache_hit_false_populates_field,
+    test_ac4_3_llm_cache_hit_false_populates_field_body
+);
+
 // ===========================================================================
 // AC4.4 — gen_ai.response.id populates llm_response_id
 // ===========================================================================
 
 /// AC4.4: `gen_ai.response.id=chatcmpl-abc123` populates `llm_response_id`.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_4_gen_ai_response_id_populates_field() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_4_gen_ai_response_id_populates_field_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -485,19 +500,22 @@ async fn test_ac4_4_gen_ai_response_id_populates_field() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_4_gen_ai_response_id_populates_field,
+    test_ac4_4_gen_ai_response_id_populates_field_body
+);
+
 // ===========================================================================
 // AC4.5 / AC4.6 — deployment.environment lands on every span; ?environment filter
 // ===========================================================================
 
 /// AC4.5: a resource attribute `deployment.environment=production` lands as
 /// Span.environment on EVERY span in the request.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_5_deployment_environment_propagates_to_all_spans() -> Result<()> {
+async fn test_ac4_5_deployment_environment_propagates_to_all_spans_body(
+    env: TestEnv,
+) -> Result<()> {
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
-
-    let env = TestEnv::setup().await?;
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
 
@@ -527,12 +545,14 @@ async fn test_ac4_5_deployment_environment_propagates_to_all_spans() -> Result<(
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue(service.clone())),
                     }),
+                    ..Default::default()
                 },
                 KeyValue {
                     key: "deployment.environment".to_string(),
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue("production".to_string())),
                     }),
+                    ..Default::default()
                 },
             ],
             ..Default::default()
@@ -570,15 +590,16 @@ async fn test_ac4_5_deployment_environment_propagates_to_all_spans() -> Result<(
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_5_deployment_environment_propagates_to_all_spans,
+    test_ac4_5_deployment_environment_propagates_to_all_spans_body
+);
+
 /// AC4.6: `?environment=production` filter returns only spans tagged
 /// production; staging spans never leak in.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_6_environment_filter_returns_only_matching() -> Result<()> {
+async fn test_ac4_6_environment_filter_returns_only_matching_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
-
-    let env = TestEnv::setup().await?;
     let service = TestDataGenerator::service_name();
 
     let now_ns = std::time::SystemTime::now()
@@ -595,12 +616,14 @@ async fn test_ac4_6_environment_filter_returns_only_matching() -> Result<()> {
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue(service.clone())),
                     }),
+                    ..Default::default()
                 },
                 KeyValue {
                     key: "deployment.environment".to_string(),
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue(env_name.to_string())),
                     }),
+                    ..Default::default()
                 },
             ],
             ..Default::default()
@@ -673,6 +696,11 @@ async fn test_ac4_6_environment_filter_returns_only_matching() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_6_environment_filter_returns_only_matching,
+    test_ac4_6_environment_filter_returns_only_matching_body
+);
+
 // ===========================================================================
 // AC4.7 — gen_ai.request.* sampling params populate model_parameters JSON
 // ===========================================================================
@@ -697,10 +725,7 @@ fn kv_int(key: &str, val: i64) -> (String, OtlpAnyValue) {
 
 /// AC4.7: a span carrying gen_ai.request.temperature=0.7 and max_tokens=500
 /// must produce a model_parameters object containing both fields.
-#[tokio::test]
-#[ignore]
-async fn test_ac4_7_sampling_params_populate_model_parameters() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_7_sampling_params_populate_model_parameters_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -750,12 +775,14 @@ async fn test_ac4_7_sampling_params_populate_model_parameters() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_ac4_7_sampling_params_populate_model_parameters,
+    test_ac4_7_sampling_params_populate_model_parameters_body
+);
+
 /// AC4.7 negative-path: a span with NO sampling attributes must surface
 /// model_parameters as null (not as the literal "{}" string).
-#[tokio::test]
-#[ignore]
-async fn test_ac4_7_no_sampling_params_returns_null() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_ac4_7_no_sampling_params_returns_null_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -787,6 +814,11 @@ async fn test_ac4_7_no_sampling_params_returns_null() -> Result<()> {
     println!("✅ AC4.7 neg: absent sampling attrs surface as null");
     Ok(())
 }
+
+dual_transport_test!(
+    test_ac4_7_no_sampling_params_returns_null,
+    test_ac4_7_no_sampling_params_returns_null_body
+);
 
 // ===========================================================================
 // AC4.11 — NEMO.md auth section published (doc review backed by file check)

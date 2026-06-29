@@ -188,6 +188,7 @@ fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
             serde_json::Value::Object(map)
         }
         Some(Value::BytesValue(b)) => serde_json::Value::String(hex::encode(b)),
+        Some(Value::StringValueStrindex(_)) => serde_json::Value::Null,
         None => serde_json::Value::Null,
     }
 }
@@ -233,6 +234,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(Value::StringValue(v.to_string())),
             }),
+            ..Default::default()
         }
     }
 

@@ -24,12 +24,9 @@ struct CleanupStats {
     errors: Vec<String>,
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
+async fn test_cleanup_deletes_all_with_zero_retention_body(mut env: TestEnv) -> Result<()> {
     // Use a dedicated workspace_id so this destructive test is idempotent in
     // reuse mode and does not affect other workspaces running in parallel.
-    let mut env = TestEnv::setup().await?;
     let retention_workspace_id = Uuid::new_v4();
 
     env.client
@@ -89,7 +86,8 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
         "Cleanup endpoint should return 200"
     );
 
-    let cleanup: CleanupResponse = cleanup_resp.json().await?;
+    let json = cleanup_resp.json().await?;
+    let cleanup: CleanupResponse = serde_json::from_value(json)?;
     assert!(cleanup.stats.files_deleted > 0, "Should have deleted files");
     assert!(cleanup.stats.errors.is_empty(), "No errors expected");
 
@@ -101,11 +99,13 @@ async fn test_cleanup_deletes_all_with_zero_retention() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_cleanup_preserves_recent_data() -> Result<()> {
+dual_transport_test!(
+    test_cleanup_deletes_all_with_zero_retention,
+    test_cleanup_deletes_all_with_zero_retention_body
+);
+
+async fn test_cleanup_preserves_recent_data_body(mut env: TestEnv) -> Result<()> {
     // Use a dedicated workspace_id so cleanup is scoped and parallel-safe.
-    let mut env = TestEnv::setup().await?;
     let retention_workspace_id = Uuid::new_v4();
 
     env.client
@@ -200,9 +200,12 @@ async fn test_cleanup_preserves_recent_data() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_cleanup_requires_auth() -> Result<()> {
+dual_transport_test!(
+    test_cleanup_preserves_recent_data,
+    test_cleanup_preserves_recent_data_body
+);
+
+async fn test_cleanup_requires_auth_body(_env: TestEnv) -> Result<()> {
     let session = TestSession::setup().await?;
     let unauthenticated = ApiClient::new(session.ctx.config.api_url.clone());
     let resp = unauthenticated
@@ -222,3 +225,5 @@ async fn test_cleanup_requires_auth() -> Result<()> {
     println!("Cleanup endpoint requires authentication");
     Ok(())
 }
+
+dual_transport_test!(test_cleanup_requires_auth, test_cleanup_requires_auth_body);

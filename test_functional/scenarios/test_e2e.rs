@@ -4,11 +4,7 @@
 use crate::*;
 use std::collections::{HashMap, HashSet};
 
-#[tokio::test]
-#[ignore]
-async fn test_complete_observability_workflow() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_complete_observability_workflow_body(env: TestEnv) -> Result<()> {
     println!("=== Complete Observability Workflow ===\n");
 
     let trace_id = TestDataGenerator::trace_id();
@@ -42,11 +38,12 @@ async fn test_complete_observability_workflow() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_multi_service_observability() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_complete_observability_workflow,
+    test_complete_observability_workflow_body
+);
 
+async fn test_multi_service_observability_body(env: TestEnv) -> Result<()> {
     println!("=== Multi-Service Observability ===\n");
 
     let services = vec![
@@ -83,11 +80,12 @@ async fn test_multi_service_observability() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_distributed_trace_flow() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_multi_service_observability,
+    test_multi_service_observability_body
+);
 
+async fn test_distributed_trace_flow_body(env: TestEnv) -> Result<()> {
     println!("=== Distributed Trace Flow ===\n");
 
     let trace_id = TestDataGenerator::trace_id();
@@ -158,3 +156,8 @@ async fn test_distributed_trace_flow() -> Result<()> {
     println!("\nDistributed trace flow simulated!\n");
     Ok(())
 }
+
+dual_transport_test!(
+    test_distributed_trace_flow,
+    test_distributed_trace_flow_body
+);

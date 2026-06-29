@@ -196,6 +196,7 @@ mod tests {
             value: Some(OtlpAnyValue {
                 value: Some(AnyValue::StringValue(v.to_string())),
             }),
+            ..Default::default()
         }
     }
 
@@ -205,6 +206,7 @@ mod tests {
             value: Some(OtlpAnyValue {
                 value: Some(AnyValue::DoubleValue(v)),
             }),
+            ..Default::default()
         }
     }
 
@@ -294,6 +296,7 @@ mod tests {
         let null_attr = KeyValue {
             key: "score.comment".to_string(),
             value: Some(OtlpAnyValue { value: None }),
+            ..Default::default()
         };
         let req = ExportLogsServiceRequest {
             resource_logs: vec![ResourceLogs {
