@@ -72,6 +72,14 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace --exclude zradar-functional-tests
 
+      - name: Cache test fixtures
+        uses: actions/cache@v4
+        with:
+          path: test_functional/fixtures
+          key: ${{ runner.os }}-test-fixtures-${{ hashFiles('test_functional/fixtures/**') }}
+          restore-keys: |
+            ${{ runner.os }}-test-fixtures-
+
       # The script starts its own Postgres container via Docker (preinstalled on
       # ubuntu runners) and runs the suite under nextest (ci profile = retries).
       - name: Functional tests
