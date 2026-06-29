@@ -172,16 +172,17 @@ If you are starting from scratch, pick your framework from the `examples/` direc
 
 | Framework | Language | Directory |
 |-----------|----------|-----------|
-| LangChain | Python | `examples/langchain/python/` |
-| OpenAI Agents SDK | Python | `examples/openai-agents/python/` |
-| PydanticAI | Python | `examples/pydantic-ai/python/` |
-| CrewAI | Python | `examples/crewai/python/` |
-| LlamaIndex | Python | `examples/llamaindex/python/` |
-| Anthropic | Python + TypeScript | `examples/anthropic/` |
-| Google ADK | Python + TypeScript | `examples/google-adk/` |
-| OpenAI SDK | Python + TypeScript | `examples/openai/` |
-| Vercel AI SDK | TypeScript | `examples/vercel-ai-sdk/typescript/` |
-| Mastra | TypeScript | `examples/mastra/typescript/` |
+| LangChain | Python | [`examples/langchain/python/`](../examples/langchain/python/) |
+| OpenAI Agents SDK | Python | [`examples/openai-agents/python/`](../examples/openai-agents/python/) |
+| PydanticAI | Python | [`examples/pydantic-ai/python/`](../examples/pydantic-ai/python/) |
+| CrewAI | Python | [`examples/crewai/python/`](../examples/crewai/python/) |
+| LlamaIndex | Python | [`examples/llamaindex/python/`](../examples/llamaindex/python/) |
+| Anthropic | Python + TypeScript | [`examples/anthropic/`](../examples/anthropic/) |
+| Google ADK | Python + TypeScript | [`examples/google-adk/`](../examples/google-adk/) |
+| OpenAI SDK | Python + TypeScript | [`examples/openai/`](../examples/openai/) |
+| Vercel AI SDK | TypeScript | [`examples/vercel-ai-sdk/typescript/`](../examples/vercel-ai-sdk/typescript/) |
+| Mastra | TypeScript | [`examples/mastra/typescript/`](../examples/mastra/typescript/) |
+| NVIDIA NeMo / NIM | YAML (OTel Collector) | [`examples/nemo/`](../examples/nemo/) · [Integration guide](INTEGRATIONS/NEMO.md) |
 
 ---
 
