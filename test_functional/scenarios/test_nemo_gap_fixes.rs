@@ -27,12 +27,11 @@ fn test_auth_header(env: &TestEnv) -> String {
 
 async fn disable_content_capture(env: &TestEnv) -> Result<()> {
     let workspace_id = env.client.workspace_id();
-    let default_settings = ApiClient::get_json(
-        env.client
-            .get(&format!("/api/v1/workspaces/{workspace_id}/settings"))
-            .await?,
-    )
-    .await?;
+    let response = env
+        .client
+        .get(&format!("/api/v1/workspaces/{workspace_id}/settings"))
+        .await?;
+    let default_settings = response.json().await?;
     let disable_body = serde_json::json!({
         "traces_retention_days": default_settings["traces_retention_days"].as_i64().unwrap_or(30),
         "metrics_retention_days": default_settings["metrics_retention_days"].as_i64().unwrap_or(30),
@@ -95,10 +94,7 @@ fn assert_content_scrubbed(span: &serde_json::Value) {
 ///
 /// NeMo Evaluator's canonical transport is HTTP; gRPC was already covered.
 /// This test verifies the shared score_extractor is wired into the HTTP path.
-#[tokio::test]
-#[ignore]
-async fn test_g1_http_logs_persists_eval_scores() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_g1_http_logs_persists_eval_scores_body(env: TestEnv) -> Result<()> {
     let otlp_http_url = otlp_http_url();
 
     let trace_id = TestDataGenerator::trace_id();
@@ -167,15 +163,17 @@ async fn test_g1_http_logs_persists_eval_scores() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_g1_http_logs_persists_eval_scores,
+    test_g1_http_logs_persists_eval_scores_body
+);
+
 // ---------------------------------------------------------------------------
 // G4: llm_response_model filter on traces
 // ---------------------------------------------------------------------------
 
 /// G4: ?llm_response_model= filter on /api/v1/traces returns only matching traces.
-#[tokio::test]
-#[ignore]
-async fn test_g4_trace_llm_response_model_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_g4_trace_llm_response_model_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let unique_model = format!("gpt-g4-{}", hex::encode(TestDataGenerator::span_id()));
 
@@ -232,6 +230,11 @@ async fn test_g4_trace_llm_response_model_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_g4_trace_llm_response_model_filter,
+    test_g4_trace_llm_response_model_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // G7: OQ18 — exception survives 200 LLM_NEW_TOKEN events
 // ---------------------------------------------------------------------------
@@ -239,14 +242,10 @@ async fn test_g4_trace_llm_response_model_filter() -> Result<()> {
 /// G7: When a span carries 200 LLM_NEW_TOKEN events before an exception,
 /// the exception must appear in the span's events JSON.
 /// Verifies that noise is dropped BEFORE the count cap is applied.
-#[tokio::test]
-#[ignore]
-async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
+async fn test_g7_oq18_exception_survives_new_token_flood_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::trace::v1::span::Event;
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
-
-    let env = TestEnv::setup().await?;
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -260,6 +259,7 @@ async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
                 value: Some(OtlpAnyValue {
                     value: Some(AnyValue::StringValue("LLM_NEW_TOKEN".to_string())),
                 }),
+                ..Default::default()
             }],
             ..Default::default()
         })
@@ -271,6 +271,7 @@ async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
             value: Some(OtlpAnyValue {
                 value: Some(AnyValue::StringValue("real error".to_string())),
             }),
+            ..Default::default()
         }],
         ..Default::default()
     });
@@ -288,6 +289,7 @@ async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
                 value: Some(OtlpAnyValue {
                     value: Some(AnyValue::StringValue(service.clone())),
                 }),
+                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -332,15 +334,17 @@ async fn test_g7_oq18_exception_survives_new_token_flood() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_g7_oq18_exception_survives_new_token_flood,
+    test_g7_oq18_exception_survives_new_token_flood_body
+);
+
 // ---------------------------------------------------------------------------
 // G9: start-only time filter
 // ---------------------------------------------------------------------------
 
 /// G9: ?start_time= without ?end_time= must not silently drop the time filter.
-#[tokio::test]
-#[ignore]
-async fn test_g9_start_time_only_filter_applied() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_g9_start_time_only_filter_applied_body(env: TestEnv) -> Result<()> {
     let workspace_id = env.client.workspace_id();
     let service = TestDataGenerator::service_name();
 
@@ -383,6 +387,11 @@ async fn test_g9_start_time_only_filter_applied() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_g9_start_time_only_filter_applied,
+    test_g9_start_time_only_filter_applied_body
+);
+
 // ---------------------------------------------------------------------------
 // G3/G6: content-capture scrubs events and attributes
 // ---------------------------------------------------------------------------
@@ -394,10 +403,7 @@ async fn test_g9_start_time_only_filter_applied() -> Result<()> {
 /// Note: this test only fires if the workspace has capture disabled in its
 /// settings. The test updates the real workspace settings row, ingests a span,
 /// and verifies prompt/completion text is scrubbed from all response columns.
-#[tokio::test]
-#[ignore]
-async fn test_g3_g6_content_capture_disabled_scrubs_all_columns() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_g3_g6_content_capture_disabled_scrubs_all_columns_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
 
     disable_content_capture(&env).await?;
@@ -431,12 +437,16 @@ async fn test_g3_g6_content_capture_disabled_scrubs_all_columns() -> Result<()> 
     Ok(())
 }
 
+dual_transport_test!(
+    test_g3_g6_content_capture_disabled_scrubs_all_columns,
+    test_g3_g6_content_capture_disabled_scrubs_all_columns_body
+);
+
 /// G3/G6: OTLP/HTTP traces must use the same workspace settings-backed content
 /// capture policy as gRPC traces.
-#[tokio::test]
-#[ignore]
-async fn test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns_body(
+    env: TestEnv,
+) -> Result<()> {
     let service = TestDataGenerator::service_name();
 
     disable_content_capture(&env).await?;
@@ -480,12 +490,14 @@ async fn test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns() ->
     Ok(())
 }
 
+dual_transport_test!(
+    test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns,
+    test_g3_g6_http_traces_content_capture_disabled_scrubs_all_columns_body
+);
+
 /// HTTP guard-chain parity: OTLP/HTTP traces must enforce the same
 /// workspace-level ingestion rate limits as gRPC traces.
-#[tokio::test]
-#[ignore]
-async fn test_http_trace_workspace_ingestion_rate_limited() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_http_trace_workspace_ingestion_rate_limited_body(env: TestEnv) -> Result<()> {
     let workspace_id = env.client.workspace_id();
     let service = TestDataGenerator::service_name();
 
@@ -537,3 +549,8 @@ async fn test_http_trace_workspace_ingestion_rate_limited() -> Result<()> {
     println!("✅ HTTP guard-chain parity: trace ingestion rate limits apply to OTLP/HTTP");
     Ok(())
 }
+
+dual_transport_test!(
+    test_http_trace_workspace_ingestion_rate_limited,
+    test_http_trace_workspace_ingestion_rate_limited_body
+);

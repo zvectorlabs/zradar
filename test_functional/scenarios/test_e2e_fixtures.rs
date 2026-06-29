@@ -231,47 +231,59 @@ async fn assert_logs_fixture(env: &TestEnv, fixture_name: &str) -> Result<()> {
 // Per-fixture tests
 // ===========================================================================
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_guardrails_input_halt() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_fixture_guardrails_input_halt_body(env: TestEnv) -> Result<()> {
     assert_trace_fixture(&env, "guardrails_input_halt").await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_guardrails_action_passthrough() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_fixture_guardrails_input_halt,
+    test_fixture_guardrails_input_halt_body
+);
+
+async fn test_fixture_guardrails_action_passthrough_body(env: TestEnv) -> Result<()> {
     assert_trace_fixture(&env, "guardrails_action_passthrough").await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_nat_simple_workflow() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_fixture_guardrails_action_passthrough,
+    test_fixture_guardrails_action_passthrough_body
+);
+
+async fn test_fixture_nat_simple_workflow_body(env: TestEnv) -> Result<()> {
     assert_trace_fixture(&env, "nat_simple_workflow").await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_nat_multi_function() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_fixture_nat_simple_workflow,
+    test_fixture_nat_simple_workflow_body
+);
+
+async fn test_fixture_nat_multi_function_body(env: TestEnv) -> Result<()> {
     assert_trace_fixture(&env, "nat_multi_function").await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_openinference_langchain() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_fixture_nat_multi_function,
+    test_fixture_nat_multi_function_body
+);
+
+async fn test_fixture_openinference_langchain_body(env: TestEnv) -> Result<()> {
     assert_trace_fixture(&env, "openinference_langchain").await
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_fixture_evaluator_score() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_fixture_openinference_langchain,
+    test_fixture_openinference_langchain_body
+);
+
+async fn test_fixture_evaluator_score_body(env: TestEnv) -> Result<()> {
     assert_logs_fixture(&env, "evaluator_score").await
 }
+
+dual_transport_test!(
+    test_fixture_evaluator_score,
+    test_fixture_evaluator_score_body
+);
 
 // ===========================================================================
 // Sanity test: every fixture file is loadable + decodable. Doesn't require

@@ -52,6 +52,7 @@ async fn ingest_named_span(env: &TestEnv, service_name: &str) -> Result<String> 
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue(service_name.to_string())),
                     }),
+                    ..Default::default()
                 }],
                 ..Default::default()
             }),
@@ -103,11 +104,9 @@ async fn query_spans_by_service(env: &TestEnv, service_name: &str) -> Result<(u1
 ///
 /// Returning multiple rows would indicate the injection successfully widened
 /// the WHERE clause beyond the queried service name.
-#[tokio::test]
-#[ignore]
-async fn test_sql_injection_service_name_payloads_return_zero_rows() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_sql_injection_service_name_payloads_return_zero_rows_body(
+    env: TestEnv,
+) -> Result<()> {
     // Ingest exactly one span so there is real data under this workspace.
     let _trace_id = ingest_named_span(&env, "legit-service").await?;
     // Give the flush worker time to write the Parquet file.
@@ -143,13 +142,15 @@ async fn test_sql_injection_service_name_payloads_return_zero_rows() -> Result<(
     Ok(())
 }
 
+dual_transport_test!(
+    test_sql_injection_service_name_payloads_return_zero_rows,
+    test_sql_injection_service_name_payloads_return_zero_rows_body
+);
+
 /// Verify that a benign value containing a single-quote (e.g. Irish company
 /// names like "O'Brien Systems") is correctly escaped and returns zero rows
 /// because "O'Brien" does not match our ingested service name.
-#[tokio::test]
-#[ignore]
-async fn test_single_quote_in_service_name_is_escaped() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_single_quote_in_service_name_is_escaped_body(env: TestEnv) -> Result<()> {
     let _trace_id = ingest_named_span(&env, "clean-service").await?;
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
@@ -162,19 +163,19 @@ async fn test_single_quote_in_service_name_is_escaped() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_single_quote_in_service_name_is_escaped,
+    test_single_quote_in_service_name_is_escaped_body
+);
+
 /// Verify that the action_name filter is also injection-safe (it travels through
 /// a separate `escape_sql_str` call in `telemetry_reader.rs`).
-#[tokio::test]
-#[ignore]
-async fn test_sql_injection_action_name_returns_zero_rows() -> Result<()> {
+async fn test_sql_injection_action_name_returns_zero_rows_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
     use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
     use opentelemetry_proto::tonic::common::v1::{AnyValue as OtlpAnyValue, KeyValue};
     use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as OtlpSpan};
     use uuid::Uuid;
-
-    let env = TestEnv::setup().await?;
-
     let trace_id = Uuid::new_v4().as_bytes().to_vec();
     let mut span_id = vec![0u8; 8];
     span_id.copy_from_slice(&Uuid::new_v4().as_bytes()[0..8]);
@@ -191,6 +192,7 @@ async fn test_sql_injection_action_name_returns_zero_rows() -> Result<()> {
                     value: Some(OtlpAnyValue {
                         value: Some(AnyValue::StringValue("security-test-svc".to_string())),
                     }),
+                    ..Default::default()
                 }],
                 ..Default::default()
             }),
@@ -206,6 +208,7 @@ async fn test_sql_injection_action_name_returns_zero_rows() -> Result<()> {
                         value: Some(OtlpAnyValue {
                             value: Some(AnyValue::StringValue("benign_action".to_string())),
                         }),
+                        ..Default::default()
                     }],
                     ..Default::default()
                 }],
@@ -247,15 +250,18 @@ async fn test_sql_injection_action_name_returns_zero_rows() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_sql_injection_action_name_returns_zero_rows,
+    test_sql_injection_action_name_returns_zero_rows_body
+);
+
 // ===========================================================================
 // Unauthenticated / invalid-token request rejection
 // ===========================================================================
 
 /// Requests with no Authorization header must be rejected with a non-200
 /// status. This confirms the auth layer is not bypassed by omitting the header.
-#[tokio::test]
-#[ignore]
-async fn test_unauthenticated_request_is_rejected() -> Result<()> {
+async fn test_unauthenticated_request_is_rejected_body(_env: TestEnv) -> Result<()> {
     let session = TestSession::setup().await?;
     let anon = session.unauthenticated_client();
     let resp = anon.get("/api/v1/spans").await?;
@@ -266,11 +272,14 @@ async fn test_unauthenticated_request_is_rejected() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_unauthenticated_request_is_rejected,
+    test_unauthenticated_request_is_rejected_body
+);
+
 /// Requests carrying a syntactically valid but wrong Bearer token must be
 /// rejected with a non-200 status.
-#[tokio::test]
-#[ignore]
-async fn test_invalid_token_is_rejected() -> Result<()> {
+async fn test_invalid_token_is_rejected_body(_env: TestEnv) -> Result<()> {
     let session = TestSession::setup().await?;
 
     // Build a client that sends a wrong key.
@@ -284,6 +293,11 @@ async fn test_invalid_token_is_rejected() -> Result<()> {
     }
     Ok(())
 }
+
+dual_transport_test!(
+    test_invalid_token_is_rejected,
+    test_invalid_token_is_rejected_body
+);
 
 // ===========================================================================
 // constant_time_eq correctness (unit tests — no live server required)

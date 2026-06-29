@@ -78,3 +78,6 @@ mod test_nim_collector;
 
 #[path = "scenarios/test_security.rs"]
 mod test_security;
+
+#[path = "scenarios/test_grpc_api.rs"]
+mod test_grpc_api;

@@ -38,6 +38,8 @@ pub fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
             serde_json::Value::Object(map)
         }
         Some(Value::BytesValue(b)) => serde_json::Value::String(hex::encode(b)),
+        // String table index — no table context in this helper; treat as absent.
+        Some(Value::StringValueStrindex(_)) => serde_json::Value::Null,
         None => serde_json::Value::Null,
     }
 }
@@ -80,6 +82,7 @@ impl Serialize for AnyValueSer<'_> {
                 map.end()
             }
             Some(Value::BytesValue(b)) => ser.serialize_str(&hex::encode(b)),
+            Some(Value::StringValueStrindex(_)) => ser.serialize_none(),
             None => ser.serialize_none(),
         }
     }
@@ -134,6 +137,7 @@ mod tests {
         KeyValue {
             key: k.to_string(),
             value: Some(av(v)),
+            ..Default::default()
         }
     }
 
@@ -179,10 +183,12 @@ mod tests {
                         KeyValue {
                             key: "b".into(),
                             value: Some(av(Value::IntValue(2))),
+                            ..Default::default()
                         },
                         KeyValue {
                             key: "a".into(),
                             value: Some(av(Value::IntValue(1))),
+                            ..Default::default()
                         },
                     ],
                 }),
@@ -194,6 +200,7 @@ mod tests {
             KeyValue {
                 key: "skip.null".into(),
                 value: None,
+                ..Default::default()
             },
         ];
         assert_eq!(attrs_to_json(&attrs), reference_json(&attrs));
@@ -270,6 +277,7 @@ mod tests {
             values: vec![KeyValue {
                 key: "k".to_string(),
                 value: Some(av(Value::StringValue("v".to_string()))),
+                ..Default::default()
             }],
         }));
         let result = any_value_to_json(&v);
@@ -297,16 +305,19 @@ mod tests {
             KeyValue {
                 key: "str".to_string(),
                 value: Some(av(Value::StringValue("hello".to_string()))),
+                ..Default::default()
             },
             KeyValue {
                 key: "bool".to_string(),
                 value: Some(av(Value::BoolValue(true))),
+                ..Default::default()
             },
             KeyValue {
                 key: "arr".to_string(),
                 value: Some(av(Value::ArrayValue(ArrayValue {
                     values: vec![av(Value::IntValue(1)), av(Value::IntValue(2))],
                 }))),
+                ..Default::default()
             },
         ];
         let result = attrs_to_json(&attrs);

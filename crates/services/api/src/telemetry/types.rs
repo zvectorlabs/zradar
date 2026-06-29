@@ -35,6 +35,7 @@ pub struct TraceQueryFilters {
     // Phase 4 R4.5 — deployment.environment filter
     pub environment: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// Span query filters
@@ -65,6 +66,7 @@ pub struct SpanQueryFilters {
     // Phase 4 R4.5 — deployment.environment filter
     pub environment: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 impl SpanQueryFilters {
@@ -120,6 +122,7 @@ mod tests {
             invocation_id: None,
             environment: None,
             limit: None,
+            offset: None,
         };
         let result = params.parse_span_types().unwrap();
         assert_eq!(result, Some(vec!["GENERATION".to_string()]));
@@ -150,6 +153,7 @@ mod tests {
             invocation_id: None,
             environment: None,
             limit: None,
+            offset: None,
         };
         let result = params.parse_span_types().unwrap();
         assert_eq!(
@@ -187,6 +191,7 @@ mod tests {
             invocation_id: None,
             environment: None,
             limit: None,
+            offset: None,
         };
         assert!(params.parse_span_types().is_err());
     }
@@ -216,6 +221,7 @@ mod tests {
             invocation_id: None,
             environment: None,
             limit: None,
+            offset: None,
         };
         let result = params.parse_span_types().unwrap();
         assert_eq!(
@@ -559,6 +565,7 @@ pub struct LogQueryFilters {
     pub agent_name: Option<String>,
     pub session_id: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// Metric query filters (API-level)
@@ -572,6 +579,7 @@ pub struct MetricQueryFilters {
     pub service_name: Option<String>,
     pub agent_name: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// Metric time-series filters (API-level)

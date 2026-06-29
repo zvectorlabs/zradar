@@ -93,6 +93,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(AnyVal::StringValue(v.to_string())),
             }),
+            ..Default::default()
         }
     }
 
@@ -103,6 +104,7 @@ mod tests {
             trace_state: String::new(),
             attributes: attrs,
             dropped_attributes_count: 0,
+            ..Default::default()
         }
     }
 

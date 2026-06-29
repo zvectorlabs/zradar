@@ -2,17 +2,18 @@
 #
 # Use PowerShell on Windows instead of cmd.exe
 set windows-shell := ["powershell.exe", "-c"]
+set unstable
+set lists := true
 
 # Export CARGO_TARGET_DIR environment variable
 # If CARGO_TARGET_DIR is set in the shell environment, use it. Otherwise, default to "target".
 export CARGO_TARGET_DIR := env("CARGO_TARGET_DIR", "target")
 
-# Opt-in fast builds: `ZRADAR_FAST_BUILD=1 just <recipe>` links with mold and
-# caches compiles with sccache (Linux/macOS; both must be installed). Off by
-# default so default builds need no extra tooling, and any RUSTFLAGS /
-# RUSTC_WRAPPER you already set is honored. Compile/link dominates build time,
-# so this is the real speedup for the whole `just test`/`check`/`build` cycle.
-fast_build := env("ZRADAR_FAST_BUILD", "")
+# Opt-in/Auto-detected fast builds: links with mold and caches compiles with sccache
+# if both are installed. Compile/link dominates build time, so this speeds up the cycle.
+has_mold := `command -v mold || echo ""`
+has_sccache := `command -v sccache || echo ""`
+fast_build := env("ZRADAR_FAST_BUILD", if has_mold != "" { if has_sccache != "" { "1" } else { "" } } else { "" })
 export RUSTFLAGS := env("RUSTFLAGS", if fast_build == "" { "" } else { "-C link-arg=-fuse-ld=mold" })
 export RUSTC_WRAPPER := env("RUSTC_WRAPPER", if fast_build == "" { "" } else { "sccache" })
 
@@ -286,10 +287,10 @@ deploy-stop:
 # TESTING
 # =============================================================================
 
-# Run unit tests
+# Run unit tests (uses nextest if available for parallel workspace execution)
 test:
     @echo "🧪 Running unit tests..."
-    cargo test
+    {{ if which("cargo-nextest") == "" { "cargo test" } else { "cargo nextest run" } }}
 
 # Run benchmarks
 bench args="":
@@ -449,8 +450,12 @@ fmt:
 check:
     cargo check --all-targets
 
-# Lint code
-lint:
+# Check licenses, advisories, and dependency sources
+deny:
+    cargo deny check
+
+# Lint code (clippy + cargo-deny)
+lint: deny
     cargo clippy --all-targets -- -D warnings
 
 # Fix warnings

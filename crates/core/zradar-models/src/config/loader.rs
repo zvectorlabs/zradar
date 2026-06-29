@@ -39,6 +39,14 @@ pub struct Config {
     /// Admin API port (defaults to `query_api_port`).
     #[serde(default)]
     pub admin_api_port: Option<u16>,
+
+    /// Port for the Query gRPC API (default: 8081).
+    #[serde(default)]
+    pub query_grpc_port: Option<u16>,
+
+    /// Port for the Admin gRPC API (default: 8082).
+    #[serde(default)]
+    pub admin_grpc_port: Option<u16>,
 }
 
 impl Config {
@@ -73,6 +81,8 @@ impl Config {
                 auth: AuthConfig::default(),
                 ingestor: None,
                 admin_api_port: None,
+                query_grpc_port: None,
+                admin_grpc_port: None,
             }
         };
 
@@ -96,6 +106,16 @@ impl Config {
     /// Effective admin API port (falls back to query_api_port).
     pub fn effective_admin_port(&self) -> u16 {
         self.admin_api_port.unwrap_or(self.query_api_port)
+    }
+
+    /// Effective Query gRPC port (default: 8081).
+    pub fn effective_query_grpc_port(&self) -> u16 {
+        self.query_grpc_port.unwrap_or(8081)
+    }
+
+    /// Effective Admin gRPC port (default: 8082).
+    pub fn effective_admin_grpc_port(&self) -> u16 {
+        self.admin_grpc_port.unwrap_or(8082)
     }
 }
 

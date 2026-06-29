@@ -4,7 +4,7 @@
 //! and delegates all server startup to [`ZradarRuntimeBuilder`].
 //!
 //! This binary contains no platform-specific code. External platform wrapper binaries
-//! follow the same pattern using their own `Authenticator` and `AdminAuthorizer` implementations.
+//! follow the same pattern using their own auth implementations.
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 
 use zradar_auth_config::ConfigAuthenticator;
 use zradar_models::Config;
-use zradar_runtime::{ApiKeyAdminAuthorizer, RuntimeAuth, ZradarRuntimeBuilder};
+use zradar_runtime::{RuntimeAuth, ZradarRuntimeBuilder, api_key_authorizers_from_config};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,13 +43,12 @@ async fn main() -> Result<()> {
         None
     };
 
-    let admin = Arc::new(ApiKeyAdminAuthorizer::from_config_with_test_header_context(
-        api_keys,
-        config.auth.allow_test_header_context,
-    ));
+    let (query, admin) =
+        api_key_authorizers_from_config(api_keys, config.auth.allow_test_header_context);
 
     let runtime_auth = RuntimeAuth {
         otlp: otlp_auth,
+        query,
         admin,
     };
 

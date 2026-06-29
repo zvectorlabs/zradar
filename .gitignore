@@ -1,8 +1,18 @@
-# Rust
+# Rust (workspace root and per-crate build dirs)
 target/
-/target-just/
+target-just/
 **/*.rs.bk
 *.pdb
+
+# Node.js (examples/nodejs)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python (examples/python)
+.venv/
+__pycache__/
+*.py[cod]
 
 # IDE
 .idea/
@@ -12,15 +22,21 @@ target/
 *~
 .DS_Store
 
-# Configuration
+# Local configuration (use config.example.toml as template)
 config.toml
 config.toml.backup
 *.local.toml
 
+# Environment
+.env
+.env.*
+!.env.example
+
 # Logs
 *.log
 
-# Generated files
+# Local / test data
+data-test/
 
 # Data directories (preserve structure but ignore contents)
 data/trace-batches/*
@@ -31,10 +47,5 @@ data/parquet-files/*
 data/wal/*
 !data/wal/.gitkeep
 
-data-test/
-
-.env
-
-.lenv
-target-just/
+# Sibling workspace repos (when checked out next to zradar)
 zradar-plans/

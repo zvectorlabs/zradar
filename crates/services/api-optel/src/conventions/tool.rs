@@ -44,6 +44,7 @@ mod tests {
             value: Some(AnyValue {
                 value: Some(Value::StringValue(v.to_string())),
             }),
+            ..Default::default()
         }
     }
 

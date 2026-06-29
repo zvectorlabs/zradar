@@ -4,11 +4,7 @@
 use crate::*;
 use uuid::Uuid;
 
-#[tokio::test]
-#[ignore]
-async fn test_send_single_trace() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_send_single_trace_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
@@ -32,11 +28,9 @@ async fn test_send_single_trace() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_send_multi_span_trace() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_send_single_trace, test_send_single_trace_body);
 
+async fn test_send_multi_span_trace_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let root_span_id = TestDataGenerator::span_id();
     let child_span_id = TestDataGenerator::span_id();
@@ -67,11 +61,9 @@ async fn test_send_multi_span_trace() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_send_multiple_traces() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_send_multi_span_trace, test_send_multi_span_trace_body);
 
+async fn test_send_multiple_traces_body(env: TestEnv) -> Result<()> {
     let service_name = TestDataGenerator::service_name();
     let mut trace_ids = Vec::new();
 
@@ -105,6 +97,8 @@ async fn test_send_multiple_traces() -> Result<()> {
     println!("✅ All 5 traces stored and verified");
     Ok(())
 }
+
+dual_transport_test!(test_send_multiple_traces, test_send_multiple_traces_body);
 
 #[tokio::test]
 #[ignore]
@@ -150,10 +144,7 @@ async fn test_trace_with_invalid_api_key_rejected() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_trace_for_blocked_workspace_rejected() -> Result<()> {
-    let mut env = TestEnv::setup().await?;
+async fn test_trace_for_blocked_workspace_rejected_body(mut env: TestEnv) -> Result<()> {
     let blocked_workspace_id = Uuid::new_v4();
 
     env.client
@@ -197,10 +188,12 @@ async fn test_trace_for_blocked_workspace_rejected() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_trace_workspace_ingestion_rate_limited() -> Result<()> {
-    let mut env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_trace_for_blocked_workspace_rejected,
+    test_trace_for_blocked_workspace_rejected_body
+);
+
+async fn test_trace_workspace_ingestion_rate_limited_body(mut env: TestEnv) -> Result<()> {
     let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
@@ -250,10 +243,12 @@ async fn test_trace_workspace_ingestion_rate_limited() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_metrics_workspace_ingestion_rate_limited() -> Result<()> {
-    let mut env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_trace_workspace_ingestion_rate_limited,
+    test_trace_workspace_ingestion_rate_limited_body
+);
+
+async fn test_metrics_workspace_ingestion_rate_limited_body(mut env: TestEnv) -> Result<()> {
     let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
@@ -293,10 +288,12 @@ async fn test_metrics_workspace_ingestion_rate_limited() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_logs_workspace_ingestion_rate_limited() -> Result<()> {
-    let mut env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_metrics_workspace_ingestion_rate_limited,
+    test_metrics_workspace_ingestion_rate_limited_body
+);
+
+async fn test_logs_workspace_ingestion_rate_limited_body(mut env: TestEnv) -> Result<()> {
     let rate_limited_workspace_id = Uuid::new_v4();
 
     env.client
@@ -336,14 +333,15 @@ async fn test_logs_workspace_ingestion_rate_limited() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_logs_workspace_ingestion_rate_limited,
+    test_logs_workspace_ingestion_rate_limited_body
+);
+
 // Note: API key revocation is no longer supported — keys are config-based.
 // Revocation requires updating config.toml and restarting the server.
 
-#[tokio::test]
-#[ignore]
-async fn test_trace_with_different_service_names() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_trace_with_different_service_names_body(env: TestEnv) -> Result<()> {
     let services = vec!["frontend", "backend", "database", "cache"];
     let mut trace_ids = Vec::new();
 
@@ -371,11 +369,12 @@ async fn test_trace_with_different_service_names() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_trace_with_complex_attributes() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_trace_with_different_service_names,
+    test_trace_with_different_service_names_body
+);
 
+async fn test_trace_with_complex_attributes_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = TestDataGenerator::service_name();
@@ -400,11 +399,12 @@ async fn test_trace_with_complex_attributes() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_high_volume_trace_ingestion() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_trace_with_complex_attributes,
+    test_trace_with_complex_attributes_body
+);
 
+async fn test_high_volume_trace_ingestion_body(env: TestEnv) -> Result<()> {
     let service_name = TestDataGenerator::service_name();
     let count = 50;
     let mut last_trace_id = None;
@@ -453,11 +453,12 @@ async fn test_high_volume_trace_ingestion() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_concurrent_trace_ingestion() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_high_volume_trace_ingestion,
+    test_high_volume_trace_ingestion_body
+);
 
+async fn test_concurrent_trace_ingestion_body(env: TestEnv) -> Result<()> {
     let grpc_url = env.grpc_url().to_string();
     let api_key = env.api_key.clone();
     let service_name = TestDataGenerator::service_name();
@@ -510,3 +511,8 @@ async fn test_concurrent_trace_ingestion() -> Result<()> {
     println!("✅ Concurrent trace ingestion and storage verified");
     Ok(())
 }
+
+dual_transport_test!(
+    test_concurrent_trace_ingestion,
+    test_concurrent_trace_ingestion_body
+);

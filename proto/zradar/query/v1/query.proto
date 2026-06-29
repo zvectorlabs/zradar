@@ -1,0 +1,700 @@
+// Copyright 2024-2026 Agnitiv. All rights reserved.
+//
+// Proto definitions for the zRadar Query API.
+
+syntax = "proto3";
+
+package zradar.query.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/agnitiv/zradar/gen/go/zradar/query/v1;queryv1";
+
+// ============================================================================
+// Common messages
+// ============================================================================
+
+// Pagination parameters for list/query requests.
+message PaginationRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+// A time range filter. Both start and end are inclusive.
+message TimeRange {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+}
+
+// ============================================================================
+// QueryService — Traces, Spans, Logs, Metrics
+// ============================================================================
+
+// QueryService provides RPCs for querying telemetry data:
+// traces, spans, logs, and metrics.
+service QueryService {
+  // QueryTraces returns a paginated list of trace summaries matching the
+  // provided filters.
+  rpc QueryTraces(QueryTracesRequest) returns (QueryTracesResponse);
+
+  // GetTrace returns the full detail of a single trace, including all
+  // constituent spans.
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
+
+  // QuerySpans returns a paginated list of span details matching the
+  // provided filters.
+  rpc QuerySpans(QuerySpansRequest) returns (QuerySpansResponse);
+
+  // GetSpan returns a single span by its ID.
+  rpc GetSpan(GetSpanRequest) returns (GetSpanResponse);
+
+  // QueryLogs returns a paginated list of log records matching the
+  // provided filters.
+  rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
+
+  // GetLog returns a single log record by its ID.
+  rpc GetLog(GetLogRequest) returns (GetLogResponse);
+
+  // QueryMetrics returns a paginated list of metric data points matching
+  // the provided filters.
+  rpc QueryMetrics(QueryMetricsRequest) returns (QueryMetricsResponse);
+
+  // QueryMetricSeries returns a bucketed time-series of aggregated metric
+  // values for a specific metric name.
+  rpc QueryMetricSeries(QueryMetricSeriesRequest) returns (QueryMetricSeriesResponse);
+}
+
+// ============================================================================
+// AnalyticsService — Dashboards, Usage, Guardrails
+// ============================================================================
+
+// AnalyticsService provides RPCs for analytics dashboards, usage monitoring,
+// and LLM/Agent/Guardrails analytics.
+service AnalyticsService {
+  // GetAnalytics returns generic grouped time-series analytics data.
+  rpc GetAnalytics(GetAnalyticsRequest) returns (GetAnalyticsResponse);
+
+  // GetMetricsSummary returns aggregate metrics (trace count, error rate,
+  // latency percentiles) for a time range.
+  rpc GetMetricsSummary(GetMetricsSummaryRequest) returns (GetMetricsSummaryResponse);
+
+  // GetTopEndpoints returns the top-N endpoints by request count, ranked
+  // by volume and annotated with latency/error statistics.
+  rpc GetTopEndpoints(GetTopEndpointsRequest) returns (GetTopEndpointsResponse);
+
+  // GetErrorBreakdown returns errors grouped by error type with counts
+  // and percentages.
+  rpc GetErrorBreakdown(GetErrorBreakdownRequest) returns (GetErrorBreakdownResponse);
+
+  // GetLlmAnalytics returns per-model LLM usage statistics (request count,
+  // tokens, cost, latency).
+  rpc GetLlmAnalytics(GetLlmAnalyticsRequest) returns (GetLlmAnalyticsResponse);
+
+  // GetAgentAnalytics returns per-agent usage statistics (span count,
+  // errors, tokens, latency).
+  rpc GetAgentAnalytics(GetAgentAnalyticsRequest) returns (GetAgentAnalyticsResponse);
+
+  // GetGuardrailsAnalytics returns guardrails halt-rate, per-rail-type
+  // breakdown, and top halting rails.
+  rpc GetGuardrailsAnalytics(GetGuardrailsAnalyticsRequest) returns (GetGuardrailsAnalyticsResponse);
+
+  // GetStorageUsage returns aggregated storage usage statistics for active
+  // telemetry files, optionally filtered by signal type and location.
+  rpc GetStorageUsage(GetStorageUsageRequest) returns (GetStorageUsageResponse);
+
+  // GetStorageUsageDaily returns daily storage usage time-series, broken
+  // down by signal type.
+  rpc GetStorageUsageDaily(GetStorageUsageDailyRequest) returns (GetStorageUsageDailyResponse);
+
+  // GetQuotaStatus returns the current quota consumption status for the
+  // workspace, optionally filtered by signal kind.
+  rpc GetQuotaStatus(GetQuotaStatusRequest) returns (GetQuotaStatusResponse);
+
+  // GetUsageDaily returns daily usage records (bytes, records, query count)
+  // broken down by signal and operation.
+  rpc GetUsageDaily(GetUsageDailyRequest) returns (GetUsageDailyResponse);
+
+  // GetIngestRate returns ingest rate (records/sec, bytes/sec) windows
+  // for the workspace.
+  rpc GetIngestRate(GetIngestRateRequest) returns (GetIngestRateResponse);
+
+  // GetQueryUsage returns query usage windows (bytes scanned, rows scanned,
+  // query count, average latency).
+  rpc GetQueryUsage(GetQueryUsageRequest) returns (GetQueryUsageResponse);
+}
+
+// ============================================================================
+// QueryService — Request / Response messages
+// ============================================================================
+
+// --- Traces ---
+
+message QueryTracesRequest {
+  string workspace_id = 1;
+  optional TimeRange time_range = 2;
+  optional string service_name = 3;
+  // Filter traces containing spans whose name matches (substring).
+  // Maps to the `operation_name` query parameter in the HTTP API.
+  optional string operation_name = 4;
+  optional string status = 5;
+  optional uint64 min_duration_ms = 6;
+  optional uint64 max_duration_ms = 7;
+  optional string llm_model = 8;
+  optional string llm_provider = 9;
+  optional string llm_response_model = 10;
+  optional string agent_name = 11;
+  optional string session_id = 12;
+  // NeMo / Guardrails filters
+  optional string rail_type = 13;
+  optional string action_name = 14;
+  optional string workflow_run_id = 15;
+  optional string framework = 16;
+  optional string tool_name = 17;
+  optional string invocation_id = 18;
+  // Deployment environment (prod / staging / etc.)
+  optional string environment = 19;
+  PaginationRequest pagination = 20;
+}
+
+message QueryTracesResponse {
+  repeated TraceSummary items = 1;
+  int64 total_count = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message GetTraceRequest {
+  string workspace_id = 1;
+  string trace_id = 2;
+}
+
+message GetTraceResponse {
+  TraceDetail trace = 1;
+}
+
+// --- Spans ---
+
+message QuerySpansRequest {
+  string workspace_id = 1;
+  optional string trace_id = 2;
+  optional TimeRange time_range = 3;
+  optional string service_name = 4;
+  optional string operation_name = 5;
+  // Filter by one or more span types (SPAN, GENERATION, TOOL, AGENT, etc.).
+  repeated string span_types = 6;
+  optional string status = 7;
+  optional string llm_model = 8;
+  optional string llm_provider = 9;
+  optional string llm_response_model = 10;
+  optional string agent_name = 11;
+  optional string session_id = 12;
+  // NeMo / Guardrails filters
+  optional string rail_type = 13;
+  optional string action_name = 14;
+  optional string workflow_run_id = 15;
+  optional string framework = 16;
+  optional string tool_name = 17;
+  optional string invocation_id = 18;
+  optional string environment = 19;
+  PaginationRequest pagination = 20;
+}
+
+message QuerySpansResponse {
+  repeated SpanDetail items = 1;
+  int64 total_count = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message GetSpanRequest {
+  string workspace_id = 1;
+  string span_id = 2;
+}
+
+message GetSpanResponse {
+  SpanDetail span = 1;
+}
+
+// --- Logs ---
+
+message QueryLogsRequest {
+  string workspace_id = 1;
+  optional TimeRange time_range = 2;
+  optional string severity = 3;
+  optional string service_name = 4;
+  optional string trace_id = 5;
+  optional string search_text = 6;
+  optional string agent_name = 7;
+  optional string session_id = 8;
+  PaginationRequest pagination = 9;
+}
+
+message QueryLogsResponse {
+  repeated LogDetail items = 1;
+  int64 total_count = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message GetLogRequest {
+  string workspace_id = 1;
+  string log_id = 2;
+}
+
+message GetLogResponse {
+  LogDetail log = 1;
+}
+
+// --- Metrics ---
+
+message QueryMetricsRequest {
+  string workspace_id = 1;
+  optional TimeRange time_range = 2;
+  optional string metric_name = 3;
+  optional string service_name = 4;
+  optional string agent_name = 5;
+  PaginationRequest pagination = 6;
+}
+
+message QueryMetricsResponse {
+  repeated MetricDetail items = 1;
+  int64 total_count = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+// --- Metric Series ---
+
+message QueryMetricSeriesRequest {
+  string workspace_id = 1;
+  // Required. The name of the metric to query.
+  string metric_name = 2;
+  optional TimeRange time_range = 3;
+  // Bucket interval in seconds (e.g. 60 for 1-minute buckets). Default: 60.
+  optional uint64 interval_seconds = 4;
+  // Aggregation function: "avg", "sum", "min", "max", "count". Default: "avg".
+  optional string aggregation = 5;
+  optional string service_name = 6;
+}
+
+message QueryMetricSeriesResponse {
+  repeated MetricSeriesPoint points = 1;
+}
+
+// ============================================================================
+// AnalyticsService — Request / Response messages
+// ============================================================================
+
+message GetAnalyticsRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start = 2;
+  optional google.protobuf.Timestamp end = 3;
+  // Metric to compute: "trace_count", "span_count", "total_tokens", etc.
+  optional string metric = 4;
+  // Dimensions to group by, e.g. ["agent_name", "llm_model"].
+  repeated string group_by = 5;
+  // WHERE filters on allowed columns: {"agent_name": "planner"}.
+  map<string, string> filters = 6;
+}
+
+message GetAnalyticsResponse {
+  repeated AnalyticsResult results = 1;
+}
+
+message GetMetricsSummaryRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start = 2;
+  optional google.protobuf.Timestamp end = 3;
+}
+
+message GetMetricsSummaryResponse {
+  int64 total_traces = 1;
+  double error_rate = 2;
+  double p50_latency = 3;
+  double p90_latency = 4;
+  double p99_latency = 5;
+}
+
+message GetTopEndpointsRequest {
+  string workspace_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  optional int64 n = 4;
+}
+
+message GetTopEndpointsResponse {
+  repeated TopEndpoint endpoints = 1;
+}
+
+message GetErrorBreakdownRequest {
+  string workspace_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  optional string service_name = 4;
+}
+
+message GetErrorBreakdownResponse {
+  repeated ErrorBreakdown errors = 1;
+}
+
+message GetLlmAnalyticsRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start = 2;
+  optional google.protobuf.Timestamp end = 3;
+  optional string metric = 4;
+  repeated string group_by = 5;
+  map<string, string> filters = 6;
+}
+
+message GetLlmAnalyticsResponse {
+  repeated LlmAnalytics items = 1;
+}
+
+message GetAgentAnalyticsRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start = 2;
+  optional google.protobuf.Timestamp end = 3;
+  optional string metric = 4;
+  repeated string group_by = 5;
+  map<string, string> filters = 6;
+}
+
+message GetAgentAnalyticsResponse {
+  repeated AgentAnalytics items = 1;
+}
+
+message GetGuardrailsAnalyticsRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start = 2;
+  optional google.protobuf.Timestamp end = 3;
+}
+
+message GetGuardrailsAnalyticsResponse {
+  int64 total_requests = 1;
+  int64 halted_requests = 2;
+  double halt_rate = 3;
+  repeated RailTypeBreakdown by_rail_type = 4;
+  repeated RailNameStat top_halting_rails = 5;
+}
+
+message GetStorageUsageRequest {
+  string workspace_id = 1;
+  optional google.protobuf.Timestamp start_time = 2;
+  optional google.protobuf.Timestamp end_time = 3;
+  optional string signal_type = 4;
+  optional string location = 5;
+}
+
+message GetStorageUsageResponse {
+  repeated StorageUsage items = 1;
+}
+
+message GetStorageUsageDailyRequest {
+  string workspace_id = 1;
+  optional string signal = 2;
+  optional google.protobuf.Timestamp start_time = 3;
+  optional google.protobuf.Timestamp end_time = 4;
+}
+
+message GetStorageUsageDailyResponse {
+  repeated StorageUsageDaily items = 1;
+}
+
+message GetQuotaStatusRequest {
+  string workspace_id = 1;
+  optional string signal = 2;
+}
+
+message GetQuotaStatusResponse {
+  repeated QuotaStatus items = 1;
+}
+
+message GetUsageDailyRequest {
+  string workspace_id = 1;
+  optional string signal = 2;
+  optional google.protobuf.Timestamp start_time = 3;
+  optional google.protobuf.Timestamp end_time = 4;
+}
+
+message GetUsageDailyResponse {
+  repeated UsageDailyRecord items = 1;
+}
+
+message GetIngestRateRequest {
+  string workspace_id = 1;
+  optional string signal = 2;
+  optional google.protobuf.Timestamp start_time = 3;
+  optional google.protobuf.Timestamp end_time = 4;
+}
+
+message GetIngestRateResponse {
+  repeated IngestRateRecord items = 1;
+}
+
+message GetQueryUsageRequest {
+  string workspace_id = 1;
+  optional string signal = 2;
+  optional google.protobuf.Timestamp start_time = 3;
+  optional google.protobuf.Timestamp end_time = 4;
+}
+
+message GetQueryUsageResponse {
+  repeated QueryUsageRecord items = 1;
+}
+
+// ============================================================================
+// Domain messages — Telemetry data types
+// ============================================================================
+
+// Summary of a trace, returned in list queries.
+message TraceSummary {
+  string trace_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  int64 duration_ms = 3;
+  string service_name = 4;
+  // The root span name / trace name.
+  string operation_name = 5;
+  // Status string: "OK", "ERROR", "UNSET".
+  string status = 6;
+  int64 span_count = 7;
+}
+
+// Full trace detail including all constituent spans.
+message TraceDetail {
+  string trace_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  int64 duration_ms = 3;
+  repeated SpanDetail spans = 4;
+}
+
+// Detailed span information.
+message SpanDetail {
+  string span_id = 1;
+  string trace_id = 2;
+  optional string parent_span_id = 3;
+  string service_name = 4;
+  string operation_name = 5;
+  // Span kind: SPAN, EVENT, GENERATION, AGENT, TOOL, GUARDRAIL, etc.
+  string span_type = 6;
+  google.protobuf.Timestamp start_time = 7;
+  int64 duration_ms = 8;
+  string status = 9;
+  // Agent fields
+  optional string agent_name = 10;
+  optional string agent_type = 11;
+  optional string session_id = 12;
+  // LLM fields
+  optional string llm_model = 13;
+  optional string llm_provider = 14;
+  optional string llm_response_model = 15;
+  optional string llm_input = 16;
+  optional string llm_output = 17;
+  optional int32 prompt_tokens = 18;
+  optional int32 completion_tokens = 19;
+  optional int32 total_tokens = 20;
+  optional double prompt_cost_usd = 21;
+  optional double completion_cost_usd = 22;
+  optional double total_cost_usd = 23;
+  // Tool fields
+  optional string tool_name = 24;
+  optional string tool_call_id = 25;
+  // Guardrails fields
+  optional string rail_type = 26;
+  optional string rail_name = 27;
+  optional bool rail_stop = 28;
+  optional string action_name = 29;
+  // NeMo / GenAI fields
+  optional string workflow_run_id = 30;
+  optional string framework = 31;
+  // NeMo extensions on Guardrails LLM children (Phase 4 R4.2/R4.3).
+  optional bool llm_cache_hit = 32;
+  optional string llm_response_id = 33;
+  // Deployment environment (Phase 4 R4.5).
+  optional string environment = 34;
+  // gen_ai.request.* sampling params (JSON string). Phase 4 R4.4.
+  optional string model_parameters_json = 35;
+  // Span events (JSON string).
+  optional string events_json = 36;
+  // OTLP span links (JSON string). Phase 4 R4.6.
+  optional string links_json = 37;
+  // Arbitrary key-value attributes. Values are JSON-encoded strings.
+  map<string, string> attributes = 38;
+}
+
+// Log record detail.
+message LogDetail {
+  string id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string severity = 3;
+  string service_name = 4;
+  string message = 5;
+  optional string trace_id = 6;
+  optional string span_id = 7;
+  optional string agent_name = 8;
+  optional string session_id = 9;
+  optional string user_id = 10;
+  // Arbitrary key-value attributes. Values are JSON-encoded strings.
+  map<string, string> attributes = 11;
+}
+
+// Metric data point.
+message MetricDetail {
+  string metric_name = 1;
+  string metric_type = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string service_name = 4;
+  double value = 5;
+  int64 count = 6;
+  double sum = 7;
+  double min = 8;
+  double max = 9;
+  // Metric labels. Values are JSON-encoded strings.
+  map<string, string> labels = 10;
+}
+
+// A single point in a metric time-series.
+message MetricSeriesPoint {
+  google.protobuf.Timestamp timestamp = 1;
+  double value = 2;
+}
+
+// ============================================================================
+// Domain messages — Analytics data types
+// ============================================================================
+
+// A single analytics time-series data point.
+message AnalyticsResult {
+  // ISO 8601 timestamp string for the bucket.
+  string timestamp = 1;
+  double value = 2;
+  // Group dimension values, e.g. {"agent_name": "planner"}.
+  map<string, string> groups = 3;
+}
+
+// Top endpoint statistics.
+message TopEndpoint {
+  string operation_name = 1;
+  string service_name = 2;
+  int64 count = 3;
+  double avg_duration_ms = 4;
+  optional double p95_duration_ms = 5;
+  double error_rate = 6;
+}
+
+// Error type breakdown.
+message ErrorBreakdown {
+  string error_type = 1;
+  int64 count = 2;
+  double percentage = 3;
+}
+
+// Per-model LLM usage statistics.
+message LlmAnalytics {
+  string llm_model = 1;
+  int64 request_count = 2;
+  double total_tokens = 3;
+  double total_cost_usd = 4;
+  double avg_duration_ms = 5;
+}
+
+// Per-agent usage statistics.
+message AgentAnalytics {
+  string agent_name = 1;
+  optional string agent_type = 2;
+  int64 span_count = 3;
+  int64 error_count = 4;
+  double total_tokens = 5;
+  double avg_duration_ms = 6;
+}
+
+// Per-rail-type breakdown for guardrails analytics.
+message RailTypeBreakdown {
+  string rail_type = 1;
+  int64 count = 2;
+  int64 halted = 3;
+  double halt_rate = 4;
+}
+
+// Per-rail-name statistics (top halting rails).
+message RailNameStat {
+  string rail_name = 1;
+  string rail_type = 2;
+  int64 halts = 3;
+  int64 total = 4;
+}
+
+// Aggregated storage usage for active telemetry files.
+message StorageUsage {
+  string workspace_id = 1;
+  string signal_type = 2;
+  string location = 3;
+  int64 file_count = 4;
+  int64 records = 5;
+  int64 original_size = 6;
+  int64 compressed_size = 7;
+}
+
+// Daily storage usage time-series point.
+message StorageUsageDaily {
+  string workspace_id = 1;
+  string signal = 2;
+  // Date string (YYYY-MM-DD).
+  string day = 3;
+  int64 compressed_bytes = 4;
+  int64 file_count = 5;
+  // Capture timestamp (microseconds since epoch).
+  int64 captured_at = 6;
+  bool estimated_today = 7;
+}
+
+// Current quota consumption status.
+message QuotaStatus {
+  // Signal kind: "traces", "logs", "metrics", "all".
+  string signal = 1;
+  // Operation: "ingest", "query", "store".
+  string operation = 2;
+  string limit_kind = 3;
+  int64 limit_value = 4;
+  int64 observed_value = 5;
+  double pct_consumed = 6;
+  // Threshold status: "ok", "warning", "critical", "grace", "blocked".
+  string status = 7;
+  optional int64 period_start = 8;
+  optional int64 period_end = 9;
+  optional int64 projected_exhaustion_at = 10;
+}
+
+// Daily usage record broken down by signal and operation.
+message UsageDailyRecord {
+  string workspace_id = 1;
+  string signal = 2;
+  string operation = 3;
+  // Date string (YYYY-MM-DD).
+  string day = 4;
+  int64 used_bytes = 5;
+  int64 records = 6;
+  int64 query_count = 7;
+  int64 file_count = 8;
+}
+
+// Ingest rate window record.
+message IngestRateRecord {
+  string workspace_id = 1;
+  string signal = 2;
+  uint64 records_per_sec = 3;
+  uint64 bytes_per_sec = 4;
+  int64 window_start_micros = 5;
+  int64 window_end_micros = 6;
+}
+
+// Query usage window record.
+message QueryUsageRecord {
+  string workspace_id = 1;
+  string signal = 2;
+  int64 bytes_scanned = 3;
+  int64 rows_scanned = 4;
+  int64 query_count = 5;
+  optional double avg_query_time_ms = 6;
+  int64 window_start_micros = 7;
+  int64 window_end_micros = 8;
+}

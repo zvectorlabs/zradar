@@ -18,11 +18,7 @@ fn assert_grpc_status(error: &anyhow::Error, code: tonic::Code, message: &str) -
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_policy_rate_block_rejects_trace_ingest() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_policy_rate_block_rejects_trace_ingest_body(env: TestEnv) -> Result<()> {
     let response = env
         .client
         .put(
@@ -69,11 +65,12 @@ async fn test_policy_rate_block_rejects_trace_ingest() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_usage_tracking_drives_ingest_quota_block() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_policy_rate_block_rejects_trace_ingest,
+    test_policy_rate_block_rejects_trace_ingest_body
+);
 
+async fn test_usage_tracking_drives_ingest_quota_block_body(env: TestEnv) -> Result<()> {
     let response = env
         .client
         .put(
@@ -130,11 +127,12 @@ async fn test_usage_tracking_drives_ingest_quota_block() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_policy_query_window_rejects_trace_query() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_usage_tracking_drives_ingest_quota_block,
+    test_usage_tracking_drives_ingest_quota_block_body
+);
 
+async fn test_policy_query_window_rejects_trace_query_body(env: TestEnv) -> Result<()> {
     let response = env
         .client
         .put(
@@ -195,3 +193,8 @@ async fn test_policy_query_window_rejects_trace_query() -> Result<()> {
     println!("✅ Policy query window rejected over-wide trace query");
     Ok(())
 }
+
+dual_transport_test!(
+    test_policy_query_window_rejects_trace_query,
+    test_policy_query_window_rejects_trace_query_body
+);

@@ -1014,21 +1014,41 @@ async fn insert_write_samples(
             file_id,
             decision,
             flushed_at
-        )
+        ) VALUES 
         "#,
     );
 
-    builder.push_values(samples, |mut b, sample| {
-        b.push_bind(sample.workspace_id)
-            .push_bind(signal_kind(sample.signal))
-            .push_bind(sample.stream_name.as_deref())
-            .push_bind(sample.compressed_bytes)
-            .push_bind(sample.original_bytes)
-            .push_bind(sample.records)
-            .push_bind(sample.file_id)
-            .push_bind(decision_summary(sample.decision))
-            .push_bind(sample.flushed_at);
-    });
+    for (i, sample) in samples.iter().enumerate() {
+        if i > 0 {
+            builder.push(", ");
+        }
+        builder.push("(");
+        builder.push_bind(sample.workspace_id);
+        builder.push(", ");
+        builder.push_bind(signal_kind(sample.signal));
+        builder.push(", ");
+        builder.push_bind(sample.stream_name.as_deref());
+        builder.push(", ");
+        builder.push_bind(sample.compressed_bytes);
+        builder.push(", ");
+        builder.push_bind(sample.original_bytes);
+        builder.push(", ");
+        builder.push_bind(sample.records);
+        builder.push(", ");
+
+        if sample.file_id.is_none() {
+            builder.push("NULL, ");
+        } else {
+            builder.push("(SELECT id FROM file_list WHERE id = ");
+            builder.push_bind(sample.file_id);
+            builder.push("), ");
+        }
+
+        builder.push_bind(decision_summary(sample.decision));
+        builder.push(", ");
+        builder.push_bind(sample.flushed_at);
+        builder.push(")");
+    }
 
     let mut tx = client.pool().begin().await?;
     builder.build().execute(&mut *tx).await?;

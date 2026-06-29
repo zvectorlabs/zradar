@@ -48,10 +48,7 @@ fn kv_bool(key: &str, val: bool) -> (String, OtlpAnyValue) {
 // ---------------------------------------------------------------------------
 
 /// AC2.1a: ?rail_type=input returns only spans with rail_type='input'.
-#[tokio::test]
-#[ignore]
-async fn test_r2_1_rail_type_filter_returns_matching() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_1_rail_type_filter_returns_matching_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
 
     // Ingest two GUARDRAIL spans: one with rail_type=input, one with rail_type=output
@@ -124,11 +121,13 @@ async fn test_r2_1_rail_type_filter_returns_matching() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_1_rail_type_filter_returns_matching,
+    test_r2_1_rail_type_filter_returns_matching_body
+);
+
 /// AC2.1 edge case: filter that matches nothing returns empty items, not 200-with-everything.
-#[tokio::test]
-#[ignore]
-async fn test_r2_1_filter_no_match_returns_empty() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_1_filter_no_match_returns_empty_body(env: TestEnv) -> Result<()> {
     let workspace_id = env.client.workspace_id();
 
     let resp = env
@@ -148,15 +147,17 @@ async fn test_r2_1_filter_no_match_returns_empty() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_1_filter_no_match_returns_empty,
+    test_r2_1_filter_no_match_returns_empty_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.2 — action_name filter
 // ---------------------------------------------------------------------------
 
 /// AC2.2: ?action_name=self_check_input filters correctly.
-#[tokio::test]
-#[ignore]
-async fn test_r2_2_action_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_2_action_name_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -199,15 +200,17 @@ async fn test_r2_2_action_name_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_2_action_name_filter,
+    test_r2_2_action_name_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.3 — workflow_run_id filter
 // ---------------------------------------------------------------------------
 
 /// AC2.3: ?workflow_run_id=... filters to one NAT workflow.
-#[tokio::test]
-#[ignore]
-async fn test_r2_3_workflow_run_id_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_3_workflow_run_id_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let unique_run_id = format!("wf-{}", hex::encode(TestDataGenerator::trace_id()));
 
@@ -246,15 +249,17 @@ async fn test_r2_3_workflow_run_id_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_3_workflow_run_id_filter,
+    test_r2_3_workflow_run_id_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.4 — framework filter
 // ---------------------------------------------------------------------------
 
 /// AC2.4: ?framework=langchain filters correctly.
-#[tokio::test]
-#[ignore]
-async fn test_r2_4_framework_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_4_framework_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -294,15 +299,14 @@ async fn test_r2_4_framework_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(test_r2_4_framework_filter, test_r2_4_framework_filter_body);
+
 // ---------------------------------------------------------------------------
 // AC2.5 — tool_name filter
 // ---------------------------------------------------------------------------
 
 /// AC2.5: ?tool_name=web_search filters correctly.
-#[tokio::test]
-#[ignore]
-async fn test_r2_5_tool_name_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_5_tool_name_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -342,6 +346,8 @@ async fn test_r2_5_tool_name_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(test_r2_5_tool_name_filter, test_r2_5_tool_name_filter_body);
+
 // ---------------------------------------------------------------------------
 // AC2.6 — invocation_id filter
 // ---------------------------------------------------------------------------
@@ -349,10 +355,7 @@ async fn test_r2_5_tool_name_filter() -> Result<()> {
 /// AC2.6: ?invocation_id=... filters correctly with the canonical wire key
 /// `invocation.id` (P2-G3: AgentConvention now maps invocation.id /
 /// zradar.invocation.id / invocation_id into the invocation_id column).
-#[tokio::test]
-#[ignore]
-async fn test_r2_6_invocation_id_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_6_invocation_id_filter_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let unique_inv_id = format!("inv-{}", hex::encode(TestDataGenerator::span_id()));
 
@@ -410,15 +413,17 @@ async fn test_r2_6_invocation_id_filter() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_6_invocation_id_filter,
+    test_r2_6_invocation_id_filter_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.7 / AC2.8 — RERANKER span type
 // ---------------------------------------------------------------------------
 
 /// AC2.7: Span with openinference.span.kind=RERANKER is stored as span_type='RERANKER'.
-#[tokio::test]
-#[ignore]
-async fn test_r2_7_reranker_span_type_detection() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_7_reranker_span_type_detection_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -449,11 +454,13 @@ async fn test_r2_7_reranker_span_type_detection() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_7_reranker_span_type_detection,
+    test_r2_7_reranker_span_type_detection_body
+);
+
 /// AC2.8: RERANKER spans are returned by ?span_type=RERANKER filter.
-#[tokio::test]
-#[ignore]
-async fn test_r2_8_reranker_queryable_by_span_type() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_8_reranker_queryable_by_span_type_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -496,16 +503,18 @@ async fn test_r2_8_reranker_queryable_by_span_type() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_8_reranker_queryable_by_span_type,
+    test_r2_8_reranker_queryable_by_span_type_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.9 — GET /api/v1/analytics/guardrails
 // ---------------------------------------------------------------------------
 
 /// AC2.9: GET /api/v1/analytics/guardrails returns valid JSON with the documented
 /// shape AND correct aggregates. Hardened per P2-G4 to assert behavior, not just shape.
-#[tokio::test]
-#[ignore]
-async fn test_r2_9_guardrails_analytics_endpoint_shape() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_9_guardrails_analytics_endpoint_shape_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     // Use a unique rail.name so we can find our ingested rail in the
     // top_halting_rails list independently of any other test data.
@@ -650,15 +659,17 @@ async fn test_r2_9_guardrails_analytics_endpoint_shape() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r2_9_guardrails_analytics_endpoint_shape,
+    test_r2_9_guardrails_analytics_endpoint_shape_body
+);
+
 // ---------------------------------------------------------------------------
 // AC2.10 — NAT workflow appears in /api/v1/analytics/agents
 // ---------------------------------------------------------------------------
 
 /// AC2.10: NAT workflow appears in GET /api/v1/analytics/agents without code changes.
-#[tokio::test]
-#[ignore]
-async fn test_r2_10_nat_agents_analytics_smoke() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_r2_10_nat_agents_analytics_smoke_body(env: TestEnv) -> Result<()> {
     let service = TestDataGenerator::service_name();
     let agent_name = format!("nat-agent-{}", hex::encode(TestDataGenerator::span_id()));
 
@@ -720,3 +731,8 @@ async fn test_r2_10_nat_agents_analytics_smoke() -> Result<()> {
     println!("✅ AC2.10: NAT workflow agent appears in /api/v1/analytics/agents");
     Ok(())
 }
+
+dual_transport_test!(
+    test_r2_10_nat_agents_analytics_smoke,
+    test_r2_10_nat_agents_analytics_smoke_body
+);

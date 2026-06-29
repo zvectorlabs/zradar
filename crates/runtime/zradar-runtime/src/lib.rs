@@ -5,13 +5,15 @@
 //! admin-context strategies via [`RuntimeAuth`].
 //!
 //! OSS `zradar-server` supplies [`zradar_auth_config::ConfigAuthenticator`] and
-//! a config-key `AdminAuthorizer`. External platform wrapper binaries supply
-//! their own `Authenticator` and `AdminAuthorizer` implementations.
+//! config-key query/admin authorizers. External platform wrapper binaries supply
+//! their own `Authenticator`, `QueryAuthorizer`, and `AdminAuthorizer` implementations.
 
-pub mod admin_key;
 pub mod builder;
+pub mod config_key;
 pub(crate) mod health;
 
-pub use admin_key::ApiKeyAdminAuthorizer;
 pub use builder::{RuntimeAuth, ZradarRuntimeBuilder};
-pub use zradar_traits::{AdminAuth, AdminAuthorizer, Authenticator};
+pub use config_key::{
+    ApiKeyAdminAuthorizer, ApiKeyQueryAuthorizer, api_key_authorizers_from_config,
+};
+pub use zradar_traits::{AdminAuth, AdminAuthorizer, Authenticator, QueryAuth, QueryAuthorizer};

@@ -39,12 +39,18 @@ license = "Apache-2.0"
 
 # Shared workspace dependencies
 [workspace.dependencies]
-# OpenTelemetry Protocol - THE CONTRACT (v0.4 uses tonic 0.9)
-opentelemetry-proto = { version = "0.4", features = ["gen-tonic", "trace", "metrics", "logs"] }
+# OpenTelemetry Protocol - THE CONTRACT (v0.32 uses tonic 0.14)
+opentelemetry-proto = { version = "0.32", features = ["gen-tonic", "trace", "metrics", "logs"] }
 
 # gRPC/Async (must match opentelemetry-proto's tonic version)
-tonic = { version = "0.9", features = ["gzip"] }
-prost = "0.11"
+tonic = { version = "0.14", features = ["gzip"] }
+prost = "0.14"
+prost-types = "0.14"
+tonic-build = "0.14"
+tonic-prost-build = "0.14"
+tonic-prost = "0.14"
+tonic-web = "0.14"
+tonic-reflection = "0.14"
 tokio = { version = "1.35", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }

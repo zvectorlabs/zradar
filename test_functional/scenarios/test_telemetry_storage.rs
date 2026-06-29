@@ -24,11 +24,7 @@ fn int_value(value: i64) -> AnyValue {
 }
 
 /// Test that a span sent via OTLP is stored and can be queried back
-#[tokio::test]
-#[ignore]
-async fn test_span_storage_and_retrieval() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_span_storage_and_retrieval_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
     let service_name = "test-llm-service";
@@ -70,12 +66,13 @@ async fn test_span_storage_and_retrieval() -> Result<()> {
     Ok(())
 }
 
-/// Test that LLM-specific span fields are stored correctly
-#[tokio::test]
-#[ignore]
-async fn test_llm_span_fields_storage() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_span_storage_and_retrieval,
+    test_span_storage_and_retrieval_body
+);
 
+/// Test that LLM-specific span fields are stored correctly
+async fn test_llm_span_fields_storage_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -129,12 +126,13 @@ async fn test_llm_span_fields_storage() -> Result<()> {
     Ok(())
 }
 
-/// Test querying traces with filters
-#[tokio::test]
-#[ignore]
-async fn test_trace_query_with_filters() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_llm_span_fields_storage,
+    test_llm_span_fields_storage_body
+);
 
+/// Test querying traces with filters
+async fn test_trace_query_with_filters_body(env: TestEnv) -> Result<()> {
     let service1 = "api-gateway";
     let service2 = "llm-service";
 
@@ -161,12 +159,13 @@ async fn test_trace_query_with_filters() -> Result<()> {
     Ok(())
 }
 
-/// Test that spans with parent-child relationships are stored correctly
-#[tokio::test]
-#[ignore]
-async fn test_span_hierarchy_storage() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_trace_query_with_filters,
+    test_trace_query_with_filters_body
+);
 
+/// Test that spans with parent-child relationships are stored correctly
+async fn test_span_hierarchy_storage_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let parent_span_id = TestDataGenerator::span_id();
     let child_span_id = TestDataGenerator::span_id();
@@ -205,10 +204,13 @@ async fn test_span_hierarchy_storage() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_span_hierarchy_storage,
+    test_span_hierarchy_storage_body
+);
+
 /// Test workspace isolation - spans from one workspace shouldn't be visible to another
-#[tokio::test]
-#[ignore]
-async fn test_telemetry_workspace_isolation() -> Result<()> {
+async fn test_telemetry_workspace_isolation_body(_env: TestEnv) -> Result<()> {
     let env1 = TestEnv::setup().await?;
     let env2 = TestEnv::setup().await?;
 
@@ -244,3 +246,8 @@ async fn test_telemetry_workspace_isolation() -> Result<()> {
     println!("✅ Tenant isolation verified!");
     Ok(())
 }
+
+dual_transport_test!(
+    test_telemetry_workspace_isolation,
+    test_telemetry_workspace_isolation_body
+);

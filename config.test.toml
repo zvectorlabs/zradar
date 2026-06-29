@@ -4,8 +4,16 @@
 # OTLP gRPC port for tests
 otlp_port = 9016
 
+# OTLP/HTTP port for tests (must match TEST_OTLP_HTTP_URL in test script).
+# Use an isolated port — not 4318 (local dev default).
+otlp_http_port = 9019
+
 # Admin API port (must match TEST_API_URL in test script; loader reads root-level key)
 admin_api_port = 9015
+
+# Query/Admin gRPC ports — avoid clashing with local dev defaults (8081/8082)
+query_grpc_port = 9017
+admin_grpc_port = 9018
 
 # Batch configuration
 batch_size = 1000
@@ -14,7 +22,7 @@ batch_timeout_seconds = 10
 # PostgreSQL configuration (Control Plane) - Test Database
 # Uses port 9011 mapped from docker-compose.test.yml
 [postgres]
-max_connections = 20
+max_connections = 80
 
 # Admin API configuration - Test port 9015
 [admin_api]

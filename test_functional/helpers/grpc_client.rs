@@ -143,8 +143,10 @@ impl OtlpClient {
                         ),
                     ),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let span = Span {
@@ -166,6 +168,7 @@ impl OtlpClient {
                             ),
                         ),
                     }),
+                    ..Default::default()
                 },
                 KeyValue {
                     key: "http.status_code".to_string(),
@@ -174,6 +177,7 @@ impl OtlpClient {
                             opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(200),
                         ),
                     }),
+                    ..Default::default()
                 },
             ],
             dropped_attributes_count: 0,
@@ -185,6 +189,7 @@ impl OtlpClient {
                 message: String::new(),
                 code: 0, // STATUS_CODE_UNSET
             }),
+            ..Default::default()
         };
 
         let scope_spans = ScopeSpans {
@@ -232,8 +237,10 @@ impl OtlpClient {
                         ),
                     ),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let span = Span {
@@ -255,6 +262,7 @@ impl OtlpClient {
                 message: String::new(),
                 code: 0,
             }),
+            ..Default::default()
         };
 
         let scope_spans = ScopeSpans {
@@ -366,8 +374,10 @@ impl OtlpClient {
                         ),
                     ),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let data_point = NumberDataPoint {
@@ -396,6 +406,7 @@ impl OtlpClient {
             description: String::new(),
             unit: String::new(),
             data: Some(data),
+            ..Default::default()
         };
 
         let scope_metrics = ScopeMetrics {
@@ -511,6 +522,7 @@ impl OtlpClient {
                 value: Some(AnyValue {
                     value: Some(AnyVal::StringValue(v.to_string())),
                 }),
+                ..Default::default()
             })
             .collect();
 
@@ -527,6 +539,7 @@ impl OtlpClient {
             flags: 0,
             trace_id: trace_id.to_vec(),
             span_id: span_id.to_vec(),
+            ..Default::default()
         };
 
         let resource = Resource {
@@ -535,8 +548,10 @@ impl OtlpClient {
                 value: Some(AnyValue {
                     value: Some(AnyVal::StringValue(service_name.to_string())),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let scope_logs = ScopeLogs {
@@ -583,8 +598,10 @@ impl OtlpClient {
                         ),
                     ),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let built_spans: Vec<Span> = spans
@@ -612,6 +629,7 @@ impl OtlpClient {
                         message: String::new(),
                         code: 0,
                     }),
+                    ..Default::default()
                 }
             })
             .collect();
@@ -664,8 +682,10 @@ impl OtlpClient {
                         ),
                     ),
                 }),
+                ..Default::default()
             }],
             dropped_attributes_count: 0,
+            ..Default::default()
         };
 
         let built_spans: Vec<Span> = spans
@@ -680,6 +700,7 @@ impl OtlpClient {
                     .map(|(key, value)| KeyValue {
                         key,
                         value: Some(value),
+                        ..Default::default()
                     })
                     .collect();
 
@@ -702,6 +723,7 @@ impl OtlpClient {
                         message: String::new(),
                         code: def.status_code.unwrap_or(0),
                     }),
+                    ..Default::default()
                 }
             })
             .collect();

@@ -51,6 +51,7 @@ fn kv_str(k: &str, v: &str) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::StringValue(v.to_string())),
         }),
+        ..Default::default()
     }
 }
 
@@ -63,6 +64,7 @@ fn nat_simple_workflow_input() -> ResourceSpans {
                 kv_str("deployment.environment", "test"),
             ],
             dropped_attributes_count: 0,
+            ..Default::default()
         }),
         scope_spans: vec![ScopeSpans {
             scope: Some(InstrumentationScope::default()),

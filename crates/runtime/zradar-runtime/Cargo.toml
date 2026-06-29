@@ -36,6 +36,8 @@ opentelemetry-proto = { workspace = true }
 
 # gRPC
 tonic = { workspace = true }
+tonic-web = { workspace = true }
+tonic-reflection = { workspace = true }
 
 # Database
 sqlx = { workspace = true }

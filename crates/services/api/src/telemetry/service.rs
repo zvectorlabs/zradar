@@ -407,7 +407,7 @@ impl QueryService {
             environment: filters.environment.clone(),
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
-                offset: Some(0),
+                offset: Some(filters.offset.unwrap_or(0).max(0) as u32),
             },
         };
 
@@ -608,7 +608,7 @@ impl QueryService {
             environment: filters.environment.clone(),
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
-                offset: Some(0),
+                offset: Some(filters.offset.unwrap_or(0).max(0) as u32),
             },
         };
 
@@ -1567,7 +1567,7 @@ impl QueryService {
             session_id: filters.session_id,
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
-                offset: Some(0),
+                offset: Some(filters.offset.unwrap_or(0).max(0) as u32),
             },
         };
 
@@ -1716,7 +1716,7 @@ impl QueryService {
             agent_name: filters.agent_name,
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
-                offset: Some(0),
+                offset: Some(filters.offset.unwrap_or(0).max(0) as u32),
             },
         };
 

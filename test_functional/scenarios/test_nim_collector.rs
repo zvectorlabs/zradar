@@ -84,7 +84,7 @@ impl NimTopology {
 }
 
 /// Poll `/api/v1/metrics?metric_name=<name>` until at least one row appears.
-async fn wait_for_metric(client: &ApiClient, name: &str) -> Result<serde_json::Value> {
+async fn wait_for_metric(client: &TransportApiClient, name: &str) -> Result<serde_json::Value> {
     let workspace_id = client.workspace_id().to_string();
     let path = format!("/api/v1/metrics?workspace_id={workspace_id}&metric_name={name}");
     poll_until(
@@ -113,15 +113,11 @@ async fn wait_for_metric(client: &ApiClient, name: &str) -> Result<serde_json::V
 /// AC3.2: mock Prometheus → otel-collector → zradar → `/api/v1/metrics`
 /// returns each documented `vllm:*` and `DCGM_FI_*` name with the right
 /// `metric_type`. Colons in the name are preserved end-to-end (AC3.8).
-#[tokio::test]
-#[ignore]
-async fn test_r3_2_nim_metrics_roundtrip() -> Result<()> {
+async fn test_r3_2_nim_metrics_roundtrip_body(env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not found (install it or set ZRADAR_OTELCOL_BIN). Skipping.");
         return Ok(());
     }
-
-    let env = TestEnv::setup().await?;
     let topology = launch_topology(&env).await?;
 
     // Wait one full batch interval + a margin for the prom scrape.
@@ -158,6 +154,11 @@ async fn test_r3_2_nim_metrics_roundtrip() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r3_2_nim_metrics_roundtrip,
+    test_r3_2_nim_metrics_roundtrip_body
+);
+
 // ---------------------------------------------------------------------------
 // AC3.7 — time-window query works, trace_id labels NOT expected
 // ---------------------------------------------------------------------------
@@ -165,15 +166,11 @@ async fn test_r3_2_nim_metrics_roundtrip() -> Result<()> {
 /// AC3.7: a time-window query for the period the mock collector was running
 /// returns histogram data. trace_id labels are not present on aggregate
 /// vllm:* metrics — verify we still return rows.
-#[tokio::test]
-#[ignore]
-async fn test_r3_7_time_window_metric_query_no_trace_id_labels() -> Result<()> {
+async fn test_r3_7_time_window_metric_query_no_trace_id_labels_body(env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping.");
         return Ok(());
     }
-
-    let env = TestEnv::setup().await?;
     let window_start = chrono::Utc::now();
     let topology = launch_topology(&env).await?;
     tokio::time::sleep(Duration::from_secs(8)).await;
@@ -214,6 +211,11 @@ async fn test_r3_7_time_window_metric_query_no_trace_id_labels() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r3_7_time_window_metric_query_no_trace_id_labels,
+    test_r3_7_time_window_metric_query_no_trace_id_labels_body
+);
+
 // ---------------------------------------------------------------------------
 // AC3.1 — collector config validates
 // ---------------------------------------------------------------------------
@@ -222,9 +224,7 @@ async fn test_r3_7_time_window_metric_query_no_trace_id_labels() -> Result<()> {
 /// successfully. We verify by spawning the collector against it and checking
 /// the process starts. (`otelcol validate` is the canonical check, but spawn
 /// gives us the same signal without a second binary path.)
-#[tokio::test]
-#[ignore]
-async fn test_r3_1_reference_yaml_starts_collector() -> Result<()> {
+async fn test_r3_1_reference_yaml_starts_collector_body(_env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping.");
         return Ok(());
@@ -256,6 +256,11 @@ async fn test_r3_1_reference_yaml_starts_collector() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_r3_1_reference_yaml_starts_collector,
+    test_r3_1_reference_yaml_starts_collector_body
+);
+
 // ===========================================================================
 // T1 — Histogram count/sum/values match the source payload
 // ===========================================================================
@@ -267,14 +272,11 @@ async fn test_r3_1_reference_yaml_starts_collector() -> Result<()> {
 ///
 /// The fixture sets `vllm:e2e_request_latency_seconds_count = 60` and
 /// `_sum = 121.4`. Both must survive the round-trip.
-#[tokio::test]
-#[ignore]
-async fn test_t1_histogram_count_sum_match_payload() -> Result<()> {
+async fn test_t1_histogram_count_sum_match_payload_body(env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping T1.");
         return Ok(());
     }
-    let env = TestEnv::setup().await?;
     let topology = launch_topology(&env).await?;
     tokio::time::sleep(Duration::from_secs(8)).await;
 
@@ -300,6 +302,11 @@ async fn test_t1_histogram_count_sum_match_payload() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t1_histogram_count_sum_match_payload,
+    test_t1_histogram_count_sum_match_payload_body
+);
+
 // ===========================================================================
 // T2 — Cross-workspace isolation for collector-pushed metrics
 // ===========================================================================
@@ -307,9 +314,7 @@ async fn test_t1_histogram_count_sum_match_payload() -> Result<()> {
 /// T2: Two collectors pushing the same metric name with different
 /// `x-workspace-id` / `x-workspace-id` headers must produce isolated rows.
 /// Tenant A's query must not return workspace B's data.
-#[tokio::test]
-#[ignore]
-async fn test_t2_collector_pushed_metrics_workspace_isolated() -> Result<()> {
+async fn test_t2_collector_pushed_metrics_workspace_isolated_body(_env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping T2.");
         return Ok(());
@@ -374,6 +379,11 @@ async fn test_t2_collector_pushed_metrics_workspace_isolated() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t2_collector_pushed_metrics_workspace_isolated,
+    test_t2_collector_pushed_metrics_workspace_isolated_body
+);
+
 // ===========================================================================
 // T3 — Counter values arrive non-zero (catches silent data loss)
 // ===========================================================================
@@ -383,14 +393,11 @@ async fn test_t2_collector_pushed_metrics_workspace_isolated() -> Result<()> {
 /// `vllm:generation_tokens_total = 22184`. Anything that gives us 0 means
 /// either the collector or zradar's number-data-point conversion dropped
 /// the value.
-#[tokio::test]
-#[ignore]
-async fn test_t3_counter_values_nonzero() -> Result<()> {
+async fn test_t3_counter_values_nonzero_body(env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping T3.");
         return Ok(());
     }
-    let env = TestEnv::setup().await?;
     let topology = launch_topology(&env).await?;
     tokio::time::sleep(Duration::from_secs(8)).await;
 
@@ -413,6 +420,11 @@ async fn test_t3_counter_values_nonzero() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t3_counter_values_nonzero,
+    test_t3_counter_values_nonzero_body
+);
+
 // ===========================================================================
 // T4 — OTLP/HTTP metrics endpoint rejects requests without Bearer token
 // ===========================================================================
@@ -421,9 +433,7 @@ async fn test_t3_counter_values_nonzero() -> Result<()> {
 /// Bearer token. This is the security perimeter — the gap-fix audit
 /// already removed the `x-workspace-id` header escape; this test locks in
 /// the positive path of "no auth → 401."
-#[tokio::test]
-#[ignore]
-async fn test_t4_otlp_http_metrics_rejects_missing_bearer() -> Result<()> {
+async fn test_t4_otlp_http_metrics_rejects_missing_bearer_body(_env: TestEnv) -> Result<()> {
     // Build a minimal but well-formed ExportMetricsServiceRequest. The
     // server must reject before parsing, so the body content doesn't
     // matter for the auth check, but well-formed body avoids 400/415
@@ -482,6 +492,11 @@ async fn test_t4_otlp_http_metrics_rejects_missing_bearer() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t4_otlp_http_metrics_rejects_missing_bearer,
+    test_t4_otlp_http_metrics_rejects_missing_bearer_body
+);
+
 // ===========================================================================
 // T5 — Prometheus labels survive the OTLP roundtrip
 // ===========================================================================
@@ -489,14 +504,11 @@ async fn test_t4_otlp_http_metrics_rejects_missing_bearer() -> Result<()> {
 /// T5: Labels on the Prometheus payload (`model="meta/llama-3-8b-instruct"`,
 /// `gpu="0"`) must appear in zradar's `labels` JSON column. Catches the
 /// failure where the collector's Prometheus receiver strips labels.
-#[tokio::test]
-#[ignore]
-async fn test_t5_prometheus_labels_preserved() -> Result<()> {
+async fn test_t5_prometheus_labels_preserved_body(env: TestEnv) -> Result<()> {
     if !collector_available() {
         eprintln!("⚠️ otelcol-contrib not available, skipping T5.");
         return Ok(());
     }
-    let env = TestEnv::setup().await?;
     let topology = launch_topology(&env).await?;
     tokio::time::sleep(Duration::from_secs(8)).await;
 
@@ -525,16 +537,18 @@ async fn test_t5_prometheus_labels_preserved() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t5_prometheus_labels_preserved,
+    test_t5_prometheus_labels_preserved_body
+);
+
 // ===========================================================================
 // T6 — Empty result for non-existent metric is 200 with empty items
 // ===========================================================================
 
 /// T6: Querying a metric that does not exist must return 200 with
 /// `total: 0` and an empty `items` array. Not 404, not 500.
-#[tokio::test]
-#[ignore]
-async fn test_t6_metric_query_no_match_returns_empty() -> Result<()> {
-    let env = TestEnv::setup().await?;
+async fn test_t6_metric_query_no_match_returns_empty_body(env: TestEnv) -> Result<()> {
     let workspace_id = env.client.workspace_id();
     let unique = format!(
         "non_existent_metric_{}",
@@ -562,6 +576,11 @@ async fn test_t6_metric_query_no_match_returns_empty() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_t6_metric_query_no_match_returns_empty,
+    test_t6_metric_query_no_match_returns_empty_body
+);
+
 // ===========================================================================
 // T7 — Direct OTLP/HTTP metric push (no collector dependency)
 // ===========================================================================
@@ -570,9 +589,7 @@ async fn test_t6_metric_query_no_match_returns_empty() -> Result<()> {
 /// :4318 endpoint and confirm it lands. This validates the OTLP/HTTP metric
 /// path independently of `otelcol-contrib` and runs in every CI run (no
 /// `collector_available()` gate).
-#[tokio::test]
-#[ignore]
-async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
+async fn test_t7_otlp_http_metric_direct_push_body(env: TestEnv) -> Result<()> {
     use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
     use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyVal;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue};
@@ -583,8 +600,6 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
     use opentelemetry_proto::tonic::resource::v1::Resource;
     use prost::Message;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    let env = TestEnv::setup().await?;
     let now_ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -599,8 +614,10 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
             value: Some(AnyValue {
                 value: Some(AnyVal::StringValue("nim-llm".to_string())),
             }),
+            ..Default::default()
         }],
         dropped_attributes_count: 0,
+        ..Default::default()
     };
 
     let data_point = NumberDataPoint {
@@ -609,6 +626,7 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
             value: Some(AnyValue {
                 value: Some(AnyVal::StringValue("meta/llama-3-8b-instruct".to_string())),
             }),
+            ..Default::default()
         }],
         start_time_unix_nano: now_ns - 60_000_000_000,
         time_unix_nano: now_ns,
@@ -624,6 +642,7 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
         data: Some(Data::Gauge(Gauge {
             data_points: vec![data_point],
         })),
+        ..Default::default()
     };
 
     let scope_metrics = ScopeMetrics {
@@ -685,3 +704,8 @@ async fn test_t7_otlp_http_metric_direct_push() -> Result<()> {
     println!("✅ T7: direct OTLP/HTTP metric push round-trips name, type, value, labels");
     Ok(())
 }
+
+dual_transport_test!(
+    test_t7_otlp_http_metric_direct_push,
+    test_t7_otlp_http_metric_direct_push_body
+);

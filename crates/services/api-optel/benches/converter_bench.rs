@@ -41,6 +41,7 @@ fn kv_str(k: &str, v: &str) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::StringValue(v.to_string())),
         }),
+        ..Default::default()
     }
 }
 
@@ -50,6 +51,7 @@ fn kv_int(k: &str, v: i64) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::IntValue(v)),
         }),
+        ..Default::default()
     }
 }
 
@@ -59,6 +61,7 @@ fn kv_bool(k: &str, v: bool) -> KeyValue {
         value: Some(AnyValue {
             value: Some(any_value::Value::BoolValue(v)),
         }),
+        ..Default::default()
     }
 }
 
@@ -75,6 +78,7 @@ fn resource_with_service(name: &str) -> Resource {
             kv_str("deployment.environment", "bench"),
         ],
         dropped_attributes_count: 0,
+        ..Default::default()
     }
 }
 

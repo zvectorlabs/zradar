@@ -10,11 +10,7 @@ use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Test that spans with gen_ai.request.model attribute are detected as GENERATION
-#[tokio::test]
-#[ignore]
-async fn test_generation_span_type_from_model_attribute() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_generation_span_type_from_model_attribute_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -55,12 +51,13 @@ async fn test_generation_span_type_from_model_attribute() -> Result<()> {
     Ok(())
 }
 
-/// Test that spans with tool.name attribute are detected as TOOL
-#[tokio::test]
-#[ignore]
-async fn test_tool_span_type_from_tool_attribute() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_generation_span_type_from_model_attribute,
+    test_generation_span_type_from_model_attribute_body
+);
 
+/// Test that spans with tool.name attribute are detected as TOOL
+async fn test_tool_span_type_from_tool_attribute_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -99,12 +96,13 @@ async fn test_tool_span_type_from_tool_attribute() -> Result<()> {
     Ok(())
 }
 
-/// Test that spans with agent.name attribute are detected as AGENT
-#[tokio::test]
-#[ignore]
-async fn test_agent_span_type_from_agent_attribute() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_tool_span_type_from_tool_attribute,
+    test_tool_span_type_from_tool_attribute_body
+);
 
+/// Test that spans with agent.name attribute are detected as AGENT
+async fn test_agent_span_type_from_agent_attribute_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -143,12 +141,13 @@ async fn test_agent_span_type_from_agent_attribute() -> Result<()> {
     Ok(())
 }
 
-/// Test that zero-duration spans are detected as EVENT
-#[tokio::test]
-#[ignore]
-async fn test_event_span_type_for_zero_duration() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_agent_span_type_from_agent_attribute,
+    test_agent_span_type_from_agent_attribute_body
+);
 
+/// Test that zero-duration spans are detected as EVENT
+async fn test_event_span_type_for_zero_duration_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -183,12 +182,13 @@ async fn test_event_span_type_for_zero_duration() -> Result<()> {
     Ok(())
 }
 
-/// Test that explicit zradar.span.type attribute is respected
-#[tokio::test]
-#[ignore]
-async fn test_explicit_span_type_from_zradar_attribute() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_event_span_type_for_zero_duration,
+    test_event_span_type_for_zero_duration_body
+);
 
+/// Test that explicit zradar.span.type attribute is respected
+async fn test_explicit_span_type_from_zradar_attribute_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -240,12 +240,13 @@ async fn test_explicit_span_type_from_zradar_attribute() -> Result<()> {
     Ok(())
 }
 
-/// Test REST API filtering by span_type
-#[tokio::test]
-#[ignore]
-async fn test_rest_api_filter_by_span_type() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_explicit_span_type_from_zradar_attribute,
+    test_explicit_span_type_from_zradar_attribute_body
+);
 
+/// Test REST API filtering by span_type
+async fn test_rest_api_filter_by_span_type_body(env: TestEnv) -> Result<()> {
     let trace1 = TestDataGenerator::trace_id();
     let span1 = TestDataGenerator::span_id();
     let request1 = build_trace_with_attributes(
@@ -309,12 +310,13 @@ async fn test_rest_api_filter_by_span_type() -> Result<()> {
     Ok(())
 }
 
-/// Test REST API filtering by multiple span_types
-#[tokio::test]
-#[ignore]
-async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_rest_api_filter_by_span_type,
+    test_rest_api_filter_by_span_type_body
+);
 
+/// Test REST API filtering by multiple span_types
+async fn test_rest_api_filter_by_multiple_span_types_body(env: TestEnv) -> Result<()> {
     let trace1 = TestDataGenerator::trace_id();
     let span1 = TestDataGenerator::span_id();
     let request1 = build_trace_with_attributes(
@@ -379,9 +381,27 @@ async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
     env.otlp.export_traces(request2).await?;
     env.otlp.export_traces(request3).await?;
 
-    // Poll until GENERATION+TOOL spans appear
+    // Poll until BOTH GENERATION and TOOL spans appear (2 separate ingests, may arrive separately)
     let filter_url = "/api/v1/spans?span_types=GENERATION,TOOL";
-    let spans = wait_for_items_default(&env.client, filter_url).await?;
+    let spans = poll_until(
+        || async {
+            let response = env.client.get(filter_url).await?;
+            let data: Value = response.json().await?;
+            let items = data
+                .get("items")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if items.len() >= 2 {
+                Ok(Some(items))
+            } else {
+                Ok(None)
+            }
+        },
+        DEFAULT_POLL_TIMEOUT,
+        DEFAULT_POLL_INTERVAL,
+    )
+    .await?;
 
     assert!(
         spans.len() >= 2,
@@ -400,12 +420,13 @@ async fn test_rest_api_filter_by_multiple_span_types() -> Result<()> {
     Ok(())
 }
 
-/// Test that JSONB fields (llm_input, llm_output) are stored as JSON and searchable
-#[tokio::test]
-#[ignore]
-async fn test_jsonb_fields_stored_as_json() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_rest_api_filter_by_multiple_span_types,
+    test_rest_api_filter_by_multiple_span_types_body
+);
 
+/// Test that JSONB fields (llm_input, llm_output) are stored as JSON and searchable
+async fn test_jsonb_fields_stored_as_json_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
 
@@ -447,6 +468,11 @@ async fn test_jsonb_fields_stored_as_json() -> Result<()> {
     Ok(())
 }
 
+dual_transport_test!(
+    test_jsonb_fields_stored_as_json,
+    test_jsonb_fields_stored_as_json_body
+);
+
 // Helper function to build trace with custom attributes
 fn build_trace_with_attributes(
     service_name: &str,
@@ -477,8 +503,10 @@ fn build_trace_with_attributes(
                     ),
                 ),
             }),
+            ..Default::default()
         }],
         dropped_attributes_count: 0,
+        ..Default::default()
     };
 
     let span = OtlpSpan {
@@ -495,6 +523,7 @@ fn build_trace_with_attributes(
             .map(|(key, value)| KeyValue {
                 key: key.to_string(),
                 value: Some(value),
+                ..Default::default()
             })
             .collect(),
         dropped_attributes_count: 0,
@@ -506,6 +535,7 @@ fn build_trace_with_attributes(
             message: String::new(),
             code: 0, // STATUS_CODE_UNSET
         }),
+        ..Default::default()
     };
 
     let scope_spans = ScopeSpans {

@@ -24,7 +24,11 @@ fn str_val(s: &str) -> AnyValue {
 }
 
 /// Poll the analytics endpoint until it returns a non-empty array.
-async fn poll_analytics(client: &ApiClient, url: &str, timeout: Duration) -> Result<Vec<Value>> {
+async fn poll_analytics(
+    client: &TransportApiClient,
+    url: &str,
+    timeout: Duration,
+) -> Result<Vec<Value>> {
     poll_until(
         || async {
             let response = client.get(url).await?;
@@ -50,11 +54,7 @@ async fn poll_analytics(client: &ApiClient, url: &str, timeout: Duration) -> Res
 // ============================================================================
 
 /// Test: default analytics (no group_by) — backward compatibility
-#[tokio::test]
-#[ignore]
-async fn test_analytics_default_trace_count() -> Result<()> {
-    let env = TestEnv::setup().await?;
-
+async fn test_analytics_default_trace_count_body(env: TestEnv) -> Result<()> {
     // Ingest a trace so there's data
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -94,12 +94,13 @@ async fn test_analytics_default_trace_count() -> Result<()> {
     Ok(())
 }
 
-/// Test: analytics grouped by agent_name
-#[tokio::test]
-#[ignore]
-async fn test_analytics_group_by_agent_name() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_analytics_default_trace_count,
+    test_analytics_default_trace_count_body
+);
 
+/// Test: analytics grouped by agent_name
+async fn test_analytics_group_by_agent_name_body(env: TestEnv) -> Result<()> {
     // Ingest traces for different agents
     let agents = vec!["planner", "researcher", "validator"];
     let mut trace_ids = Vec::new();
@@ -168,12 +169,13 @@ async fn test_analytics_group_by_agent_name() -> Result<()> {
     Ok(())
 }
 
-/// Test: analytics grouped by llm_model
-#[tokio::test]
-#[ignore]
-async fn test_analytics_group_by_llm_model() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_analytics_group_by_agent_name,
+    test_analytics_group_by_agent_name_body
+);
 
+/// Test: analytics grouped by llm_model
+async fn test_analytics_group_by_llm_model_body(env: TestEnv) -> Result<()> {
     // Ingest traces with different models
     let models = vec!["gpt-4", "claude-3", "llama-2"];
     let mut trace_ids = Vec::new();
@@ -236,12 +238,13 @@ async fn test_analytics_group_by_llm_model() -> Result<()> {
     Ok(())
 }
 
-/// Test: total_tokens metric grouped by agent_name
-#[tokio::test]
-#[ignore]
-async fn test_analytics_total_tokens_by_agent() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_analytics_group_by_llm_model,
+    test_analytics_group_by_llm_model_body
+);
 
+/// Test: total_tokens metric grouped by agent_name
+async fn test_analytics_total_tokens_by_agent_body(env: TestEnv) -> Result<()> {
     // Ingest a trace with agent attributes
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();
@@ -286,12 +289,13 @@ async fn test_analytics_total_tokens_by_agent() -> Result<()> {
     Ok(())
 }
 
-/// Test: analytics with combined filter and group_by
-#[tokio::test]
-#[ignore]
-async fn test_analytics_with_filter() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_analytics_total_tokens_by_agent,
+    test_analytics_total_tokens_by_agent_body
+);
 
+/// Test: analytics with combined filter and group_by
+async fn test_analytics_with_filter_body(env: TestEnv) -> Result<()> {
     // Ingest traces for different agents
     let agents = vec![("planner", "gpt-4"), ("researcher", "claude-3")];
     let mut trace_ids = Vec::new();
@@ -346,12 +350,10 @@ async fn test_analytics_with_filter() -> Result<()> {
     Ok(())
 }
 
-/// Test: multi-dimensional group_by (agent_name AND llm_model)
-#[tokio::test]
-#[ignore]
-async fn test_analytics_multi_group_by() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(test_analytics_with_filter, test_analytics_with_filter_body);
 
+/// Test: multi-dimensional group_by (agent_name AND llm_model)
+async fn test_analytics_multi_group_by_body(env: TestEnv) -> Result<()> {
     // Ingest traces with different agent + model combos
     let combos = vec![
         ("planner", "gpt-4"),
@@ -414,12 +416,13 @@ async fn test_analytics_multi_group_by() -> Result<()> {
     Ok(())
 }
 
-/// Test: unsupported metric returns an error
-#[tokio::test]
-#[ignore]
-async fn test_analytics_unsupported_metric_error() -> Result<()> {
-    let env = TestEnv::setup().await?;
+dual_transport_test!(
+    test_analytics_multi_group_by,
+    test_analytics_multi_group_by_body
+);
 
+/// Test: unsupported metric returns an error
+async fn test_analytics_unsupported_metric_error_body(env: TestEnv) -> Result<()> {
     let url = "/api/v1/analytics?metric=invalid_metric&group_by=agent_name";
     let response = env.client.get(url).await?;
 
@@ -432,3 +435,8 @@ async fn test_analytics_unsupported_metric_error() -> Result<()> {
     println!("✅ Analytics unsupported metric error test passed");
     Ok(())
 }
+
+dual_transport_test!(
+    test_analytics_unsupported_metric_error,
+    test_analytics_unsupported_metric_error_body
+);

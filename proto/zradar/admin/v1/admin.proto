@@ -1,0 +1,321 @@
+// Copyright 2024-2026 Agnitiv. All rights reserved.
+//
+// Proto definitions for the zRadar Admin API (retention, policies, audit, settings).
+
+syntax = "proto3";
+
+package zradar.admin.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/agnitiv/zradar/gen/go/zradar/admin/v1;adminv1";
+
+// ============================================================================
+// RetentionService — Data lifecycle management
+// ============================================================================
+
+// RetentionService provides RPCs for managing data retention policies
+// and triggering cleanup operations.
+service RetentionService {
+  // RunCleanup triggers a retention cleanup cycle synchronously.
+  // Expired Parquet files are soft-deleted and then physically reclaimed.
+  // Returns cleanup statistics.
+  rpc RunCleanup(RunCleanupRequest) returns (RunCleanupResponse);
+
+  // GetWorkspaceRetention returns the effective retention configuration
+  // for a specific workspace.
+  rpc GetWorkspaceRetention(GetWorkspaceRetentionRequest) returns (GetWorkspaceRetentionResponse);
+
+  // SetWorkspaceRetention updates the retention configuration for a
+  // specific workspace. Sets the same retention days for traces, metrics,
+  // and logs.
+  rpc SetWorkspaceRetention(SetWorkspaceRetentionRequest) returns (SetWorkspaceRetentionResponse);
+}
+
+// ============================================================================
+// PolicyService — Rate limits, quotas, and usage policies
+// ============================================================================
+
+// PolicyService provides RPCs for managing rate-limit, quota, size,
+// retention, and query-window policies for workspaces.
+// Note: Delete is intentionally excluded by design.
+service PolicyService {
+  // ListPolicies returns all policies for the specified workspace.
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+
+  // UpsertPolicies creates or updates one or more policies for a workspace.
+  rpc UpsertPolicies(UpsertPoliciesRequest) returns (UpsertPoliciesResponse);
+
+  // GetEffectivePolicy returns the resolved effective policy for a workspace,
+  // merged across ingest, query, and store operations.
+  rpc GetEffectivePolicy(GetEffectivePolicyRequest) returns (GetEffectivePolicyResponse);
+}
+
+// ============================================================================
+// AuditService — Audit log access
+// ============================================================================
+
+// AuditService provides RPCs for querying the audit log, which records
+// administrative actions performed on the system.
+service AuditService {
+  // ListAuditLogs returns a paginated list of audit log entries matching
+  // the provided filters.
+  rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
+}
+
+// ============================================================================
+// SettingsService — Workspace configuration
+// ============================================================================
+
+// SettingsService provides RPCs for reading and updating per-workspace
+// configuration (retention, ingestion rate, content capture, etc.).
+service SettingsService {
+  // GetWorkspaceSettings returns the current settings for a workspace.
+  // If no settings exist, defaults are created and returned.
+  rpc GetWorkspaceSettings(GetWorkspaceSettingsRequest) returns (GetWorkspaceSettingsResponse);
+
+  // UpdateWorkspaceSettings updates the configuration for a workspace.
+  // An audit log entry is created for the change.
+  rpc UpdateWorkspaceSettings(UpdateWorkspaceSettingsRequest) returns (UpdateWorkspaceSettingsResponse);
+}
+
+// ============================================================================
+// RetentionService — Request / Response messages
+// ============================================================================
+
+message RunCleanupRequest {
+  string workspace_id = 1;
+  // Override retention in days for this run only.
+  // When set, all files older than this many days are deleted regardless
+  // of the stored per-workspace config. 0 means delete everything.
+  optional uint32 retention_days = 2;
+}
+
+message RunCleanupResponse {
+  RetentionRunStats stats = 1;
+}
+
+// Combined stats from a retention cleanup run.
+message RetentionRunStats {
+  // Number of files soft-deleted (marked for removal).
+  uint64 files_marked = 1;
+  // Number of files physically reclaimed.
+  uint64 files_deleted = 2;
+  // Total bytes freed by physical deletion.
+  uint64 bytes_freed = 3;
+  // Files skipped because they are currently leased.
+  uint64 files_skipped_leased = 4;
+  // Number of projects processed during the run.
+  uint32 projects_processed = 5;
+  // Any errors encountered during cleanup.
+  repeated string errors = 6;
+  // Total duration of the cleanup run in milliseconds.
+  uint64 duration_ms = 7;
+}
+
+message GetWorkspaceRetentionRequest {
+  string workspace_id = 1;
+}
+
+message GetWorkspaceRetentionResponse {
+  string workspace_id = 1;
+  uint32 retention_days = 2;
+  // True if the retention days are inherited from the global default
+  // rather than set explicitly for this workspace.
+  bool inherited = 3;
+  uint32 workspace_default_days = 4;
+}
+
+message SetWorkspaceRetentionRequest {
+  string workspace_id = 1;
+  uint32 retention_days = 2;
+}
+
+message SetWorkspaceRetentionResponse {
+  string workspace_id = 1;
+  uint32 retention_days = 2;
+  bool inherited = 3;
+  uint32 workspace_default_days = 4;
+}
+
+// ============================================================================
+// PolicyService — Request / Response messages
+// ============================================================================
+
+message ListPoliciesRequest {
+  string workspace_id = 1;
+}
+
+message ListPoliciesResponse {
+  repeated Policy policies = 1;
+}
+
+message UpsertPoliciesRequest {
+  string workspace_id = 1;
+  repeated PolicyConfig policies = 2;
+}
+
+message UpsertPoliciesResponse {
+  // Empty on success (NO_CONTENT equivalent).
+}
+
+message GetEffectivePolicyRequest {
+  string workspace_id = 1;
+}
+
+message GetEffectivePolicyResponse {
+  // Resolved policy for ingest operations.
+  ResolvedPolicy ingest = 1;
+  // Resolved policy for query operations.
+  ResolvedPolicy query = 2;
+  // Resolved policy for store operations.
+  ResolvedPolicy store = 3;
+}
+
+// ============================================================================
+// AuditService — Request / Response messages
+// ============================================================================
+
+message ListAuditLogsRequest {
+  string workspace_id = 1;
+  optional string action = 2;
+  optional string resource_type = 3;
+  optional string resource_id = 4;
+  // Microseconds since epoch — lower bound on created_at.
+  optional int64 start_created_at = 5;
+  // Microseconds since epoch — upper bound on created_at.
+  optional int64 end_created_at = 6;
+  optional uint32 limit = 7;
+  optional uint32 offset = 8;
+}
+
+message ListAuditLogsResponse {
+  repeated AuditLog items = 1;
+  int64 total = 2;
+  uint32 limit = 3;
+  uint32 offset = 4;
+}
+
+// ============================================================================
+// SettingsService — Request / Response messages
+// ============================================================================
+
+message GetWorkspaceSettingsRequest {
+  string workspace_id = 1;
+}
+
+message GetWorkspaceSettingsResponse {
+  WorkspaceSettings settings = 1;
+}
+
+message UpdateWorkspaceSettingsRequest {
+  string workspace_id = 1;
+  int32 traces_retention_days = 2;
+  int32 metrics_retention_days = 3;
+  int32 logs_retention_days = 4;
+  optional int32 max_ingestion_rate = 5;
+  int32 file_push_interval_secs = 6;
+  bool blocked = 7;
+  bool capture_llm_content_enabled = 8;
+}
+
+message UpdateWorkspaceSettingsResponse {
+  WorkspaceSettings settings = 1;
+}
+
+// ============================================================================
+// Domain messages — Policy types
+// ============================================================================
+
+// A policy definition governing rate limits, quotas, or size constraints.
+message Policy {
+  optional int64 id = 1;
+  string workspace_id = 2;
+  // Signal kind: "traces", "logs", "metrics", "rum", "session_replay",
+  // "error_tracking", "all".
+  string signal = 3;
+  // Operation: "ingest", "query", "store", "all".
+  string operation = 4;
+  // The limit configuration, encoded as a JSON object matching the Rust
+  // PolicyLimit tagged enum: {"kind": "rate", "records_per_sec": 1000, ...}.
+  string limit_json = 5;
+  uint32 grace_pct = 6;
+  uint32 hard_block_pct = 7;
+  // Microseconds since epoch.
+  int64 effective_from = 8;
+  // Optional expiration. Microseconds since epoch.
+  optional int64 effective_until = 9;
+  // Source: "api", "file", "env", "crd", "default".
+  string source = 10;
+}
+
+// Configuration for upserting a single policy.
+message PolicyConfig {
+  string signal = 1;
+  string operation = 2;
+  // The limit configuration, encoded as a JSON object.
+  string limit_json = 3;
+  // Grace percentage before soft-warning (default: 101).
+  optional uint32 grace_pct = 4;
+  // Hard block percentage (default: 103).
+  optional uint32 hard_block_pct = 5;
+  // Microseconds since epoch. Defaults to now.
+  optional int64 effective_from = 6;
+  optional int64 effective_until = 7;
+  // Source tag. Defaults to "api".
+  optional string source = 8;
+}
+
+// A resolved/merged policy for a single operation type.
+message ResolvedPolicy {
+  bool blocked = 1;
+  // Rate limit (JSON-encoded PolicyLimit or empty if none).
+  optional string rate_json = 2;
+  // Quota limits (JSON-encoded PolicyLimit array).
+  repeated string quotas_json = 3;
+  // Size limit (JSON-encoded PolicyLimit or empty if none).
+  optional string size_json = 4;
+  // Retention limit (JSON-encoded PolicyLimit or empty if none).
+  optional string retention_json = 5;
+  // Query window limit (JSON-encoded PolicyLimit or empty if none).
+  optional string query_window_json = 6;
+  uint32 grace_pct = 7;
+  uint32 hard_block_pct = 8;
+}
+
+// ============================================================================
+// Domain messages — Audit log
+// ============================================================================
+
+// An audit log entry recording an administrative action.
+message AuditLog {
+  int64 id = 1;
+  optional string actor_workspace_id = 2;
+  optional string resource_workspace_id = 3;
+  string action = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  // JSON-encoded metadata associated with the action.
+  string metadata_json = 7;
+  // Microseconds since epoch.
+  int64 created_at = 8;
+}
+
+// ============================================================================
+// Domain messages — Workspace settings
+// ============================================================================
+
+// Full workspace settings record, as stored.
+message WorkspaceSettings {
+  int64 id = 1;
+  string workspace_id = 2;
+  int32 traces_retention_days = 3;
+  int32 metrics_retention_days = 4;
+  int32 logs_retention_days = 5;
+  optional int32 max_ingestion_rate = 6;
+  int32 file_push_interval_secs = 7;
+  bool blocked = 8;
+  bool capture_llm_content_enabled = 9;
+  // Microseconds since epoch.
+  int64 updated_at = 10;
+}

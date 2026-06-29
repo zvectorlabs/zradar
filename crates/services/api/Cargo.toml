@@ -41,3 +41,15 @@ zradar-traits = { path = "../../core/zradar-traits", features = ["utoipa"] }
 zradar-retention = { path = "../../core/zradar-retention" }
 zradar-policy = { path = "../../core/zradar-policy" }
 
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic-prost = { workspace = true }
+tonic-web = { workspace = true }
+tonic-reflection = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
+
