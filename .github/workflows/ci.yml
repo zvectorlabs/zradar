@@ -37,7 +37,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y mold protobuf-compiler build-essential pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y mold protobuf-compiler build-essential pkg-config
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.10

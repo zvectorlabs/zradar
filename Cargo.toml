@@ -80,8 +80,8 @@ tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"]
 utoipa = { version = "4.2", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 
-# Database
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "chrono", "migrate"] }
+# Database (rustls for pure Rust TLS, no libssl-dev needed)
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "migrate"] }
 
 # Arrow / Parquet / DataFusion
 # DataFusion 44 uses arrow/parquet 53 internally; pin to the same major to avoid duplicate crates.
