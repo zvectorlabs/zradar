@@ -182,6 +182,7 @@ If you are starting from scratch, pick your framework from the `examples/` direc
 | OpenAI SDK | Python + TypeScript | [`examples/openai/`](../examples/openai/) |
 | Vercel AI SDK | TypeScript | [`examples/vercel-ai-sdk/typescript/`](../examples/vercel-ai-sdk/typescript/) |
 | Mastra | TypeScript | [`examples/mastra/typescript/`](../examples/mastra/typescript/) |
+| NVIDIA NeMo / NIM | YAML (OTel Collector) | [`examples/nemo/`](../examples/nemo/) · [Integration guide](INTEGRATIONS/NEMO.md) |
 
 ---
 
