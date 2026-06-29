@@ -68,11 +68,11 @@ async function simulateOpenAICall(tracer) {
   try {
     // Set LLM-specific attributes
     span.setAttributes({
-      'llm.vendor': 'openai',
-      'llm.model': 'gpt-4',
-      'llm.temperature': 0.7,
-      'llm.max_tokens': 1000,
-      'llm.stream': false,
+      'gen_ai.system': 'openai',
+      'gen_ai.request.model': 'gpt-4',
+      'gen_ai.request.temperature': 0.7,
+      'gen_ai.request.max_tokens': 1000,
+      'gen_ai.request.stream': false,
     });
 
     // Simulate API latency
@@ -80,13 +80,13 @@ async function simulateOpenAICall(tracer) {
 
     // Add response metadata
     span.setAttributes({
-      'llm.prompt.tokens': 50,
-      'llm.completion.tokens': 150,
-      'llm.total.tokens': 200,
-      'llm.cost.input': 0.0015,
-      'llm.cost.output': 0.0045,
-      'llm.cost.total': 0.006,
-      'llm.finish_reason': 'stop',
+      'gen_ai.usage.input_tokens': 50,
+      'gen_ai.usage.output_tokens': 150,
+      'gen_ai.usage.total_tokens': 200,
+      'llm.cost.prompt_usd': 0.0015,
+      'llm.cost.completion_usd': 0.0045,
+      'llm.cost.total_usd': 0.006,
+      'gen_ai.response.finish_reasons': 'stop',
     });
 
     console.log('✅ Simulated OpenAI call');
@@ -107,21 +107,21 @@ async function simulateClaudeCall(tracer) {
   
   try {
     span.setAttributes({
-      'llm.vendor': 'anthropic',
-      'llm.model': 'claude-3-opus-20240229',
-      'llm.temperature': 0.8,
-      'llm.max_tokens': 2000,
-      'llm.top_p': 0.95,
+      'gen_ai.system': 'anthropic',
+      'gen_ai.request.model': 'claude-3-opus-20240229',
+      'gen_ai.request.temperature': 0.8,
+      'gen_ai.request.max_tokens': 2000,
+      'gen_ai.request.top_p': 0.95,
     });
 
     await new Promise(resolve => setTimeout(resolve, 600));
 
     span.setAttributes({
-      'llm.prompt.tokens': 75,
-      'llm.completion.tokens': 200,
-      'llm.total.tokens': 275,
-      'llm.cost.total': 0.021, // Claude Opus pricing
-      'llm.stop_reason': 'end_turn',
+      'gen_ai.usage.input_tokens': 75,
+      'gen_ai.usage.output_tokens': 200,
+      'gen_ai.usage.total_tokens': 275,
+      'llm.cost.total_usd': 0.021, // Claude Opus pricing
+      'gen_ai.response.finish_reasons': 'end_turn',
     });
 
     console.log('✅ Simulated Claude call');
@@ -146,10 +146,10 @@ async function simulateRAGPipeline(tracer) {
     const embedSpan = tracer.startSpan('step.generate_embedding', {}, trace.setSpan(context.active(), rootSpan));
     try {
       embedSpan.setAttributes({
-        'llm.vendor': 'openai',
-        'llm.model': 'text-embedding-ada-002',
+        'gen_ai.system': 'openai',
+        'gen_ai.request.model': 'text-embedding-ada-002',
         'embedding.dimensions': 1536,
-        'llm.cost.total': 0.0001,
+        'llm.cost.total_usd': 0.0001,
       });
       await new Promise(resolve => setTimeout(resolve, 150));
     } finally {
@@ -174,11 +174,11 @@ async function simulateRAGPipeline(tracer) {
     const completionSpan = tracer.startSpan('step.completion', {}, trace.setSpan(context.active(), rootSpan));
     try {
       completionSpan.setAttributes({
-        'llm.vendor': 'openai',
-        'llm.model': 'gpt-4',
+        'gen_ai.system': 'openai',
+        'gen_ai.request.model': 'gpt-4',
         'context.chunks': 5,
-        'llm.total.tokens': 800,
-        'llm.cost.total': 0.024,
+        'gen_ai.usage.total_tokens': 800,
+        'llm.cost.total_usd': 0.024,
       });
       await new Promise(resolve => setTimeout(resolve, 700));
     } finally {
@@ -204,8 +204,8 @@ async function simulateErrorScenario(tracer) {
   
   try {
     span.setAttributes({
-      'llm.vendor': 'openai',
-      'llm.model': 'gpt-4',
+      'gen_ai.system': 'openai',
+      'gen_ai.request.model': 'gpt-4',
     });
 
     // Simulate retries
