@@ -98,6 +98,25 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ---
 
+## Contributor ladder
+
+Contributions of any size are welcome. Here is how involvement typically grows:
+
+| Level | How you get there | What it unlocks |
+|-------|------------------|-----------------|
+| **Contributor** | Open a merged PR (docs, bug fix, example, or feature) | Listed in release notes; can be assigned issues |
+| **Reviewer** | 3+ thoughtful reviews or consistently high-quality PRs | Added to `CODEOWNERS` for your area; PRs routed to you |
+| **Maintainer** | Sustained engagement across reviews, issues, and design discussions | Merge access; helps set roadmap direction |
+
+There is no application process. Maintainers will reach out when the pattern is clear, or you can ask in a GitHub Discussion.
+
+**Good first steps:**
+- Pick an issue labelled [`good first issue`](https://github.com/zvectorlabs/zradar/issues?q=is%3Aopen+label%3A%22good+first+issue%22) — the framework integration issues (#23–#32) are self-contained and well-scoped
+- Review an open PR and leave a comment
+- Improve a doc or add a missing code example
+
+---
+
 ## Getting help
 
 - Open a [GitHub Discussion](https://github.com/zvectorlabs/zradar/discussions) for questions, ideas, or anything that doesn't fit an issue
