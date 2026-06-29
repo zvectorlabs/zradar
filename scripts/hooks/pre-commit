@@ -45,7 +45,7 @@ fi
 # ── 4. cargo deny ─────────────────────────────────────────────────────────────
 if command -v cargo-deny >/dev/null 2>&1; then
   echo "Checking licenses, advisories, and sources..."
-  if ! cargo deny check 2>&1; then
+  if ! cargo deny check 2>/dev/null; then
     echo "✗ cargo deny check failed — see above."
     echo "  To suppress a known advisory, add it to deny.toml [advisories].ignore"
     ERRORS=$((ERRORS + 1))

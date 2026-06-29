@@ -7,11 +7,15 @@
 #   3. Body lines (if present) must be bullet points starting with "- "
 #   4. Body must have at most 5 bullet points
 #
-# Trailer lines (e.g. "Co-Authored-By: ...") are exempt from bullet checks.
+# AI agent Co-Authored-By trailers (Claude, Cursor, Copilot, Devin, etc.)
+# are stripped from the message before any checks run.
 
 commit_msg_file=$1
 tmpbody=$(mktemp)
 trap 'rm -f "$tmpbody"' EXIT
+
+# Strip AI agent Co-Authored-By trailers in-place
+sed -i '/^Co-Authored-By:.*\(claude\|cursor\|copilot\|devin\|codex\|codeium\|tabnine\|anthropic\)/Id' "$commit_msg_file"
 
 # Strip git comment lines
 msg=$(grep -v "^#" "$commit_msg_file")
