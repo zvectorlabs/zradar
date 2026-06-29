@@ -1,0 +1,16 @@
+[project]
+name = "zradar-langchain-example"
+version = "0.1.0"
+description = "LangChain ReAct agent example for zradar observability"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-openai>=0.2",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+]
+
+[tool.uv]
+package = false

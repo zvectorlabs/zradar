@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "pydantic_ai.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "agent.model": "string"
+      }
+    },
+    {
+      "name": "pydantic_ai.tool.lookup_fact",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.input": "string"
+      }
+    }
+  ]
+}

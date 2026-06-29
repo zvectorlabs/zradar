@@ -1,6 +1,7 @@
 [package]
 name = "zradar-policy"
 version.workspace = true
+license.workspace = true
 edition.workspace = true
 description = "Policy enforcement and usage tracking primitives for zradar"
 

@@ -1,0 +1,60 @@
+name: RFC (design proposal)
+description: Propose a design for a significant change before implementation
+labels: ["rfc", "needs-discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for changes that affect the public API, data model, storage format, plugin interface, or any other significant cross-cutting concern. Start a discussion here before writing code — this prevents wasted effort and lets the community weigh in on the design.
+
+        Once accepted, this issue becomes the canonical design document for the implementation.
+
+  - type: input
+    id: title
+    attributes:
+      label: RFC title
+      placeholder: "RFC: Multi-agent causal chain tracing"
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem are you solving? Why does it matter? Include any relevant background.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Proposed design
+      description: |
+        Describe the change in enough detail that someone could implement it independently.
+        Include: API changes, data model changes, configuration, migration path, and anything that affects existing users.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you evaluate? Why did you choose this one?
+    validations:
+      required: true
+
+  - type: textarea
+    id: drawbacks
+    attributes:
+      label: Drawbacks and open questions
+      description: What are the downsides? What is left unresolved?
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing RFCs and issues to confirm this isn't already proposed
+          required: true
+        - label: I am willing to implement this if the RFC is accepted
+          required: false

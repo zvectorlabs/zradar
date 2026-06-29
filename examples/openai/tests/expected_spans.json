@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "openai.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "gen_ai.request.model": "string",
+        "agent.tool_calls": "int",
+        "gen_ai.usage.input_tokens": "int",
+        "gen_ai.usage.output_tokens": "int"
+      }
+    },
+    {
+      "name": "openai.tool.get_weather",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.input": "string"
+      }
+    }
+  ]
+}

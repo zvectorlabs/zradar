@@ -1,0 +1,58 @@
+area: storage:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/core/zradar-parquet/**"
+          - "crates/plugins/zradar-plugin-s3/**"
+          - "crates/core/zradar-retention/**"
+
+area: ingestion:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/services/api-optel/**"
+
+area: query-api:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/services/api/**"
+
+area: plugin:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/plugins/**"
+
+area: auth:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/auth/**"
+
+area: core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/core/zradar-models/**"
+          - "crates/core/zradar-traits/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+examples:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "examples/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/dependabot.yml"
+          - "Makefile"
+          - "justfile"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Cargo.toml"
+          - "Cargo.lock"
+          - "**/Cargo.toml"

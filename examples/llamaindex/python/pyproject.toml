@@ -1,0 +1,22 @@
+[project]
+name = "zradar-example-llamaindex"
+version = "0.1.0"
+description = "LlamaIndex ReAct agent example with OTel tracing via zradar"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "llama-index-core>=0.12",
+    "llama-index-llms-openai>=0.3",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "langchain.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "gen_ai.request.model": "string",
+        "agent.tool_calls": "int"
+      }
+    },
+    {
+      "name": "langchain.tool.get_weather",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.input": "string"
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@zradar-examples/google-adk",
+  "version": "0.1.0",
+  "description": "Google ADK exchange-rate agent with zradar OpenTelemetry instrumentation",
+  "type": "module",
+  "scripts": {
+    "start": "tsx example.ts",
+    "test:e2e": "tsx example.ts"
+  },
+  "dependencies": {
+    "@google/adk": "^1.0.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
+    "@opentelemetry/resources": "^1.27.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-node": "^1.27.0",
+    "@opentelemetry/semantic-conventions": "^1.27.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

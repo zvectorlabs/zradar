@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "mastra.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "gen_ai.request.model": "string",
+        "agent.name": "string"
+      }
+    },
+    {
+      "name": "mastra.tool.get_forecast",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.input": "string"
+      }
+    }
+  ]
+}

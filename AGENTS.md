@@ -204,32 +204,51 @@ Preferred structures:
 
 ## Commit and Hook Expectations
 
-Use `make hook` to install or refresh repository hooks.
+Use `just hook` to install or refresh repository hooks.
 
-Commit messages must follow Conventional Commits:
+### Commit message format
 
-```text
-<type>(<scope>): <subject>
+```
+<type>(<scope>): <subject>          ← max 70 characters, enforced by hook
+
+- first change or reason            ← bullet points only, enforced by hook
+- second change or reason           ← max 5 bullets, enforced by hook
 ```
 
-Accepted types include:
+Rules enforced by `commit-msg` hook (hard fail):
+- Subject follows Conventional Commits: `type(scope): description`
+- Subject is ≤ 70 characters
+- Body lines (if present) must start with `- ` (bullet points)
+- Body must have at most 5 bullet points
+- Trailer lines (`Co-Authored-By: ...`) are exempt from bullet checks
 
-- `feat`
-- `fix`
-- `docs`
-- `style`
-- `refactor`
-- `perf`
-- `test`
-- `chore`
-- `build`
-- `ci`
+Accepted types: `feat` `fix` `docs` `style` `refactor` `perf` `test` `chore` `build` `ci`
 
-Example:
-
-```text
-feat(auth): add social login
+Good example:
 ```
+feat(ingest): add MCP span type detection
+
+- maps mcp.tool.name and mcp.server.name to span fields
+- registers McpConvention in the dispatch pipeline
+- adds unit tests covering tool call and error spans
+```
+
+Bad examples (hook will block these):
+```
+feat(ingest): add support for the new MCP protocol span type detection system   ← too long (73 chars)
+
+Add MCP support                                                                  ← missing type prefix
+```
+
+### Pre-commit hook checks
+
+The `pre-commit` hook runs on every commit (in order):
+1. `just fmt` — formatting
+2. `just lint` — clippy zero warnings
+3. `just check` — compilation
+4. `cargo deny check` — license, advisory, source checks (skipped if not installed)
+5. Migration safety — blocks unsafe SQL: DROP COLUMN, RENAME COLUMN, ALTER COLUMN TYPE, DROP TABLE, ADD NOT NULL without DEFAULT
+6. Code deny patterns — blocks `dbg!()` in non-test files, hardcoded secret literals
 
 ## Agent Safety Rules
 

@@ -1,30 +1,168 @@
 #!/bin/sh
+# Pre-commit hook — blocks commits that fail quality or safety checks.
+#
+# Checks (in order):
+#   1. cargo fmt       — formatting
+#   2. cargo clippy    — lint (zero warnings)
+#   3. cargo check     — compilation
+#   4. cargo deny      — license, advisory, source checks (skipped if not installed)
+#   5. Migration safety — unsafe SQL patterns in staged migration files
+#   6. Code deny patterns — dbg!, hardcoded secret literals
+#
+# Install: just hook
+# Bypass (CI will still catch it): git commit --no-verify
 
-echo "Running pre-commit checks..."
+ERRORS=0
+MIGRATION_DIR="crates/plugins/zradar-plugin-postgres/migrations"
 
-# Formatting
-echo "Formatting code..."
-just fmt
-if [ $? -ne 0 ]; then
-  echo "Formatting failed."
-  exit 1
+# ── 1. Formatting ─────────────────────────────────────────────────────────────
+echo "Checking formatting..."
+if ! just fmt 2>&1; then
+  echo "✗ Formatting failed — run 'just fmt' then re-stage."
+  ERRORS=$((ERRORS + 1))
+else
+  echo "✓ Formatting OK"
 fi
 
-# Check clippy
+# ── 2. Clippy ─────────────────────────────────────────────────────────────────
 echo "Checking clippy..."
-just lint
-if [ $? -ne 0 ]; then
-  echo "Clippy check failed."
-  exit 1
+if ! just lint 2>&1; then
+  echo "✗ Clippy failed — fix warnings before committing."
+  ERRORS=$((ERRORS + 1))
+else
+  echo "✓ Clippy OK"
 fi
 
-# Check compilation
+# ── 3. Compilation ────────────────────────────────────────────────────────────
 echo "Checking compilation..."
-just check
-if [ $? -ne 0 ]; then
-  echo "Compilation check failed."
+if ! just check 2>&1; then
+  echo "✗ Compilation failed."
+  ERRORS=$((ERRORS + 1))
+else
+  echo "✓ Compilation OK"
+fi
+
+# ── 4. cargo deny ─────────────────────────────────────────────────────────────
+if command -v cargo-deny >/dev/null 2>&1; then
+  echo "Checking licenses, advisories, and sources..."
+  if ! cargo deny check 2>&1; then
+    echo "✗ cargo deny check failed — see above."
+    echo "  To suppress a known advisory, add it to deny.toml [advisories].ignore"
+    ERRORS=$((ERRORS + 1))
+  else
+    echo "✓ cargo deny OK"
+  fi
+else
+  echo "○ cargo deny not installed — skipping (optional)"
+  echo "  Install: cargo install cargo-deny --locked"
+fi
+
+# ── 5. Migration safety ───────────────────────────────────────────────────────
+MIGRATIONS_STAGED=$(git diff --cached --name-only -- "$MIGRATION_DIR" 2>/dev/null || true)
+
+if [ -n "$MIGRATIONS_STAGED" ]; then
+  echo "Checking migration safety..."
+  MIG_ERRORS=0
+
+  MODIFIED=$(git diff --cached --name-only --diff-filter=M -- "$MIGRATION_DIR" 2>/dev/null || true)
+  if [ -n "$MODIFIED" ]; then
+    echo "✗ MIGRATION IMMUTABILITY VIOLATION"
+    echo "  Migration files are immutable once applied — sqlx checksums them."
+    echo "$MODIFIED" | sed 's/^/    /'
+    echo "  Fix: revert and add a NEW migration file instead."
+    MIG_ERRORS=$((MIG_ERRORS + 1))
+  fi
+
+  NEW_FILES=$(git diff --cached --name-only --diff-filter=A -- "$MIGRATION_DIR" 2>/dev/null || true)
+  for FILE in $NEW_FILES; do
+    CONTENT=$(git show ":$FILE" 2>/dev/null || true)
+    [ -z "$CONTENT" ] && continue
+    STRIPPED=$(printf '%s\n' "$CONTENT" | sed 's/--[^\n]*//g')
+    FILE_ERRORS=0
+
+    if printf '%s\n' "$STRIPPED" | grep -qiE 'ALTER[[:space:]]+TABLE[[:space:]]+[^;]+DROP[[:space:]]+COLUMN'; then
+      echo "✗ UNSAFE: DROP COLUMN in $FILE"
+      echo "  Fix (2 releases): remove server code references, then DROP COLUMN."
+      FILE_ERRORS=$((FILE_ERRORS + 1))
+    fi
+    if printf '%s\n' "$STRIPPED" | grep -qiE 'RENAME[[:space:]]+COLUMN'; then
+      echo "✗ UNSAFE: RENAME COLUMN in $FILE"
+      echo "  Fix (3 releases): ADD new col → dual-write → backfill → DROP old."
+      FILE_ERRORS=$((FILE_ERRORS + 1))
+    fi
+    if printf '%s\n' "$STRIPPED" | grep -qiE 'ALTER[[:space:]]+COLUMN[[:space:]]+[^[:space:]]+[[:space:]]+(TYPE|SET[[:space:]]+DATA[[:space:]]+TYPE)'; then
+      echo "✗ UNSAFE: ALTER COLUMN TYPE in $FILE"
+      echo "  Fix (3 releases): ADD new col → dual-write → backfill → DROP old."
+      FILE_ERRORS=$((FILE_ERRORS + 1))
+    fi
+    if printf '%s\n' "$STRIPPED" | grep -qiE '^[[:space:]]*DROP[[:space:]]+TABLE'; then
+      echo "✗ UNSAFE: DROP TABLE in $FILE"
+      echo "  Fix: ensure all server references removed first."
+      FILE_ERRORS=$((FILE_ERRORS + 1))
+    fi
+
+    # ADD COLUMN NOT NULL without DEFAULT — table rewrite + lock on old Postgres
+    TMPFILE=$(mktemp)
+    printf '%s\n' "$CONTENT" > "$TMPFILE"
+    while IFS= read -r LINE; do
+      TRIMMED=$(printf '%s' "$LINE" | sed 's/^[[:space:]]*//' | sed 's/--.*$//')
+      if printf '%s' "$TRIMMED" | grep -qiE 'ADD[[:space:]]+COLUMN'; then
+        if printf '%s' "$TRIMMED" | grep -qiE 'NOT[[:space:]]+NULL'; then
+          if ! printf '%s' "$TRIMMED" | grep -qiE 'DEFAULT'; then
+            echo "✗ UNSAFE: ADD COLUMN NOT NULL without DEFAULT in $FILE"
+            echo "  Line: $(printf '%s' "$LINE" | sed 's/^[[:space:]]*//')"
+            echo "  Fix: add a DEFAULT, or add nullable then constrain separately."
+            FILE_ERRORS=$((FILE_ERRORS + 1))
+            break
+          fi
+        fi
+      fi
+    done < "$TMPFILE"
+    rm -f "$TMPFILE"
+
+    [ $FILE_ERRORS -eq 0 ] && echo "✓ $FILE"
+    MIG_ERRORS=$((MIG_ERRORS + FILE_ERRORS))
+  done
+
+  ERRORS=$((ERRORS + MIG_ERRORS))
+fi
+
+# ── 6. Code deny patterns ─────────────────────────────────────────────────────
+STAGED_RS=$(git diff --cached --name-only -- '*.rs' 2>/dev/null \
+  | grep -vE '_test\.rs$|/tests/|test_functional/' || true)
+
+if [ -n "$STAGED_RS" ]; then
+  echo "Checking code deny patterns..."
+  DENY_ERRORS=0
+
+  for FILE in $STAGED_RS; do
+    CONTENT=$(git show ":$FILE" 2>/dev/null || true)
+    [ -z "$CONTENT" ] && continue
+
+    # dbg! outside of test/example code
+    if printf '%s\n' "$CONTENT" | grep -qE '[^/]\bdbg!\s*\('; then
+      echo "✗ dbg!() in $FILE — use tracing::debug! for structured logging."
+      DENY_ERRORS=$((DENY_ERRORS + 1))
+    fi
+
+    # Hardcoded secret literals
+    if printf '%s\n' "$CONTENT" | grep -qiE '(password|secret|api_key|private_key)\s*=\s*"[^"]+"'; then
+      echo "✗ Possible hardcoded secret in $FILE — use config/env vars."
+      DENY_ERRORS=$((DENY_ERRORS + 1))
+    fi
+  done
+
+  [ $DENY_ERRORS -eq 0 ] && echo "✓ Code deny patterns OK"
+  ERRORS=$((ERRORS + DENY_ERRORS))
+fi
+
+# ── Result ────────────────────────────────────────────────────────────────────
+echo ""
+if [ $ERRORS -gt 0 ]; then
+  echo "✗ Pre-commit blocked ($ERRORS check(s) failed) — fix above before committing."
+  echo "  Emergency bypass: git commit --no-verify  (CI will still catch it)"
   exit 1
 fi
 
-echo "All checks passed!"
+echo "✓ All pre-commit checks passed."
 exit 0

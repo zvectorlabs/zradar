@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {
+      "name": "llamaindex.agent.run",
+      "required_attributes": {
+        "gen_ai.system": "string",
+        "agent.type": "string",
+        "agent.query": "string"
+      }
+    },
+    {
+      "name": "llamaindex.tool.search_docs",
+      "required_attributes": {
+        "tool.name": "string",
+        "tool.query": "string"
+      }
+    }
+  ]
+}

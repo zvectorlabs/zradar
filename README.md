@@ -9,6 +9,16 @@ zradar helps developers understand what their agents are doing, why they fail, h
 
 ---
 
+## Mission
+
+AI observability should be affordable and complete — from a single agent on a laptop to a multi-agent cluster on Kubernetes processing millions of tool calls a day.
+
+zradar is the observability layer that scales with you: one OpenTelemetry standard, zero vendor lock-in, every use case covered — LLM completions, MCP tool calls, agentic workflows, RAG pipelines, and Kubernetes-deployed services. We believe full-stack visibility should never be the thing that breaks your budget.
+
+See [ROADMAP.md](ROADMAP.md) for what's coming next.
+
+---
+
 ## ⚡ Why choose zradar?
 
 Traditional APM tools aren't built for non-deterministic LLM chains. Zradar focuses on the specific pain points of modern AI development:
@@ -57,7 +67,7 @@ docker-compose up -d
 - **Admin HTTP API:** `http://localhost:8081` (Query analytics and settings)
 - **Swagger / OpenAPI UI:** `http://localhost:8081/swagger-ui/`
 
-*Send sample telemetry from the `examples/` directory (see `examples/README.md`), then query traces via the Swagger UI!*
+For a step-by-step walkthrough — including how to send your first trace and query it back — see **[docs/004_QUICKSTART.md](docs/004_QUICKSTART.md)**.
 
 ---
 
@@ -95,51 +105,39 @@ zradar is built from the ground up to solve the operational headaches of modern 
 
 ## 🛠️ Development & Contributing
 
-Want to contribute or hack on zradar locally? Here is everything you need to build and run the project efficiently.
+Want to contribute or hack on zradar locally? Here is everything you need.
 
-### 1. Install Prerequisites
+### 1. Install Prerequisites (manually, once)
 
-We use standard Rust tooling along with specialized tools for fast, reliable builds:
+- **Rust ≥ 1.93.0** — [rustup.rs](https://rustup.rs)
+- **Docker** — for local PostgreSQL
+- **Python 3** — for functional test scripts
+- **`just`** — `cargo install just`
 
-- **Rust:** `1.93.0` (Use `rustup`)
-- **Docker:** Required for spinning up the local PostgreSQL dev/test databases.
-- **Python 3:** Required for functional test scripts.
-- **just:** A handy command runner. (`cargo install just`)
-- **cargo-nextest:** A faster, more reliable test runner. (`cargo install cargo-nextest`)
-- **sccache & mold** *(Optional but highly recommended)*: Used for blazing-fast cached builds. 
-  - Install via your OS package manager: `sudo apt install mold sccache` or `brew install mold sccache`.
-
-### 2. Local Environment Setup
-
-Spin up the local database and development environment:
+### 2. First-time setup
 
 ```bash
-just dev
+just bootstrap   # installs cargo-nextest, sqlx-cli, and git hooks
+just doctor      # verify everything is installed correctly
+just dev         # start local Postgres + dev environment
 ```
 
 ### 3. Build & Test Commands
 
-We use `just` recipes to standardize workflows:
-
 ```bash
-# See all available commands
-just --list
-
-# Format and check code (clippy)
-just fmt
-just check
-
-# Run unit tests
-just test
-
-# Run the full end-to-end Dockerized functional suite
-just functional-tests
+just fmt              # format
+just check            # compile check
+just lint             # clippy (zero warnings)
+just test             # unit tests
+just functional-tests # full end-to-end suite (Docker)
 ```
 
-**Fast Builds:** Prefix your commands with `ZRADAR_FAST_BUILD=1` to opt-in to `mold` and `sccache` (e.g., `ZRADAR_FAST_BUILD=1 just test`). This drastically reduces re-compile times.
+**Fast Builds:** `ZRADAR_FAST_BUILD=1 just test` — activates `mold` linker and `sccache` if installed (`sudo apt install mold sccache` / `brew install mold sccache`). Drastically cuts recompile time.
 
 ### 4. Configuration
 
-To configure the server locally, copy `config.toml.example` to `config.toml` and review connection strings, retention windows, and OTLP ports.
+Copy `config.toml.example` to `config.toml` and review connection strings, retention windows, and OTLP ports.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
 
 
