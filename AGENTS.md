@@ -79,6 +79,29 @@ make deploy
 make deploy-stop
 ```
 
+### Release and Version Bumps
+
+Use `just release-publish` — never edit `Cargo.toml` or `VERSION` directly.
+
+```bash
+just show-version                    # print current version
+just release-publish patch           # bump patch (0.8.1 → 0.8.2), tag, push
+just release-publish minor           # bump minor (0.8.1 → 0.9.0), tag, push
+just release-publish major           # bump major (0.8.1 → 1.0.0), tag, push
+just release-publish 1.2.3           # set exact version, tag, push
+```
+
+`just release-publish` performs the full release cycle in one shot:
+1. Bumps `VERSION` and `[workspace.package].version` in `Cargo.toml`
+2. Runs `cargo check` to verify the workspace compiles
+3. Creates a release commit (`chore(release): v<N>`) and an annotated git tag
+4. Pushes the commit + tag to origin — this triggers CI to build and publish release artifacts
+
+**Requirements:** working tree must be clean before running (commit or stash first).
+
+To preview without pushing: `SKIP_PUSH=1 just release-publish minor`
+To dry-run entirely: `DRY_RUN=1 just release-publish minor`
+
 ### Cleanup
 
 ```bash
