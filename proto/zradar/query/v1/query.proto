@@ -10,6 +10,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/zvectorlabs/zradar/gen/go/zradar/query/v1;queryv1";
 option java_package = "com.zvectorlabs.zradar.query.v1";
+option java_multiple_files = true;
 
 // ============================================================================
 // Common messages
