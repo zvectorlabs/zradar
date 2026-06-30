@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     // auto-migrate on startup. The full server is NOT started.
     if std::env::args().nth(1).as_deref() == Some("migrate") {
         let database_url = std::env::var("DATABASE_URL")
-            .expect("DATABASE_URL must be set for the migrate subcommand");
+            .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set for the migrate subcommand"))?;
         zradar_runtime::migrate(&database_url).await?;
         println!("zradar migrations applied");
         return Ok(());
