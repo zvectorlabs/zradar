@@ -26,6 +26,7 @@ const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
 
 /// Build the OTLP/HTTP axum router. Mount at the server root on port 4318.
+#[allow(clippy::too_many_arguments)]
 pub fn otlp_http_router(
     writer: Arc<dyn zradar_traits::TelemetryWriter>,
     auth: Option<Arc<dyn Authenticator>>,
@@ -34,6 +35,7 @@ pub fn otlp_http_router(
     rate_limiter: Arc<ProjectRateLimiter>,
     policy_enforcer: Arc<dyn zradar_policy::PolicyEnforcer>,
     circuit_breaker: Arc<CircuitBreaker>,
+    cors_config: zradar_models::CorsConfig,
 ) -> Router {
     let state = OtlpHttpState {
         writer,
@@ -44,11 +46,28 @@ pub fn otlp_http_router(
         policy_enforcer: Some(policy_enforcer),
         circuit_breaker: Some(circuit_breaker),
     };
+
+    let cors_layer = if cors_config.allowed_origins.is_empty() {
+        tower_http::cors::CorsLayer::permissive()
+    } else {
+        let mut allowed_origins = Vec::new();
+        for origin in &cors_config.allowed_origins {
+            if let Ok(value) = axum::http::HeaderValue::from_str(origin) {
+                allowed_origins.push(value);
+            }
+        }
+        tower_http::cors::CorsLayer::new()
+            .allow_origin(allowed_origins)
+            .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
+            .allow_headers(tower_http::cors::Any)
+    };
+
     Router::new()
         .route("/v1/traces", post(export_traces))
         .route("/v1/metrics", post(export_metrics))
         .route("/v1/logs", post(export_logs))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(cors_layer)
         .with_state(state)
 }
 
@@ -347,6 +366,238 @@ mod tests {
         assert_eq!(
             check_content_type(&headers),
             Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cors_layer_on_otlp_http_router() {
+        use axum::http::Request;
+        use std::path::PathBuf;
+        use tower::Service;
+
+        struct DummyTelemetryWriter;
+        #[tonic::async_trait]
+        impl zradar_traits::TelemetryWriter for DummyTelemetryWriter {
+            async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_metrics(
+                &self,
+                _metrics: &[zradar_models::Metric],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_logs(&self, _logs: &[zradar_models::LogRecord]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_scores(
+                &self,
+                _scores: &[zradar_models::EvaluationScore],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct DummySettingsRepo;
+        #[tonic::async_trait]
+        impl zradar_traits::SettingsRepository for DummySettingsRepo {
+            async fn get_settings(
+                &self,
+                _workspace_id: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Option<zradar_models::WorkspaceSettings>> {
+                Ok(None)
+            }
+            async fn upsert_settings(
+                &self,
+                _settings: zradar_models::NewWorkspaceSettings,
+            ) -> anyhow::Result<zradar_models::WorkspaceSettings> {
+                unimplemented!()
+            }
+            async fn list_all_settings(
+                &self,
+            ) -> anyhow::Result<Vec<zradar_models::WorkspaceSettings>> {
+                Ok(vec![])
+            }
+        }
+
+        struct DummyPolicyEnforcer;
+        #[tonic::async_trait]
+        impl zradar_policy::PolicyEnforcer for DummyPolicyEnforcer {
+            async fn check_ingest(
+                &self,
+                _ctx: zradar_policy::IngestCtx,
+            ) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+            async fn check_query(&self, _ctx: zradar_policy::QueryCtx) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+        }
+
+        let mut router = otlp_http_router(
+            Arc::new(DummyTelemetryWriter),
+            None,
+            false,
+            Arc::new(DummySettingsRepo),
+            Arc::new(ProjectRateLimiter::new()),
+            Arc::new(DummyPolicyEnforcer),
+            Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+            zradar_models::CorsConfig::default(),
+        );
+
+        // 1. Test OPTIONS preflight request
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/traces")
+            .header("Origin", "https://example.com")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = router.call(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "*"
+        );
+
+        // 2. Test POST request CORS header presence
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/traces")
+            .header("Origin", "https://example.com")
+            .header("content-type", "application/x-protobuf")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = router.call(req).await.unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "*"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cors_layer_with_allowlist() {
+        use axum::http::Request;
+        use std::path::PathBuf;
+        use tower::Service;
+
+        struct DummyTelemetryWriter;
+        #[tonic::async_trait]
+        impl zradar_traits::TelemetryWriter for DummyTelemetryWriter {
+            async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_metrics(
+                &self,
+                _metrics: &[zradar_models::Metric],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_logs(&self, _logs: &[zradar_models::LogRecord]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_scores(
+                &self,
+                _scores: &[zradar_models::EvaluationScore],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct DummySettingsRepo;
+        #[tonic::async_trait]
+        impl zradar_traits::SettingsRepository for DummySettingsRepo {
+            async fn get_settings(
+                &self,
+                _workspace_id: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Option<zradar_models::WorkspaceSettings>> {
+                Ok(None)
+            }
+            async fn upsert_settings(
+                &self,
+                _settings: zradar_models::NewWorkspaceSettings,
+            ) -> anyhow::Result<zradar_models::WorkspaceSettings> {
+                unimplemented!()
+            }
+            async fn list_all_settings(
+                &self,
+            ) -> anyhow::Result<Vec<zradar_models::WorkspaceSettings>> {
+                Ok(vec![])
+            }
+        }
+
+        struct DummyPolicyEnforcer;
+        #[tonic::async_trait]
+        impl zradar_policy::PolicyEnforcer for DummyPolicyEnforcer {
+            async fn check_ingest(
+                &self,
+                _ctx: zradar_policy::IngestCtx,
+            ) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+            async fn check_query(&self, _ctx: zradar_policy::QueryCtx) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+        }
+
+        let mut router = otlp_http_router(
+            Arc::new(DummyTelemetryWriter),
+            None,
+            false,
+            Arc::new(DummySettingsRepo),
+            Arc::new(ProjectRateLimiter::new()),
+            Arc::new(DummyPolicyEnforcer),
+            Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+            zradar_models::CorsConfig {
+                allowed_origins: vec!["https://allowed.com".to_string()],
+            },
+        );
+
+        // 1. Allowed origin preflight
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/traces")
+            .header("Origin", "https://allowed.com")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = router.call(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "https://allowed.com"
+        );
+
+        // 2. Disallowed origin preflight (should not contain access-control-allow-origin)
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/traces")
+            .header("Origin", "https://disallowed.com")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = router.call(req).await.unwrap();
+        assert!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none()
         );
     }
 }

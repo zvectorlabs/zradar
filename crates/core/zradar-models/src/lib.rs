@@ -33,7 +33,7 @@ pub use span::Span;
 pub use workspace_settings::{NewWorkspaceSettings, WorkspaceSettings};
 
 // Re-export commonly used config types for convenience
-pub use config::{ApiKeyConfig, AuthConfig, ParquetStorageConfig};
+pub use config::{ApiKeyConfig, AuthConfig, CorsConfig, ParquetStorageConfig};
 
 pub mod workspace;
 pub use workspace::*;

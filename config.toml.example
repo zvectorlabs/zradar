@@ -80,6 +80,12 @@ memory_cache_enabled             = false
 [migrations]
 auto_migrate = true
 
+# CORS configuration for OTLP/HTTP ingest.
+# By default (when allowed_origins is empty or commented out), CORS is permissive (*).
+# [cors]
+# allowed_origins = ["https://app.example.com", "http://localhost:3000"]
+
+
 # ============================================================================
 # ENVIRONMENT VARIABLE OVERRIDES
 # ============================================================================

@@ -47,6 +47,10 @@ pub struct Config {
     /// Port for the Admin gRPC API (default: 8082).
     #[serde(default)]
     pub admin_grpc_port: Option<u16>,
+
+    /// CORS configuration block.
+    #[serde(default)]
+    pub cors: CorsConfig,
 }
 
 impl Config {
@@ -83,6 +87,7 @@ impl Config {
                 admin_api_port: None,
                 query_grpc_port: None,
                 admin_grpc_port: None,
+                cors: CorsConfig::default(),
             }
         };
 

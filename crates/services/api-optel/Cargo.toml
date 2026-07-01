@@ -50,6 +50,7 @@ allocation-counter = { version = "0.8", optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+tower = { workspace = true }
 
 [features]
 # Enable the OQ15 zero-copy invariant test. Activates the custom global
