@@ -302,12 +302,13 @@ mod tests {
         assert!(yaml.contains("job_name: dcgm"));
     }
 
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn locate_otelcol_bin_respects_zradar_env_override_when_path_valid() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         // Pick a path that always exists — `/` on unix or the current exe's parent.
         let probe = std::env::current_exe().unwrap();
-        // SAFETY: tests are single-threaded by default; this env var is consumed
-        // only by `locate_otelcol_bin` and only inside this test.
         unsafe { std::env::set_var("ZRADAR_OTELCOL_BIN", &probe) };
         let resolved = locate_otelcol_bin();
         unsafe { std::env::remove_var("ZRADAR_OTELCOL_BIN") };
@@ -321,13 +322,15 @@ mod tests {
 
     #[test]
     fn locate_otelcol_bin_ignores_env_when_path_missing() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         // Point at a definitely-not-real path; the function must fall through.
         let bogus = "/this/path/does/not/exist/zradar-otelcol";
         unsafe { std::env::set_var("ZRADAR_OTELCOL_BIN", bogus) };
         let resolved = locate_otelcol_bin();
         unsafe { std::env::remove_var("ZRADAR_OTELCOL_BIN") };
-        // If PATH also lacks otelcol the answer is None; if a system-wide
-        // otelcol exists the answer is Some(that). The only invariant we
+
+        // It either found nothing (None) or found a real bin on PATH (Some),
+        // but it definitely shouldn't be our bogus path. The only invariant we
         // can assert is that the bogus path is NOT returned.
         assert!(
             resolved.as_deref() != Some(std::path::Path::new(bogus)),

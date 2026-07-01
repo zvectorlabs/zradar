@@ -175,6 +175,10 @@ pub fn span_filters_from_request(req: &query_proto::QuerySpansRequest) -> SpanQu
         tool_name: req.tool_name.clone(),
         invocation_id: req.invocation_id.clone(),
         environment: req.environment.clone(),
+        min_duration_ms: None,
+        max_duration_ms: None,
+        db_system_name: None,
+        db_operation_name: None,
         limit: Some(limit),
         offset: Some(offset as i64),
     }
@@ -487,6 +491,13 @@ pub fn span_detail_to_proto(s: &SpanDetail) -> query_proto::SpanDetail {
         events_json: optional_json_string(&s.events),
         links_json: optional_json_string(&s.links),
         attributes: json_map_to_proto(&s.attributes),
+        db_system_name: s.db_system_name.clone(),
+        db_namespace: s.db_namespace.clone(),
+        db_operation_name: s.db_operation_name.clone(),
+        db_query_text: s.db_query_text.clone(),
+        db_query_summary: s.db_query_summary.clone(),
+        db_collection_name: s.db_collection_name.clone(),
+        db_response_status_code: s.db_response_status_code.clone(),
     }
 }
 

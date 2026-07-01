@@ -135,6 +135,17 @@ pub struct Span {
     pub level: String, // DEBUG, INFO, WARNING, ERROR, CRITICAL
 
     // ============================================================
+    // Database (db.* OTel semantic conventions)
+    // ============================================================
+    pub db_system_name: String,
+    pub db_namespace: String,
+    pub db_operation_name: String,
+    pub db_query_text: String,
+    pub db_query_summary: String,
+    pub db_collection_name: String,
+    pub db_response_status_code: String,
+
+    // ============================================================
     // Flexible Attributes (JSON)
     // ============================================================
     pub model_parameters: String, // JSON: {"temperature": 0.7, ...}
@@ -162,6 +173,7 @@ impl Span {
         "EMBEDDING",
         "GUARDRAIL",
         "RERANKER",
+        "DATABASE",
     ];
 
     /// Validate if a string is a valid span type
@@ -228,6 +240,13 @@ impl Default for Span {
             agent_version: String::new(),
             sdk_version: String::new(),
             level: "INFO".to_string(),
+            db_system_name: String::new(),
+            db_namespace: String::new(),
+            db_operation_name: String::new(),
+            db_query_text: String::new(),
+            db_query_summary: String::new(),
+            db_collection_name: String::new(),
+            db_response_status_code: String::new(),
             model_parameters: "{}".to_string(),
             attributes: "{}".to_string(),
             created_at: now,
@@ -254,6 +273,7 @@ mod tests {
         assert!(Span::validate_span_type("GUARDRAIL"));
         assert!(Span::validate_span_type("EVENT"));
         assert!(Span::validate_span_type("RERANKER"));
+        assert!(Span::validate_span_type("DATABASE"));
     }
 
     #[test]

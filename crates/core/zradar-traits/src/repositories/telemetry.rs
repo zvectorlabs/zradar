@@ -79,6 +79,10 @@ pub struct SpanQueryFilters {
     pub invocation_id: Option<String>,
     // Phase 4 R4.5 — deployment.environment filter
     pub environment: Option<String>,
+    pub min_duration_ms: Option<u64>,
+    pub max_duration_ms: Option<u64>,
+    pub db_system_name: Option<String>,
+    pub db_operation_name: Option<String>,
     pub pagination: Pagination,
 }
 
