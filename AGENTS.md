@@ -320,6 +320,20 @@ Example:
 feat(auth): add social login
 ```
 
+## OSS Content Boundary
+
+This repository is published and maintained as an independent OSS project. It must never carry
+references to any downstream company, product, or deployment that consumes it:
+
+- No company names, internal service names, internal URLs/hostnames, or internal contact
+  emails in code, comments, commit messages, or docs.
+- Describe integrations (auth, storage, gateways) generically and capability-focused (e.g. "an
+  upstream gateway can front zradar for centralized auth") rather than naming a specific consumer.
+- Test fixtures and example paths should use generic placeholders, not a real downstream
+  deployment's directory structure.
+- If you find such a reference while working here, flag or fix it as part of the change — don't
+  let it merge.
+
 ## Agent Safety Rules
 
 - Do not run destructive commands unless explicitly requested.

@@ -460,15 +460,15 @@ mod tests {
     #[test]
     fn test_s3_key_for_local_file_collapses_duplicate_data_dir_basename() {
         let key = s3_key_for_local_file(
-            std::path::Path::new("/workspace/zradar-platform/files"),
+            std::path::Path::new("/workspace/zradar/files"),
             std::path::Path::new(
-                "/workspace/zradar-platform/files/files/tenant/traces/service/2026/05/28/00/a.parquet",
+                "/workspace/zradar/files/files/tenant/traces/service/2026/05/28/00/a.parquet",
             ),
         );
 
         assert_eq!(
             key,
-            "workspace/zradar-platform/files/tenant/traces/service/2026/05/28/00/a.parquet"
+            "workspace/zradar/files/tenant/traces/service/2026/05/28/00/a.parquet"
         );
     }
 

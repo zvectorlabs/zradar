@@ -68,7 +68,7 @@ zradar
 └── crates/plugins/zradar-plugin-s3     // S3 block storage backend
 ```
 
-**Principle:** Single-binary OTLP server. PostgreSQL holds only the control plane (file_list, stream_stats, settings, retention, audit). All telemetry lives in Parquet (local disk → S3 via FileMover). Auth is handled at the zvectorlabs platform gateway; the zradar binary uses static API keys for direct deployments.
+**Principle:** Single-binary OTLP server. PostgreSQL holds only the control plane (file_list, stream_stats, settings, retention, audit). All telemetry lives in Parquet (local disk → S3 via FileMover). Auth is pluggable: an upstream gateway/reverse proxy can front zradar for centralized auth, or the zradar binary can use its own static API keys for direct deployments.
 
 ---
 
