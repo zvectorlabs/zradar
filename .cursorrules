@@ -7,19 +7,19 @@ See [AGENTS.md](AGENTS.md) and [CODING_GUIDELINES.md](CODING_GUIDELINES.md) for 
 ## Quick Rules
 
 ### Do
-- Use `make` targets for all lifecycle commands (build, test, fmt, lint, migrate)
+- Use `just` recipes for all lifecycle commands (build, test, fmt, lint, migrate)
 - Write async I/O; never block the Tokio executor
 - Enforce `org_id` + `project_id` filters on every data query
 - Use `thiserror` for structured errors; add context on propagation
 - Use newtypes for IDs (`OrganizationId`, `ProjectId`, `TraceId`, etc.)
-- Keep Clippy warning-free; run `make lint` before finishing
+- Keep Clippy warning-free; run `just lint` before finishing
 
 ### Don't
-- Call `cargo`, `docker-compose`, or `sqlx` directly when a `make` target exists
+- Call `cargo`, `docker-compose`, or `sqlx` directly when a `just` recipe exists
 - Hold locks across `.await` points
 - Panic in library code — always return `Result`
 - Hardcode secrets, tokens, API keys, or production endpoints
-- Run `make clean-all` unless explicitly requested
+- Run `just clean-all` unless explicitly requested
 
 ---
 
@@ -46,8 +46,8 @@ Storage split:
 ## Preferred Validation Sequence
 
 ```bash
-make fmt
-make check
-make lint
-make test
+just fmt
+just check
+just lint
+just test
 ```

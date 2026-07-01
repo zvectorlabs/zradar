@@ -1,6 +1,6 @@
 # Development Environment (Default)
 # This is optimized for local development with hot reload
-# Usage: make dev  OR  docker-compose up
+# Usage: just dev  OR  docker-compose up
 #
 # Architecture: PostgreSQL metadata + local Parquet telemetry
 # - Control plane and metadata stored in PostgreSQL

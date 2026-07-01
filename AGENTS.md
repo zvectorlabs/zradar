@@ -4,79 +4,79 @@
 
 This file is the operating guide for AI agents and contributors working in this repository. It is self-contained and applies to the entire `zradar` project unless a more specific `AGENTS.md` exists in a subdirectory.
 
-## Non-Negotiable Rule: Use `make`
+## Non-Negotiable Rule: Use `just`
 
-Always use `make` targets for development lifecycle commands.
+Always use `just` recipes for development lifecycle commands.
 
-Do not call lifecycle tools directly when a `make` target exists. This includes `cargo`, `docker-compose`, migrations, SQLx cache generation, formatting, linting, testing, local runs, production-like runs, deployment, logs, shells, and cleanup.
+Do not call lifecycle tools directly when a `just` recipe exists. This includes `cargo`, `docker-compose`, migrations, SQLx cache generation, formatting, linting, testing, local runs, production-like runs, deployment, logs, shells, and cleanup.
 
-Use the repository `Makefile` as the source of truth for dev workflows because it wires hooks, Docker orchestration, SQLx cache generation, migrations, and project-specific defaults together.
+Use the repository `justfile` as the source of truth for dev workflows because it wires hooks, Docker orchestration, SQLx cache generation, migrations, and project-specific defaults together.
 
 ## Quick Reference
 
 ### Discovery
 
 ```bash
-make help
+just --list
 ```
 
 ### Development
 
 ```bash
-make dev
-make dev-logs
-make start
-make stop
-make restart
-make status
-make logs
-make logs-server
-make health
+just dev
+just dev-logs
+just start
+just stop
+just restart
+just status
+just logs
+just logs-server
+just health
 ```
 
 ### Testing
 
 ```bash
-make test
-make functional_tests
-make functional_tests_fast
-make functional_tests_fast TEST_NAME=test_name
+just test
+just functional-tests
+just functional-tests-fast
+just functional-tests-fast test_name
 ```
 
 ### Quality
 
 ```bash
-make fmt
-make check
-make lint
-make fix
-make hook
+just fmt
+just check
+just lint
+just fix
+just hook
 ```
 
 ### Database and SQLx
 
 ```bash
-make migrate
-make sqlx-prepare
-make clean-sqlx
-make db-shell
+just migrate
+just sqlx-prepare
+just clean-sqlx
+just db-shell
 ```
 
 ### Builds and Runtime
 
 ```bash
-make build-prod
-make prod
-make prod-stop
-make release
-make run
+just build-prod
+just prod
+just prod-stop
+just release
+just run
 ```
 
 ### Deployment
 
 ```bash
-make deploy
-make deploy-stop
+just deploy
+just deploy-stop
 ```
 
 ### Release and Version Bumps
@@ -105,29 +105,29 @@ To dry-run entirely: `DRY_RUN=1 just release-publish minor`
 ### Cleanup
 
 ```bash
-make clean
-make clean-all
+just clean
+just clean-all
 ```
 
-`make clean-all` deletes the local `data/` directory. Treat it as destructive and do not run it unless explicitly requested.
+`just clean-all` deletes the local `data/` directory. Treat it as destructive and do not run it unless explicitly requested.
 
 ## Expected Workflow
 
 1. Inspect the relevant files and existing patterns before changing code.
 2. Prefer the smallest change that solves the problem.
-3. Run the narrowest useful validation through `make`.
+3. Run the narrowest useful validation through `just`.
 4. For Rust code changes, normally run:
 
 ```bash
-make fmt
-make check
-make lint
-make test
+just fmt
+just check
+just lint
+just test
 ```
 
-5. For behavior involving Docker services, use `make dev`, `make status`, `make logs`, and `make health`.
-6. For database query changes, regenerate SQLx metadata with `make sqlx-prepare` or `make clean-sqlx` as appropriate.
-7. Ensure hooks are installed or updated with `make hook` when working on commits.
+5. For behavior involving Docker services, use `just dev`, `just status`, `just logs`, and `just health`.
+6. For database query changes, regenerate SQLx metadata with `just sqlx-prepare` or `just clean-sqlx` as appropriate.
+7. Ensure hooks are installed or updated with `just hook` when working on commits.
 
 ## Repository Architecture
 
@@ -293,7 +293,7 @@ Conversion rules:
 
 ## Commit and Hook Expectations
 
-Use `make hook` to install or refresh repository hooks.
+Use `just hook` to install or refresh repository hooks.
 
 Commit messages must follow Conventional Commits:
 
@@ -337,8 +337,8 @@ references to any downstream company, product, or deployment that consumes it:
 ## Agent Safety Rules
 
 - Do not run destructive commands unless explicitly requested.
-- Do not use `make clean-all` unless explicitly requested and the data deletion risk is acknowledged.
-- Do not bypass `make` by calling direct lifecycle commands when a Make target exists.
+- Do not use `just clean-all` unless explicitly requested and the data deletion risk is acknowledged.
+- Do not bypass `just` by calling direct lifecycle commands when a just recipe exists.
 - Do not introduce new dependencies without checking existing project conventions and dependency files.
 - Do not modify generated or cached files unless the task requires it.
 - Do not make broad rewrites when a targeted patch is sufficient.
@@ -346,15 +346,15 @@ references to any downstream company, product, or deployment that consumes it:
 
 ## Before Finishing
 
-For code changes, report which `make` validations were run. If validation was not run, state why.
+For code changes, report which `just` validations were run. If validation was not run, state why.
 
 Preferred final checks:
 
 ```bash
-make fmt
-make check
-make lint
-make test
+just fmt
+just check
+just lint
+just test
 ```
 
 @CODING_GUIDELINES.md
