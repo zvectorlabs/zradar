@@ -1131,6 +1131,7 @@ impl ZradarRuntimeBuilder {
                 rate_limiter.clone(),
                 policy_enforcer.clone(),
                 circuit_breaker.clone(),
+                config.cors.clone(),
             );
             let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
             Some(async move {
