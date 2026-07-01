@@ -2,7 +2,7 @@
 # Requires PostgreSQL 17+
 #
 # DOCKER PORT MAPPINGS (when using docker-compose.yml):
-# - PostgreSQL:  localhost:9001 → postgres:5432
+# - PostgreSQL:  localhost:5432 → postgres:5432
 # - OTLP gRPC:   localhost:4317 → zradar:4317
 # - Admin API:   localhost:8081 → zradar:8081
 #
@@ -14,14 +14,23 @@
 # OTLP gRPC port (standard OpenTelemetry port)
 otlp_port = 4317
 
+# OTLP/HTTP receiver port. Set to 0 to disable.
+otlp_http_port = 4318
+
 # Admin API HTTP port
 admin_api_port = 8081
+
+# Port for the Query gRPC API
+query_grpc_port = 8081
+
+# Port for the Admin gRPC API
+admin_grpc_port = 8082
 
 # PostgreSQL configuration (control plane: file_list, settings, retention, audit)
 # Connection string is provided via DATABASE_URL environment variable.
 #
 # Docker (inside container): postgresql://zradar:zradar_password@postgres:5432/zradar
-# Local (to Docker):         postgresql://zradar:zradar_password@localhost:9001/zradar
+# Local (to Docker):         postgresql://zradar:zradar_password@localhost:5432/zradar
 # Local (native):            postgresql://zradar:password@localhost:5432/zradar
 [postgres]
 max_connections = 20
