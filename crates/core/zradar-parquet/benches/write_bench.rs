@@ -16,8 +16,8 @@
 
 use arrow::record_batch::RecordBatch;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
 use parquet::arrow::ArrowWriter;
+use std::hint::black_box;
 use tempfile::TempDir;
 
 use zradar_models::Span;
