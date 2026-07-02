@@ -77,8 +77,8 @@ async-trait = "0.1"
 # Object storage (S3-compatible via opendal)
 opendal = { version = "0.49", features = ["services-s3"] }
 
-# Web framework (upgraded to 0.7 for utoipa support)
-axum = "0.7"
+# Web framework (upgraded to 0.8 for latest support)
+axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.7", features = ["trace", "cors", "compression-gzip"] }
 
