@@ -248,7 +248,9 @@ impl OtlpConverter {
                         || k == "gen_ai.prompt"
                         || k == "gen_ai.completion"
                         || k == "db.statement"
-                        || k == "db.query.text")
+                        || k == "db.query.text"
+                        || k == "mcp.tool.input"
+                        || k == "mcp.tool.output")
             });
 
         // When capture is disabled, also clear the first-class content columns
@@ -257,6 +259,8 @@ impl OtlpConverter {
             span_data.llm_input = String::new();
             span_data.llm_output = String::new();
             span_data.db_query_text = String::new();
+            span_data.mcp_tool_input = String::new();
+            span_data.mcp_tool_output = String::new();
 
             if let Ok(mut events) =
                 serde_json::from_str::<Vec<serde_json::Value>>(&span_data.events)
@@ -342,8 +346,10 @@ mod tests {
             llm_input: "secret prompt".to_string(),
             llm_output: "secret completion".to_string(),
             db_query_text: "SELECT * FROM secrets".to_string(),
+            mcp_tool_input: "secret input".to_string(),
+            mcp_tool_output: "secret output".to_string(),
             attributes:
-                r#"{"gen_ai.content.prompt":"secret","db.statement":"SELECT","other":"keep"}"#
+                r#"{"gen_ai.content.prompt":"secret","db.statement":"SELECT","mcp.tool.input":"secret","other":"keep"}"#
                     .to_string(),
             events: r#"[{"name":"gen_ai.content.prompt"},{"name":"exception"}]"#.to_string(),
             ..Span::default()
@@ -361,6 +367,8 @@ mod tests {
             span.llm_input = String::new();
             span.llm_output = String::new();
             span.db_query_text = String::new();
+            span.mcp_tool_input = String::new();
+            span.mcp_tool_output = String::new();
 
             if let Ok(mut attrs) =
                 serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&span.attributes)
@@ -373,6 +381,8 @@ mod tests {
                         && k != "gen_ai.completion"
                         && k != "db.statement"
                         && k != "db.query.text"
+                        && k != "mcp.tool.input"
+                        && k != "mcp.tool.output"
                 });
                 span.attributes =
                     serde_json::to_string(&attrs).unwrap_or_else(|_| "{}".to_string());
@@ -398,6 +408,14 @@ mod tests {
         assert!(
             span.db_query_text.is_empty(),
             "db_query_text must be cleared"
+        );
+        assert!(
+            span.mcp_tool_input.is_empty(),
+            "mcp_tool_input must be cleared"
+        );
+        assert!(
+            span.mcp_tool_output.is_empty(),
+            "mcp_tool_output must be cleared"
         );
 
         let attrs: serde_json::Value = serde_json::from_str(&span.attributes).unwrap();

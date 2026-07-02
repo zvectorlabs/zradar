@@ -36,9 +36,24 @@ impl AttributeConvention for AgentConvention {
             span.user_id = v.to_string();
             view.mark_consumed("user_id");
         }
-        if let Some(v) = view.get_str("agent.name") {
+        if let Some(v) = view.get_str("gen_ai.agent.id") {
+            span.agent_id = v.to_string();
+            view.mark_consumed("gen_ai.agent.id");
+        }
+        if let Some(v) = view.get_str("gen_ai.agent.name") {
+            span.agent_name = v.to_string();
+            view.mark_consumed("gen_ai.agent.name");
+        } else if let Some(v) = view.get_str("agent.name") {
             span.agent_name = v.to_string();
             view.mark_consumed("agent.name");
+        }
+        if let Some(v) = view.get_str("gen_ai.agent.version") {
+            span.agent_version = v.to_string();
+            view.mark_consumed("gen_ai.agent.version");
+        }
+        if let Some(v) = view.get_str("gen_ai.agent.description") {
+            span.agent_description = v.to_string();
+            view.mark_consumed("gen_ai.agent.description");
         }
         if let Some(v) = view.get_str("agent.type") {
             span.agent_type = v.to_string();
@@ -68,7 +83,10 @@ mod tests {
             kv_str("invocation_id", "inv-1"),
             kv_str("session_id", "sess-2"),
             kv_str("user_id", "user-3"),
-            kv_str("agent.name", "researcher"),
+            kv_str("gen_ai.agent.id", "agent-id-123"),
+            kv_str("gen_ai.agent.name", "researcher-genai"),
+            kv_str("gen_ai.agent.version", "1.0.0"),
+            kv_str("gen_ai.agent.description", "Research assistant"),
             kv_str("agent.type", "autonomous"),
         ];
         let view = AttrView::new(&attrs);
@@ -77,7 +95,10 @@ mod tests {
         assert_eq!(span.invocation_id, "inv-1");
         assert_eq!(span.session_id, "sess-2");
         assert_eq!(span.user_id, "user-3");
-        assert_eq!(span.agent_name, "researcher");
+        assert_eq!(span.agent_id, "agent-id-123");
+        assert_eq!(span.agent_name, "researcher-genai");
+        assert_eq!(span.agent_version, "1.0.0");
+        assert_eq!(span.agent_description, "Research assistant");
         assert_eq!(span.agent_type, "autonomous");
     }
 

@@ -146,6 +146,28 @@ pub struct Span {
     pub db_response_status_code: String,
 
     // ============================================================
+    // Agentic semantic conventions (OTel GenAI SIG)
+    // ============================================================
+    pub agent_id: String,
+    pub agent_description: String,
+    pub agent_task_id: String,
+    pub agent_task_parent_id: String,
+    pub agent_task_name: String,
+    pub agent_task_kind: String,
+    pub agent_task_state: String,
+    pub agent_task_status: String,
+    pub memory_type: String,
+    pub memory_key: String,
+
+    // ============================================================
+    // MCP tool call conventions
+    // ============================================================
+    pub mcp_tool_name: String,
+    pub mcp_server_name: String,
+    pub mcp_tool_input: String,
+    pub mcp_tool_output: String,
+
+    // ============================================================
     // Flexible Attributes (JSON)
     // ============================================================
     pub model_parameters: String, // JSON: {"temperature": 0.7, ...}
@@ -247,6 +269,20 @@ impl Default for Span {
             db_query_summary: String::new(),
             db_collection_name: String::new(),
             db_response_status_code: String::new(),
+            agent_id: String::new(),
+            agent_description: String::new(),
+            agent_task_id: String::new(),
+            agent_task_parent_id: String::new(),
+            agent_task_name: String::new(),
+            agent_task_kind: String::new(),
+            agent_task_state: String::new(),
+            agent_task_status: String::new(),
+            memory_type: String::new(),
+            memory_key: String::new(),
+            mcp_tool_name: String::new(),
+            mcp_server_name: String::new(),
+            mcp_tool_input: String::new(),
+            mcp_tool_output: String::new(),
             model_parameters: "{}".to_string(),
             attributes: "{}".to_string(),
             created_at: now,

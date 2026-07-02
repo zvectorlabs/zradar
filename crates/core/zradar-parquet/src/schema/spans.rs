@@ -100,6 +100,22 @@ pub fn span_arrow_schema() -> Schema {
         Field::new("db_query_summary", DataType::Utf8, false),
         Field::new("db_collection_name", DataType::Utf8, false),
         Field::new("db_response_status_code", DataType::Utf8, false),
+        // Agentic semantic conventions (OTel GenAI SIG)
+        Field::new("agent_id", DataType::Utf8, false),
+        Field::new("agent_description", DataType::Utf8, false),
+        Field::new("agent_task_id", DataType::Utf8, false),
+        Field::new("agent_task_parent_id", DataType::Utf8, false),
+        Field::new("agent_task_name", DataType::Utf8, false),
+        Field::new("agent_task_kind", DataType::Utf8, false),
+        Field::new("agent_task_state", DataType::Utf8, false),
+        Field::new("agent_task_status", DataType::Utf8, false),
+        Field::new("memory_type", DataType::Utf8, false),
+        Field::new("memory_key", DataType::Utf8, false),
+        // MCP tool call conventions
+        Field::new("mcp_tool_name", DataType::Utf8, false),
+        Field::new("mcp_server_name", DataType::Utf8, false),
+        Field::new("mcp_tool_input", DataType::Utf8, false),
+        Field::new("mcp_tool_output", DataType::Utf8, false),
         // Flexible attributes (stored as JSON strings)
         Field::new("model_parameters", DataType::Utf8, false),
         Field::new("attributes", DataType::Utf8, false),
@@ -212,6 +228,33 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         StringArray::from_iter_values(spans.iter().map(|s| s.db_collection_name.as_str()));
     let db_response_status_code =
         StringArray::from_iter_values(spans.iter().map(|s| s.db_response_status_code.as_str()));
+    // Agentic semantic conventions (OTel GenAI SIG)
+    let agent_id = StringArray::from_iter_values(spans.iter().map(|s| s.agent_id.as_str()));
+    let agent_description =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_description.as_str()));
+    let agent_task_id =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_id.as_str()));
+    let agent_task_parent_id =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_parent_id.as_str()));
+    let agent_task_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_name.as_str()));
+    let agent_task_kind =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_kind.as_str()));
+    let agent_task_state =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_state.as_str()));
+    let agent_task_status =
+        StringArray::from_iter_values(spans.iter().map(|s| s.agent_task_status.as_str()));
+    let memory_type = StringArray::from_iter_values(spans.iter().map(|s| s.memory_type.as_str()));
+    let memory_key = StringArray::from_iter_values(spans.iter().map(|s| s.memory_key.as_str()));
+    // MCP tool call conventions
+    let mcp_tool_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.mcp_tool_name.as_str()));
+    let mcp_server_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.mcp_server_name.as_str()));
+    let mcp_tool_input =
+        StringArray::from_iter_values(spans.iter().map(|s| s.mcp_tool_input.as_str()));
+    let mcp_tool_output =
+        StringArray::from_iter_values(spans.iter().map(|s| s.mcp_tool_output.as_str()));
     // Flexible attributes
     let model_parameters =
         StringArray::from_iter_values(spans.iter().map(|s| s.model_parameters.as_str()));
@@ -283,6 +326,20 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         Arc::new(db_query_summary),
         Arc::new(db_collection_name),
         Arc::new(db_response_status_code),
+        Arc::new(agent_id),
+        Arc::new(agent_description),
+        Arc::new(agent_task_id),
+        Arc::new(agent_task_parent_id),
+        Arc::new(agent_task_name),
+        Arc::new(agent_task_kind),
+        Arc::new(agent_task_state),
+        Arc::new(agent_task_status),
+        Arc::new(memory_type),
+        Arc::new(memory_key),
+        Arc::new(mcp_tool_name),
+        Arc::new(mcp_server_name),
+        Arc::new(mcp_tool_input),
+        Arc::new(mcp_tool_output),
         Arc::new(model_parameters),
         Arc::new(attributes),
         Arc::new(created_at),
@@ -511,6 +568,22 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
     let db_query_summary_col = optional_string_col(batch, "db_query_summary")?;
     let db_collection_name_col = optional_string_col(batch, "db_collection_name")?;
     let db_response_status_code_col = optional_string_col(batch, "db_response_status_code")?;
+    // Agentic semantic conventions (OTel GenAI SIG)
+    let agent_id_col = optional_string_col(batch, "agent_id")?;
+    let agent_description_col = optional_string_col(batch, "agent_description")?;
+    let agent_task_id_col = optional_string_col(batch, "agent_task_id")?;
+    let agent_task_parent_id_col = optional_string_col(batch, "agent_task_parent_id")?;
+    let agent_task_name_col = optional_string_col(batch, "agent_task_name")?;
+    let agent_task_kind_col = optional_string_col(batch, "agent_task_kind")?;
+    let agent_task_state_col = optional_string_col(batch, "agent_task_state")?;
+    let agent_task_status_col = optional_string_col(batch, "agent_task_status")?;
+    let memory_type_col = optional_string_col(batch, "memory_type")?;
+    let memory_key_col = optional_string_col(batch, "memory_key")?;
+    // MCP tool call conventions
+    let mcp_tool_name_col = optional_string_col(batch, "mcp_tool_name")?;
+    let mcp_server_name_col = optional_string_col(batch, "mcp_server_name")?;
+    let mcp_tool_input_col = optional_string_col(batch, "mcp_tool_input")?;
+    let mcp_tool_output_col = optional_string_col(batch, "mcp_tool_output")?;
     let model_parameters_col = str_col!("model_parameters");
     let attributes_col = str_col!("attributes");
     let created_at_col = i64_col!("created_at");
@@ -639,6 +712,48 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
             db_response_status_code: db_response_status_code_col
                 .map(|c| c.value(i).to_string())
                 .unwrap_or_default(),
+            agent_id: agent_id_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_description: agent_description_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_id: agent_task_id_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_parent_id: agent_task_parent_id_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_name: agent_task_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_kind: agent_task_kind_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_state: agent_task_state_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            agent_task_status: agent_task_status_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            memory_type: memory_type_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            memory_key: memory_key_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            mcp_tool_name: mcp_tool_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            mcp_server_name: mcp_server_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            mcp_tool_input: mcp_tool_input_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            mcp_tool_output: mcp_tool_output_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
             model_parameters: model_parameters_col.value(i).to_string(),
             attributes: attributes_col.value(i).to_string(),
             created_at: created_at_col.value(i),
@@ -666,20 +781,15 @@ mod tests {
     #[test]
     fn test_span_arrow_schema_field_count() {
         let schema = span_arrow_schema();
-        // 66 fields total: 45 baseline + 6 Phase 0 Guardrails + 5 Phase 1
-        // (workflow_run_id, framework, llm_provider, llm_response_model, events)
-        // + 4 Phase 4 (llm_cache_hit, llm_response_id, environment, links) - 1 workspace_id refactor.
-        // + 7 Database Phase 4 PR2 (db_system_name, db_namespace, db_operation_name, db_query_text, db_query_summary, db_collection_name, db_response_status_code)
-        // Per OQ7/D-G3 (single release), the schema-count test asserts the
-        // final 66-col layout; multi-generation regression tests are dropped.
-        assert_eq!(schema.fields().len(), 66);
+        // 80 fields total: 66 previous + 14 new (10 agentic, 4 mcp)
+        assert_eq!(schema.fields().len(), 80);
     }
 
     #[test]
     fn test_spans_to_record_batch_empty() {
         let batch = spans_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 66);
+        assert_eq!(batch.num_columns(), 80);
     }
 
     #[test]
@@ -910,6 +1020,45 @@ mod tests {
         assert_eq!(recovered[0].db_query_summary, "SELECT users");
         assert_eq!(recovered[0].db_collection_name, "users");
         assert_eq!(recovered[0].db_response_status_code, "0");
+    }
+
+    #[test]
+    fn test_agentic_and_mcp_columns_round_trip() {
+        let span = Span {
+            trace_id: "t1".to_string(),
+            agent_id: "agent-123".to_string(),
+            agent_description: "Test Agent".to_string(),
+            agent_task_id: "task-456".to_string(),
+            agent_task_parent_id: "task-000".to_string(),
+            agent_task_name: "Run task".to_string(),
+            agent_task_kind: "reasoning".to_string(),
+            agent_task_state: "in-progress".to_string(),
+            agent_task_status: "success".to_string(),
+            memory_type: "vector".to_string(),
+            memory_key: "user-profile".to_string(),
+            mcp_tool_name: "fetch_data".to_string(),
+            mcp_server_name: "data-server".to_string(),
+            mcp_tool_input: "{\"id\": 1}".to_string(),
+            mcp_tool_output: "{\"status\": \"ok\"}".to_string(),
+            ..Span::default()
+        };
+        let batch = spans_to_record_batch(&[span]).unwrap();
+        let recovered = record_batch_to_spans(&batch).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].agent_id, "agent-123");
+        assert_eq!(recovered[0].agent_description, "Test Agent");
+        assert_eq!(recovered[0].agent_task_id, "task-456");
+        assert_eq!(recovered[0].agent_task_parent_id, "task-000");
+        assert_eq!(recovered[0].agent_task_name, "Run task");
+        assert_eq!(recovered[0].agent_task_kind, "reasoning");
+        assert_eq!(recovered[0].agent_task_state, "in-progress");
+        assert_eq!(recovered[0].agent_task_status, "success");
+        assert_eq!(recovered[0].memory_type, "vector");
+        assert_eq!(recovered[0].memory_key, "user-profile");
+        assert_eq!(recovered[0].mcp_tool_name, "fetch_data");
+        assert_eq!(recovered[0].mcp_server_name, "data-server");
+        assert_eq!(recovered[0].mcp_tool_input, "{\"id\": 1}");
+        assert_eq!(recovered[0].mcp_tool_output, "{\"status\": \"ok\"}");
     }
 
     /// All three `llm_cache_hit` states (unknown `-1`, miss `0`, hit `1`) must

@@ -172,7 +172,9 @@ impl SpanTypeMapper {
 
     /// Check if attributes contain tool information
     fn has_tool_info<A: AttrSource>(attributes: &A) -> bool {
-        attributes.has_key("tool.name") || attributes.has_key("gen_ai.tool.name")
+        attributes.has_key("tool.name")
+            || attributes.has_key("gen_ai.tool.name")
+            || attributes.has_key("mcp.tool.name")
     }
 
     /// Check if attributes contain database information
@@ -356,6 +358,12 @@ mod tests {
     #[test]
     fn test_priority_6_tool_detection_gen_ai() {
         let attrs = make_attrs(vec![("gen_ai.tool.name", json!("calculator"))]);
+        assert_eq!(SpanTypeMapper::detect_type(&attrs, 1000, "", ""), "TOOL");
+    }
+
+    #[test]
+    fn test_priority_6_tool_detection_mcp() {
+        let attrs = make_attrs(vec![("mcp.tool.name", json!("fetch_webpage"))]);
         assert_eq!(SpanTypeMapper::detect_type(&attrs, 1000, "", ""), "TOOL");
     }
 

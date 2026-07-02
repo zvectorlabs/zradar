@@ -630,6 +630,357 @@ dual_transport_test!(
     test_jsonb_fields_stored_as_json_body
 );
 
+async fn test_agentic_fields_extraction_body(env: TestEnv) -> Result<()> {
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "agent-service",
+        &trace_id,
+        &span_id,
+        "agent_run",
+        vec![
+            (
+                "gen_ai.agent.id",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "agent-id-123".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.agent.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "researcher-genai".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.agent.version",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "1.0.0".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.agent.description",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "Research assistant".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.id",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "task-123".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.parent.id",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "parent-456".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "solve_issue".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.kind",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "planning".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.state",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "in-progress".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.task.status",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "success".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.memory.type",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "vector_db".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.memory.key",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "user_context_cache".to_string(),
+                        ),
+                    ),
+                },
+            ),
+        ],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    let span = &spans[0];
+
+    assert_eq!(span["agent_id"].as_str().unwrap(), "agent-id-123");
+    assert_eq!(span["agent_name"].as_str().unwrap(), "researcher-genai");
+    assert_eq!(span["agent_version"].as_str().unwrap(), "1.0.0");
+    assert_eq!(
+        span["agent_description"].as_str().unwrap(),
+        "Research assistant"
+    );
+    assert_eq!(span["agent_task_id"].as_str().unwrap(), "task-123");
+    assert_eq!(span["agent_task_parent_id"].as_str().unwrap(), "parent-456");
+    assert_eq!(span["agent_task_name"].as_str().unwrap(), "solve_issue");
+    assert_eq!(span["agent_task_kind"].as_str().unwrap(), "planning");
+    assert_eq!(span["agent_task_state"].as_str().unwrap(), "in-progress");
+    assert_eq!(span["agent_task_status"].as_str().unwrap(), "success");
+    assert_eq!(span["memory_type"].as_str().unwrap(), "vector_db");
+    assert_eq!(span["memory_key"].as_str().unwrap(), "user_context_cache");
+
+    println!("✅ Agentic fields extracted correctly in functional test");
+    Ok(())
+}
+
+dual_transport_test!(
+    test_agentic_fields_extraction,
+    test_agentic_fields_extraction_body
+);
+
+async fn test_mcp_fields_extraction_body(env: TestEnv) -> Result<()> {
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "mcp-service",
+        &trace_id,
+        &span_id,
+        "mcp_tool_call",
+        vec![
+            (
+                "mcp.tool.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "fetch_webpage".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "mcp.server.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "web_crawler".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "mcp.tool.input",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "{\"url\": \"https://example.com\"}".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "mcp.tool.output",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "{\"html\": \"...\"}".to_string(),
+                        ),
+                    ),
+                },
+            ),
+        ],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    let span = &spans[0];
+
+    assert_eq!(span["span_type"].as_str().unwrap(), "TOOL");
+    assert_eq!(span["mcp_tool_name"].as_str().unwrap(), "fetch_webpage");
+    assert_eq!(span["mcp_server_name"].as_str().unwrap(), "web_crawler");
+    assert_eq!(
+        span["mcp_tool_input"].as_str().unwrap(),
+        "{\"url\": \"https://example.com\"}"
+    );
+    assert_eq!(
+        span["mcp_tool_output"].as_str().unwrap(),
+        "{\"html\": \"...\"}"
+    );
+
+    println!("✅ MCP fields extracted and span typed correctly in functional test");
+    Ok(())
+}
+
+dual_transport_test!(test_mcp_fields_extraction, test_mcp_fields_extraction_body);
+
+async fn local_disable_content_capture(env: &TestEnv) -> Result<()> {
+    let workspace_id = env.client.workspace_id();
+    let response = env
+        .client
+        .get(&format!("/api/v1/workspaces/{workspace_id}/settings"))
+        .await?;
+    let default_settings = response.json().await?;
+    let disable_body = serde_json::json!({
+        "traces_retention_days": default_settings["traces_retention_days"].as_i64().unwrap_or(30),
+        "metrics_retention_days": default_settings["metrics_retention_days"].as_i64().unwrap_or(30),
+        "logs_retention_days": default_settings["logs_retention_days"].as_i64().unwrap_or(30),
+        "max_ingestion_rate": default_settings["max_ingestion_rate"].clone(),
+        "file_push_interval_secs": default_settings["file_push_interval_secs"].as_i64().unwrap_or(60),
+        "blocked": false,
+        "capture_llm_content_enabled": false,
+    });
+    let update_resp = env
+        .client
+        .put(
+            &format!("/api/v1/workspaces/{workspace_id}/settings"),
+            &disable_body,
+        )
+        .await?;
+    assert!(
+        update_resp.status().is_success(),
+        "workspace settings update must succeed before content-capture assertion; status={}",
+        update_resp.status()
+    );
+    Ok(())
+}
+
+async fn test_mcp_content_security_masking_body(env: TestEnv) -> Result<()> {
+    local_disable_content_capture(&env).await?;
+
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "mcp-secure-service",
+        &trace_id,
+        &span_id,
+        "mcp_tool_call",
+        vec![
+            (
+                "mcp.tool.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "fetch_webpage".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "mcp.tool.input",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "secret input data".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "mcp.tool.output",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "secret output data".to_string(),
+                        ),
+                    ),
+                },
+            ),
+        ],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    let span = &spans[0];
+
+    assert_eq!(span["mcp_tool_name"].as_str().unwrap(), "fetch_webpage");
+    assert!(
+        span["mcp_tool_input"].as_str().is_none()
+            || span["mcp_tool_input"].as_str().unwrap().is_empty()
+    );
+    assert!(
+        span["mcp_tool_output"].as_str().is_none()
+            || span["mcp_tool_output"].as_str().unwrap().is_empty()
+    );
+
+    // Also check attributes JSON
+    if let Some(attributes) = span.get("attributes") {
+        assert!(attributes.get("mcp.tool.input").is_none());
+        assert!(attributes.get("mcp.tool.output").is_none());
+    }
+
+    println!("✅ MCP payload content security masking verified in functional test");
+    Ok(())
+}
+
+dual_transport_test!(
+    test_mcp_content_security_masking,
+    test_mcp_content_security_masking_body
+);
+
 // Helper function to build trace with custom attributes
 fn build_trace_with_attributes(
     service_name: &str,
