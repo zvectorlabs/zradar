@@ -26,7 +26,7 @@ zradar-models = { path = "../crates/core/zradar-models" }
 api = { path = "../crates/services/api" }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 
 # gRPC/OTLP
 tonic = { workspace = true }
@@ -54,8 +54,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 
 # Test data generation
-fake = { version = "2.9", features = ["derive", "uuid", "chrono"] }
-rand = "0.8"
+fake = { version = "5.1", features = ["derive", "uuid", "chrono"] }
+rand = "0.10"
 
 # Pretty assertions
 pretty_assertions = "1.4"

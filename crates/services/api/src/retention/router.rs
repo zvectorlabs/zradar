@@ -29,11 +29,11 @@ pub fn retention_router(
             routing::get(list_retention_configs).put(set_retention_config),
         )
         .route(
-            "/api/v1/admin/retention/config/:workspace_id",
+            "/api/v1/admin/retention/config/{workspace_id}",
             routing::get(get_retention_config),
         )
         .route(
-            "/api/v1/workspaces/:id/retention",
+            "/api/v1/workspaces/{id}/retention",
             routing::get(get_workspace_retention).put(set_workspace_retention),
         )
         .layer(Extension(auth_mode))

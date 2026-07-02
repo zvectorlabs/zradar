@@ -757,14 +757,14 @@ impl OtlpClient {
 
 /// Generate a random trace ID
 pub fn random_trace_id() -> [u8; 16] {
-    use rand::Rng;
-    rand::thread_rng().r#gen()
+    use rand::RngExt;
+    rand::rng().random()
 }
 
 /// Generate a random span ID
 pub fn random_span_id() -> [u8; 8] {
-    use rand::Rng;
-    rand::thread_rng().r#gen()
+    use rand::RngExt;
+    rand::rng().random()
 }
 
 /// Convert hex string to trace ID

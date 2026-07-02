@@ -27,12 +27,13 @@
 //! Save a baseline: `cargo bench -p api-optel --bench converter_bench -- --save-baseline release-1.0`
 
 use api_optel::OtlpConverter;
-use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{
     ResourceSpans, ScopeSpans, Span as OtlpSpan, span::Event,
 };
+use std::hint::black_box;
 use zradar_models::RequestContext;
 
 fn kv_str(k: &str, v: &str) -> KeyValue {

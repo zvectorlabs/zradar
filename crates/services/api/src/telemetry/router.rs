@@ -9,9 +9,9 @@ use super::{QueryService, handlers};
 pub fn router(service: Arc<QueryService>) -> Router {
     Router::new()
         .route("/api/v1/traces", get(handlers::query_traces))
-        .route("/api/v1/traces/:trace_id", get(handlers::get_trace))
+        .route("/api/v1/traces/{trace_id}", get(handlers::get_trace))
         .route("/api/v1/spans", get(handlers::query_spans))
-        .route("/api/v1/spans/:span_id", get(handlers::get_span))
+        .route("/api/v1/spans/{span_id}", get(handlers::get_span))
         .route("/api/v1/analytics", get(handlers::get_analytics))
         .route(
             "/api/v1/analytics/metrics",
@@ -59,7 +59,7 @@ pub fn router(service: Arc<QueryService>) -> Router {
             get(handlers::get_query_usage),
         )
         .route("/api/v1/logs", get(handlers::query_logs))
-        .route("/api/v1/logs/:log_id", get(handlers::get_log))
+        .route("/api/v1/logs/{log_id}", get(handlers::get_log))
         .route("/api/v1/metrics", get(handlers::query_metrics))
         .route("/api/v1/metrics/series", get(handlers::query_metric_series))
         .with_state(service)

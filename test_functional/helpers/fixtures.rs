@@ -110,23 +110,20 @@ impl TestDataGenerator {
             "render.template",
         ];
 
-        use rand::seq::SliceRandom;
-        operations
-            .choose(&mut rand::thread_rng())
-            .unwrap()
-            .to_string()
+        use rand::seq::IndexedRandom;
+        operations.choose(&mut rand::rng()).unwrap().to_string()
     }
 
     /// Generate a random trace ID (16 bytes)
     pub fn trace_id() -> [u8; 16] {
-        use rand::Rng;
-        rand::thread_rng().r#gen()
+        use rand::RngExt;
+        rand::rng().random()
     }
 
     /// Generate a random span ID (8 bytes)
     pub fn span_id() -> [u8; 8] {
-        use rand::Rng;
-        rand::thread_rng().r#gen()
+        use rand::RngExt;
+        rand::rng().random()
     }
 
     // ========================================================================

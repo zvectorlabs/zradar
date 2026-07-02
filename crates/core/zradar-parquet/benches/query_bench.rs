@@ -20,8 +20,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use parquet::arrow::ArrowWriter;
+use std::hint::black_box;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 

@@ -60,7 +60,7 @@ impl CleanupStats {
 }
 
 /// Combined stats returned by the admin retention run endpoint.
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct RetentionRunStats {
     pub files_marked: u64,
     /// Physically reclaimed files (FileReclaimer).
