@@ -17,6 +17,7 @@
 pub mod agent;
 pub mod aiq;
 pub mod attr_view;
+pub mod db;
 pub mod gen_ai_legacy;
 pub mod gen_ai_v1_29;
 pub mod guardrails;
@@ -81,6 +82,7 @@ pub fn default_conventions() -> Vec<Box<dyn AttributeConvention>> {
         // NAT then AIQ: aiq.* canonical alias overwrites nat.* for shared fields.
         Box::new(nat::NatConvention),
         Box::new(aiq::AiqConvention),
+        Box::new(db::DbConvention),
         Box::new(tool::ToolConvention),
         Box::new(prompt::PromptConvention),
         Box::new(resource::ResourceConvention),

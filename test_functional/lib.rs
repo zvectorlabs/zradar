@@ -2,6 +2,7 @@
 //!
 //! Provides utilities for black-box API testing through public endpoints only.
 
+#![recursion_limit = "256"]
 #![allow(unused_mut)] // dual_transport_test! macro may not use all env parameters
 
 pub mod helpers;

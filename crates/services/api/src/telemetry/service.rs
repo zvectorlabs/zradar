@@ -5,12 +5,12 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use zradar_models::WorkspaceId;
 
 use super::types::{
-    AgentAnalytics, AnalyticsQuery, AnalyticsResult, ErrorAnalyticsQuery, ErrorBreakdown,
-    GuardrailsAnalytics, IngestRateQuery, LlmAnalytics, LogDetail, LogQueryFilters, MetricDetail,
-    MetricQueryFilters, MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse, QueryUsageQuery,
-    QuotaStatusQuery, RailNameStatDto, RailTypeBreakdownDto, SpanDetail, SpanQueryFilters,
-    StorageUsage, StorageUsageDaily, StorageUsageDailyQuery, StorageUsageQuery, TopEndpoint,
-    TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary, UsageDailyQuery,
+    AgentAnalytics, AnalyticsQuery, AnalyticsResult, DatabaseAnalytics, ErrorAnalyticsQuery,
+    ErrorBreakdown, GuardrailsAnalytics, IngestRateQuery, LlmAnalytics, LogDetail, LogQueryFilters,
+    MetricDetail, MetricQueryFilters, MetricSeriesFilters, MetricSeriesPoint, PaginatedResponse,
+    QueryUsageQuery, QuotaStatusQuery, RailNameStatDto, RailTypeBreakdownDto, SpanDetail,
+    SpanQueryFilters, StorageUsage, StorageUsageDaily, StorageUsageDailyQuery, StorageUsageQuery,
+    TopEndpoint, TopNQuery, TraceDetail, TraceQueryFilters, TraceSummary, UsageDailyQuery,
 };
 use crate::errors::{ControlError, Result};
 
@@ -391,8 +391,8 @@ impl QueryService {
             // R1.11: trace operation_name filter (maps to span_name at storage layer)
             span_name: filters.operation_name.clone(),
             status: filters.status.clone(),
-            min_duration_ms: filters.min_duration_ms.map(|d| d as u64),
-            max_duration_ms: filters.max_duration_ms.map(|d| d as u64),
+            min_duration_ms: filters.min_duration_ms.map(|d| d.max(0) as u64),
+            max_duration_ms: filters.max_duration_ms.map(|d| d.max(0) as u64),
             llm_model: filters.llm_model.clone(),
             llm_provider: filters.llm_provider.clone(),
             llm_response_model: filters.llm_response_model.clone(),
@@ -519,6 +519,13 @@ impl QueryService {
                 llm_cache_hit: cache_hit_to_bool(s.llm_cache_hit),
                 llm_response_id: non_empty_string(s.llm_response_id.clone()),
                 environment: non_empty_string(s.environment.clone()),
+                db_system_name: non_empty_string(s.db_system_name.clone()),
+                db_namespace: non_empty_string(s.db_namespace.clone()),
+                db_operation_name: non_empty_string(s.db_operation_name.clone()),
+                db_query_text: non_empty_string(s.db_query_text.clone()),
+                db_query_summary: non_empty_string(s.db_query_summary.clone()),
+                db_collection_name: non_empty_string(s.db_collection_name.clone()),
+                db_response_status_code: non_empty_string(s.db_response_status_code.clone()),
                 model_parameters: parse_model_parameters(&s.model_parameters),
                 events: parse_json_array(&s.events),
                 links: parse_json_array(&s.links),
@@ -606,6 +613,10 @@ impl QueryService {
             tool_name: filters.tool_name.clone(),
             invocation_id: filters.invocation_id.clone(),
             environment: filters.environment.clone(),
+            min_duration_ms: filters.min_duration_ms.map(|d| d.max(0) as u64),
+            max_duration_ms: filters.max_duration_ms.map(|d| d.max(0) as u64),
+            db_system_name: filters.db_system_name.clone(),
+            db_operation_name: filters.db_operation_name.clone(),
             pagination: Pagination {
                 limit: Some(filters.limit.unwrap_or(100) as u32),
                 offset: Some(filters.offset.unwrap_or(0).max(0) as u32),
@@ -675,6 +686,13 @@ impl QueryService {
                 llm_cache_hit: cache_hit_to_bool(s.llm_cache_hit),
                 llm_response_id: non_empty_string(s.llm_response_id),
                 environment: non_empty_string(s.environment),
+                db_system_name: non_empty_string(s.db_system_name),
+                db_namespace: non_empty_string(s.db_namespace),
+                db_operation_name: non_empty_string(s.db_operation_name),
+                db_query_text: non_empty_string(s.db_query_text),
+                db_query_summary: non_empty_string(s.db_query_summary),
+                db_collection_name: non_empty_string(s.db_collection_name),
+                db_response_status_code: non_empty_string(s.db_response_status_code),
                 model_parameters: parse_model_parameters(&s.model_parameters),
                 events: parse_json_array(&s.events),
                 links: parse_json_array(&s.links),
@@ -742,6 +760,13 @@ impl QueryService {
             llm_cache_hit: cache_hit_to_bool(span.llm_cache_hit),
             llm_response_id: non_empty_string(span.llm_response_id),
             environment: non_empty_string(span.environment),
+            db_system_name: non_empty_string(span.db_system_name),
+            db_namespace: non_empty_string(span.db_namespace),
+            db_operation_name: non_empty_string(span.db_operation_name),
+            db_query_text: non_empty_string(span.db_query_text),
+            db_query_summary: non_empty_string(span.db_query_summary),
+            db_collection_name: non_empty_string(span.db_collection_name),
+            db_response_status_code: non_empty_string(span.db_response_status_code),
             model_parameters: parse_model_parameters(&span.model_parameters),
             events: parse_json_array(&span.events),
             links: parse_json_array(&span.links),
@@ -892,9 +917,8 @@ impl QueryService {
         let start = query.start_time.timestamp_nanos_opt().unwrap_or(0);
         let end = query.end_time.timestamp_nanos_opt().unwrap_or(0);
 
-        let points = self
-            .storage
-            .query_analytics(
+        let (points, durations, errors) = tokio::try_join!(
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -904,13 +928,8 @@ impl QueryService {
                     group_by: vec!["service_name".to_string(), "span_name".to_string()],
                     filters: HashMap::new(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-
-        let durations = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -920,13 +939,8 @@ impl QueryService {
                     group_by: vec!["service_name".to_string(), "span_name".to_string()],
                     filters: HashMap::new(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-
-        let errors = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -936,9 +950,9 @@ impl QueryService {
                     group_by: vec!["service_name".to_string(), "span_name".to_string()],
                     filters: HashMap::new(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
+            ),
+        )
+        .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
 
         let mut endpoints: Vec<TopEndpoint> = points
             .into_iter()
@@ -1042,9 +1056,8 @@ impl QueryService {
             .unwrap_or_else(|| end - 7 * 24 * 60 * 60 * 1_000_000_000);
         let filters = HashMap::new();
 
-        let requests = self
-            .storage
-            .query_analytics(
+        let (requests, tokens, costs, durations) = tokio::try_join!(
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1054,12 +1067,8 @@ impl QueryService {
                     group_by: vec!["llm_model".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let tokens = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1069,12 +1078,8 @@ impl QueryService {
                     group_by: vec!["llm_model".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let costs = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1084,12 +1089,8 @@ impl QueryService {
                     group_by: vec!["llm_model".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let durations = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1099,9 +1100,9 @@ impl QueryService {
                     group_by: vec!["llm_model".to_string()],
                     filters,
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
+            ),
+        )
+        .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
 
         Ok(requests
             .into_iter()
@@ -1136,9 +1137,8 @@ impl QueryService {
             .unwrap_or_else(|| end - 7 * 24 * 60 * 60 * 1_000_000_000);
         let filters = HashMap::new();
 
-        let spans = self
-            .storage
-            .query_analytics(
+        let (spans, errors, tokens, durations) = tokio::try_join!(
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1148,12 +1148,8 @@ impl QueryService {
                     group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let errors = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1163,12 +1159,8 @@ impl QueryService {
                     group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let tokens = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1178,12 +1170,8 @@ impl QueryService {
                     group_by: vec!["agent_name".to_string()],
                     filters: filters.clone(),
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
-        let durations = self
-            .storage
-            .query_analytics(
+            ),
+            self.storage.query_analytics(
                 workspace_id.into(),
                 StorageAnalyticsFilters {
                     workspace_id: workspace_id.into(),
@@ -1193,9 +1181,9 @@ impl QueryService {
                     group_by: vec!["agent_name".to_string()],
                     filters,
                 },
-            )
-            .await
-            .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
+            ),
+        )
+        .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
 
         Ok(spans
             .into_iter()
@@ -1218,6 +1206,95 @@ impl QueryService {
                     ),
                     agent_name,
                     agent_type,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn get_database_analytics(
+        &self,
+        workspace_id: WorkspaceId,
+        query: AnalyticsQuery,
+    ) -> Result<Vec<DatabaseAnalytics>> {
+        // Scope strictly to the authenticated workspace; never trust the
+        // workspace id carried in the user-supplied query (BOLA hardening).
+        let workspace_id = workspace_id.into_inner();
+        let end = query
+            .end
+            .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+        let start = query
+            .start
+            .map(|d| d.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| end - 7 * 24 * 60 * 60 * 1_000_000_000);
+        let mut filters = HashMap::new();
+        filters.insert("span_type".to_string(), "DATABASE".to_string());
+
+        let group_by = vec![
+            "db_system_name".to_string(),
+            "db_operation_name".to_string(),
+        ];
+
+        let (spans, errors, durations) = tokio::try_join!(
+            self.storage.query_analytics(
+                workspace_id.into(),
+                StorageAnalyticsFilters {
+                    workspace_id: workspace_id.into(),
+                    start,
+                    end,
+                    metric: "span_count".to_string(),
+                    group_by: group_by.clone(),
+                    filters: filters.clone(),
+                },
+            ),
+            self.storage.query_analytics(
+                workspace_id.into(),
+                StorageAnalyticsFilters {
+                    workspace_id: workspace_id.into(),
+                    start,
+                    end,
+                    metric: "error_count".to_string(),
+                    group_by: group_by.clone(),
+                    filters: filters.clone(),
+                },
+            ),
+            self.storage.query_analytics(
+                workspace_id.into(),
+                StorageAnalyticsFilters {
+                    workspace_id: workspace_id.into(),
+                    start,
+                    end,
+                    metric: "avg_duration_ms".to_string(),
+                    group_by: group_by.clone(),
+                    filters,
+                },
+            ),
+        )
+        .map_err(|e| ControlError::Internal(format!("Analytics error: {}", e)))?;
+
+        Ok(spans
+            .into_iter()
+            .map(|point| {
+                let db_system_name = point
+                    .groups
+                    .get("db_system_name")
+                    .cloned()
+                    .unwrap_or_default();
+                let db_operation_name = point.groups.get("db_operation_name").cloned();
+                DatabaseAnalytics {
+                    request_count: point.value as i64,
+                    error_count: find_db_group_value(
+                        &errors,
+                        &db_system_name,
+                        db_operation_name.as_deref(),
+                    ) as i64,
+                    avg_duration_ms: find_db_group_value(
+                        &durations,
+                        &db_system_name,
+                        db_operation_name.as_deref(),
+                    ),
+                    db_system_name,
+                    db_operation_name,
                 }
             })
             .collect())
@@ -1874,6 +1951,21 @@ fn find_agent_group_value(
                     .get("agent_type")
                     .map(|value| Some(value.as_str()) == agent_type)
                     .unwrap_or(agent_type.is_none())
+        })
+        .map(|point| point.value)
+        .unwrap_or(0.0)
+}
+
+fn find_db_group_value(
+    points: &[zradar_traits::AnalyticsDataPoint],
+    db_system_name: &str,
+    db_operation_name: Option<&str>,
+) -> f64 {
+    points
+        .iter()
+        .find(|point| {
+            point.groups.get("db_system_name").map(|s| s.as_str()) == Some(db_system_name)
+                && point.groups.get("db_operation_name").map(|s| s.as_str()) == db_operation_name
         })
         .map(|point| point.value)
         .unwrap_or(0.0)

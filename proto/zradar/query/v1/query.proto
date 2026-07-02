@@ -521,6 +521,14 @@ message SpanDetail {
   optional string links_json = 37;
   // Arbitrary key-value attributes. Values are JSON-encoded strings.
   map<string, string> attributes = 38;
+  // Database fields (Gap #46)
+  optional string db_system_name = 39;
+  optional string db_namespace = 40;
+  optional string db_operation_name = 41;
+  optional string db_query_text = 42;
+  optional string db_query_summary = 43;
+  optional string db_collection_name = 44;
+  optional string db_response_status_code = 45;
 }
 
 // Log record detail.

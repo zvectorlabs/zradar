@@ -92,6 +92,14 @@ pub fn span_arrow_schema() -> Schema {
         Field::new("sdk_version", DataType::Utf8, false),
         // Severity
         Field::new("level", DataType::Utf8, false),
+        // Database
+        Field::new("db_system_name", DataType::Utf8, false),
+        Field::new("db_namespace", DataType::Utf8, false),
+        Field::new("db_operation_name", DataType::Utf8, false),
+        Field::new("db_query_text", DataType::Utf8, false),
+        Field::new("db_query_summary", DataType::Utf8, false),
+        Field::new("db_collection_name", DataType::Utf8, false),
+        Field::new("db_response_status_code", DataType::Utf8, false),
         // Flexible attributes (stored as JSON strings)
         Field::new("model_parameters", DataType::Utf8, false),
         Field::new("attributes", DataType::Utf8, false),
@@ -190,6 +198,20 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
     let sdk_version = StringArray::from_iter_values(spans.iter().map(|s| s.sdk_version.as_str()));
     // Severity
     let level = StringArray::from_iter_values(spans.iter().map(|s| s.level.as_str()));
+    // Database
+    let db_system_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_system_name.as_str()));
+    let db_namespace = StringArray::from_iter_values(spans.iter().map(|s| s.db_namespace.as_str()));
+    let db_operation_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_operation_name.as_str()));
+    let db_query_text =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_query_text.as_str()));
+    let db_query_summary =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_query_summary.as_str()));
+    let db_collection_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_collection_name.as_str()));
+    let db_response_status_code =
+        StringArray::from_iter_values(spans.iter().map(|s| s.db_response_status_code.as_str()));
     // Flexible attributes
     let model_parameters =
         StringArray::from_iter_values(spans.iter().map(|s| s.model_parameters.as_str()));
@@ -254,6 +276,13 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         Arc::new(agent_version),
         Arc::new(sdk_version),
         Arc::new(level),
+        Arc::new(db_system_name),
+        Arc::new(db_namespace),
+        Arc::new(db_operation_name),
+        Arc::new(db_query_text),
+        Arc::new(db_query_summary),
+        Arc::new(db_collection_name),
+        Arc::new(db_response_status_code),
         Arc::new(model_parameters),
         Arc::new(attributes),
         Arc::new(created_at),
@@ -474,6 +503,14 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
     let agent_version_col = str_col!("agent_version");
     let sdk_version_col = str_col!("sdk_version");
     let level_col = str_col!("level");
+    // Database (Phase 4 Gap #46 - Database Observability)
+    let db_system_col = optional_string_col(batch, "db_system_name")?;
+    let db_namespace_col = optional_string_col(batch, "db_namespace")?;
+    let db_operation_name_col = optional_string_col(batch, "db_operation_name")?;
+    let db_query_text_col = optional_string_col(batch, "db_query_text")?;
+    let db_query_summary_col = optional_string_col(batch, "db_query_summary")?;
+    let db_collection_name_col = optional_string_col(batch, "db_collection_name")?;
+    let db_response_status_code_col = optional_string_col(batch, "db_response_status_code")?;
     let model_parameters_col = str_col!("model_parameters");
     let attributes_col = str_col!("attributes");
     let created_at_col = i64_col!("created_at");
@@ -581,6 +618,27 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
             agent_version: agent_version_col.value(i).to_string(),
             sdk_version: sdk_version_col.value(i).to_string(),
             level: level_col.value(i).to_string(),
+            db_system_name: db_system_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_namespace: db_namespace_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_operation_name: db_operation_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_query_text: db_query_text_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_query_summary: db_query_summary_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_collection_name: db_collection_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            db_response_status_code: db_response_status_code_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
             model_parameters: model_parameters_col.value(i).to_string(),
             attributes: attributes_col.value(i).to_string(),
             created_at: created_at_col.value(i),
@@ -608,19 +666,20 @@ mod tests {
     #[test]
     fn test_span_arrow_schema_field_count() {
         let schema = span_arrow_schema();
-        // 59 fields total: 45 baseline + 6 Phase 0 Guardrails + 5 Phase 1
+        // 66 fields total: 45 baseline + 6 Phase 0 Guardrails + 5 Phase 1
         // (workflow_run_id, framework, llm_provider, llm_response_model, events)
         // + 4 Phase 4 (llm_cache_hit, llm_response_id, environment, links) - 1 workspace_id refactor.
+        // + 7 Database Phase 4 PR2 (db_system_name, db_namespace, db_operation_name, db_query_text, db_query_summary, db_collection_name, db_response_status_code)
         // Per OQ7/D-G3 (single release), the schema-count test asserts the
-        // final 59-col layout; multi-generation regression tests are dropped.
-        assert_eq!(schema.fields().len(), 59);
+        // final 66-col layout; multi-generation regression tests are dropped.
+        assert_eq!(schema.fields().len(), 66);
     }
 
     #[test]
     fn test_spans_to_record_batch_empty() {
         let batch = spans_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 59);
+        assert_eq!(batch.num_columns(), 66);
     }
 
     #[test]
@@ -827,6 +886,32 @@ mod tests {
         );
     }
 
+    /// Database PR: the seven new columns round-trip through writer + reader.
+    #[test]
+    fn test_db_columns_round_trip() {
+        let span = Span {
+            trace_id: "t1".to_string(),
+            db_system_name: "postgresql".to_string(),
+            db_namespace: "public".to_string(),
+            db_operation_name: "SELECT".to_string(),
+            db_query_text: "SELECT * FROM users".to_string(),
+            db_query_summary: "SELECT users".to_string(),
+            db_collection_name: "users".to_string(),
+            db_response_status_code: "0".to_string(),
+            ..Span::default()
+        };
+        let batch = spans_to_record_batch(&[span]).unwrap();
+        let recovered = record_batch_to_spans(&batch).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].db_system_name, "postgresql");
+        assert_eq!(recovered[0].db_namespace, "public");
+        assert_eq!(recovered[0].db_operation_name, "SELECT");
+        assert_eq!(recovered[0].db_query_text, "SELECT * FROM users");
+        assert_eq!(recovered[0].db_query_summary, "SELECT users");
+        assert_eq!(recovered[0].db_collection_name, "users");
+        assert_eq!(recovered[0].db_response_status_code, "0");
+    }
+
     /// All three `llm_cache_hit` states (unknown `-1`, miss `0`, hit `1`) must
     /// survive a writer → reader round-trip distinctly — a miss must not be
     /// confused with unknown.
@@ -917,6 +1002,73 @@ mod tests {
         assert_eq!(recovered[1].llm_response_id, "");
         assert_eq!(recovered[1].environment, "");
         assert_eq!(recovered[1].links, "[]");
+    }
+
+    /// Phase 4 PR2 read-compat: a 59-col Parquet file (pre-database schema) must
+    /// still read cleanly. Drop the 7 new columns from a canonically
+    /// written batch and verify the reader defaults them safely (`""`).
+    #[test]
+    fn test_record_batch_to_spans_tolerates_59_col_legacy_file() {
+        let spans = vec![
+            Span {
+                trace_id: "t1".to_string(),
+                db_system_name: "should-be-dropped".to_string(),
+                ..Span::default()
+            },
+            Span {
+                trace_id: "t2".to_string(),
+                ..Span::default()
+            },
+        ];
+        let full_batch = spans_to_record_batch(&spans).unwrap();
+        let drop_names = [
+            "db_system_name",
+            "db_namespace",
+            "db_operation_name",
+            "db_query_text",
+            "db_query_summary",
+            "db_collection_name",
+            "db_response_status_code",
+        ];
+        let kept_fields: Vec<_> = full_batch
+            .schema()
+            .fields()
+            .iter()
+            .filter(|f| !drop_names.contains(&f.name().as_str()))
+            .cloned()
+            .collect();
+        let kept_columns: Vec<ArrayRef> = full_batch
+            .schema()
+            .fields()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                if drop_names.contains(&f.name().as_str()) {
+                    None
+                } else {
+                    Some(full_batch.column(i).clone())
+                }
+            })
+            .collect();
+        let narrow_schema = Arc::new(Schema::new(kept_fields));
+        let narrow_batch = RecordBatch::try_new(narrow_schema, kept_columns).unwrap();
+        assert_eq!(
+            narrow_batch.num_columns(),
+            span_arrow_schema().fields().len() - 7
+        );
+
+        let recovered = record_batch_to_spans(&narrow_batch).unwrap();
+        assert_eq!(recovered.len(), 2);
+        // First span loses the new columns; defaults are safe empty strings.
+        assert_eq!(recovered[0].db_system_name, "");
+        assert_eq!(recovered[0].db_namespace, "");
+        assert_eq!(recovered[0].db_operation_name, "");
+        assert_eq!(recovered[0].db_query_text, "");
+        assert_eq!(recovered[0].db_query_summary, "");
+        assert_eq!(recovered[0].db_collection_name, "");
+        assert_eq!(recovered[0].db_response_status_code, "");
+        // Second span: identical defaults all the way through.
+        assert_eq!(recovered[1].db_system_name, "");
     }
 
     #[test]

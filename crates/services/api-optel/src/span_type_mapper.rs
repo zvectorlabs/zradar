@@ -133,6 +133,11 @@ impl SpanTypeMapper {
             }
         }
 
+        // Priority 4.5: Database spans
+        if Self::has_db_info(attributes) {
+            return "DATABASE".to_string();
+        }
+
         // Priority 5: Model-based heuristic
         if Self::has_model_info(attributes) {
             return "GENERATION".to_string();
@@ -168,6 +173,11 @@ impl SpanTypeMapper {
     /// Check if attributes contain tool information
     fn has_tool_info<A: AttrSource>(attributes: &A) -> bool {
         attributes.has_key("tool.name") || attributes.has_key("gen_ai.tool.name")
+    }
+
+    /// Check if attributes contain database information
+    fn has_db_info<A: AttrSource>(attributes: &A) -> bool {
+        attributes.has_key_prefix("db.")
     }
 
     /// Check if attributes contain agent information
@@ -315,6 +325,16 @@ mod tests {
         assert_eq!(
             SpanTypeMapper::detect_type(&attrs, 1000, "", ""),
             "GENERATION"
+        );
+    }
+
+    #[test]
+    fn test_priority_4_5_database() {
+        // Any db.* attribute should map to DATABASE
+        let attrs = make_attrs(vec![("db.system.name", json!("postgresql"))]);
+        assert_eq!(
+            SpanTypeMapper::detect_type(&attrs, 1000, "", ""),
+            "DATABASE"
         );
     }
 

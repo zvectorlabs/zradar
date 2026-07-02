@@ -146,6 +146,163 @@ dual_transport_test!(
     test_agent_span_type_from_agent_attribute_body
 );
 
+/// Test that spans with db.system attribute are detected as DATABASE
+async fn test_database_span_type_from_db_attribute_body(env: TestEnv) -> Result<()> {
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "db-service",
+        &trace_id,
+        &span_id,
+        "query",
+        vec![(
+            "db.system.name",
+            AnyValue {
+                value: Some(
+                    opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                        "postgresql".to_string(),
+                    ),
+                ),
+            },
+        )],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+
+    assert_eq!(
+        spans[0]["span_type"]
+            .as_str()
+            .expect("span_type should exist"),
+        "DATABASE",
+        "Span with db.system.name should be DATABASE"
+    );
+
+    println!("✅ DATABASE span type detected correctly");
+    Ok(())
+}
+
+dual_transport_test!(
+    test_database_span_type_from_db_attribute,
+    test_database_span_type_from_db_attribute_body
+);
+
+/// Test that database fields are correctly extracted
+async fn test_database_fields_extraction_body(env: TestEnv) -> Result<()> {
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "db-service",
+        &trace_id,
+        &span_id,
+        "query",
+        vec![
+            (
+                "db.system.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "postgresql".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.namespace",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "public".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.operation.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "SELECT".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.query.text",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "SELECT * FROM users".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.query.summary",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "SELECT users".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.collection.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "users".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "db.response.status_code",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "0".to_string(),
+                        ),
+                    ),
+                },
+            ),
+        ],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    let span = &spans[0];
+
+    assert_eq!(span["span_type"].as_str().unwrap(), "DATABASE");
+    assert_eq!(span["db_system_name"].as_str().unwrap(), "postgresql");
+    assert_eq!(span["db_namespace"].as_str().unwrap(), "public");
+    assert_eq!(span["db_operation_name"].as_str().unwrap(), "SELECT");
+    assert_eq!(
+        span["db_query_text"].as_str().unwrap(),
+        "SELECT * FROM users"
+    );
+    assert_eq!(span["db_query_summary"].as_str().unwrap(), "SELECT users");
+    assert_eq!(span["db_collection_name"].as_str().unwrap(), "users");
+    assert_eq!(span["db_response_status_code"].as_str().unwrap(), "0");
+
+    println!("✅ DATABASE fields extracted correctly");
+    Ok(())
+}
+
+dual_transport_test!(
+    test_database_fields_extraction,
+    test_database_fields_extraction_body
+);
+
 /// Test that zero-duration spans are detected as EVENT
 async fn test_event_span_type_for_zero_duration_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();

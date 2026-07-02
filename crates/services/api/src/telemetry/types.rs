@@ -65,6 +65,10 @@ pub struct SpanQueryFilters {
     pub invocation_id: Option<String>,
     // Phase 4 R4.5 — deployment.environment filter
     pub environment: Option<String>,
+    pub min_duration_ms: Option<i64>,
+    pub max_duration_ms: Option<i64>,
+    pub db_system_name: Option<String>,
+    pub db_operation_name: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -121,6 +125,10 @@ mod tests {
             tool_name: None,
             invocation_id: None,
             environment: None,
+            min_duration_ms: None,
+            max_duration_ms: None,
+            db_system_name: None,
+            db_operation_name: None,
             limit: None,
             offset: None,
         };
@@ -152,6 +160,10 @@ mod tests {
             tool_name: None,
             invocation_id: None,
             environment: None,
+            min_duration_ms: None,
+            max_duration_ms: None,
+            db_system_name: None,
+            db_operation_name: None,
             limit: None,
             offset: None,
         };
@@ -190,6 +202,10 @@ mod tests {
             tool_name: None,
             invocation_id: None,
             environment: None,
+            min_duration_ms: None,
+            max_duration_ms: None,
+            db_system_name: None,
+            db_operation_name: None,
             limit: None,
             offset: None,
         };
@@ -220,6 +236,10 @@ mod tests {
             tool_name: None,
             invocation_id: None,
             environment: None,
+            min_duration_ms: None,
+            max_duration_ms: None,
+            db_system_name: None,
+            db_operation_name: None,
             limit: None,
             offset: None,
         };
@@ -361,6 +381,14 @@ pub struct SpanDetail {
     pub llm_response_id: Option<String>,
     // Phase 4 R4.5 — deployment.environment resource attribute (prod / staging / etc.).
     pub environment: Option<String>,
+    // Database Phase 4 Gap #46
+    pub db_system_name: Option<String>,
+    pub db_namespace: Option<String>,
+    pub db_operation_name: Option<String>,
+    pub db_query_text: Option<String>,
+    pub db_query_summary: Option<String>,
+    pub db_collection_name: Option<String>,
+    pub db_response_status_code: Option<String>,
     // Phase 4 R4.4 — gen_ai.request.* sampling params parsed back from the
     // model_parameters JSON column. None when no allowlisted params present.
     pub model_parameters: Option<serde_json::Value>,
@@ -417,6 +445,15 @@ pub struct AgentAnalytics {
     pub error_count: i64,
     pub total_tokens: f64,
     pub avg_duration_ms: f64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DatabaseAnalytics {
+    pub db_system_name: String,
+    pub db_operation_name: Option<String>,
+    pub request_count: i64,
+    pub avg_duration_ms: f64,
+    pub error_count: i64,
 }
 
 /// Per-rail-type breakdown for guardrails analytics.
