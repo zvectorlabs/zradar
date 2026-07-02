@@ -548,6 +548,10 @@ message SpanDetail {
   // Versioning
   optional string agent_version = 60;
   optional string sdk_version = 61;
+  // OTel GenAI evaluation conventions
+  optional string evaluation_name = 62;
+  optional string evaluation_explanation = 63;
+  optional int32 evaluation_passed = 64;
 }
 
 // Log record detail.

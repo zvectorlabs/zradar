@@ -116,6 +116,10 @@ pub fn span_arrow_schema() -> Schema {
         Field::new("mcp_server_name", DataType::Utf8, false),
         Field::new("mcp_tool_input", DataType::Utf8, false),
         Field::new("mcp_tool_output", DataType::Utf8, false),
+        // OTel GenAI evaluation conventions
+        Field::new("evaluation_name", DataType::Utf8, false),
+        Field::new("evaluation_explanation", DataType::Utf8, false),
+        Field::new("evaluation_passed", DataType::Int16, false),
         // Flexible attributes (stored as JSON strings)
         Field::new("model_parameters", DataType::Utf8, false),
         Field::new("attributes", DataType::Utf8, false),
@@ -255,6 +259,12 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         StringArray::from_iter_values(spans.iter().map(|s| s.mcp_tool_input.as_str()));
     let mcp_tool_output =
         StringArray::from_iter_values(spans.iter().map(|s| s.mcp_tool_output.as_str()));
+    // OTel GenAI evaluation conventions
+    let evaluation_name =
+        StringArray::from_iter_values(spans.iter().map(|s| s.evaluation_name.as_str()));
+    let evaluation_explanation =
+        StringArray::from_iter_values(spans.iter().map(|s| s.evaluation_explanation.as_str()));
+    let evaluation_passed: Int16Array = spans.iter().map(|s| s.evaluation_passed).collect();
     // Flexible attributes
     let model_parameters =
         StringArray::from_iter_values(spans.iter().map(|s| s.model_parameters.as_str()));
@@ -340,6 +350,9 @@ pub fn spans_to_record_batch(spans: &[Span]) -> anyhow::Result<RecordBatch> {
         Arc::new(mcp_server_name),
         Arc::new(mcp_tool_input),
         Arc::new(mcp_tool_output),
+        Arc::new(evaluation_name),
+        Arc::new(evaluation_explanation),
+        Arc::new(evaluation_passed),
         Arc::new(model_parameters),
         Arc::new(attributes),
         Arc::new(created_at),
@@ -584,6 +597,10 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
     let mcp_server_name_col = optional_string_col(batch, "mcp_server_name")?;
     let mcp_tool_input_col = optional_string_col(batch, "mcp_tool_input")?;
     let mcp_tool_output_col = optional_string_col(batch, "mcp_tool_output")?;
+    // OTel GenAI evaluation conventions
+    let evaluation_name_col = optional_string_col(batch, "evaluation_name")?;
+    let evaluation_explanation_col = optional_string_col(batch, "evaluation_explanation")?;
+    let evaluation_passed_col = optional_i16_col(batch, "evaluation_passed")?;
     let model_parameters_col = str_col!("model_parameters");
     let attributes_col = str_col!("attributes");
     let created_at_col = i64_col!("created_at");
@@ -754,6 +771,13 @@ pub fn record_batch_to_spans(batch: &RecordBatch) -> anyhow::Result<Vec<Span>> {
             mcp_tool_output: mcp_tool_output_col
                 .map(|c| c.value(i).to_string())
                 .unwrap_or_default(),
+            evaluation_name: evaluation_name_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            evaluation_explanation: evaluation_explanation_col
+                .map(|c| c.value(i).to_string())
+                .unwrap_or_default(),
+            evaluation_passed: evaluation_passed_col.map(|c| c.value(i)).unwrap_or(-1),
             model_parameters: model_parameters_col.value(i).to_string(),
             attributes: attributes_col.value(i).to_string(),
             created_at: created_at_col.value(i),
@@ -781,15 +805,15 @@ mod tests {
     #[test]
     fn test_span_arrow_schema_field_count() {
         let schema = span_arrow_schema();
-        // 80 fields total: 66 previous + 14 new (10 agentic, 4 mcp)
-        assert_eq!(schema.fields().len(), 80);
+        // 83 fields total: 80 previous + 3 new (evaluation_name, evaluation_explanation, evaluation_passed)
+        assert_eq!(schema.fields().len(), 83);
     }
 
     #[test]
     fn test_spans_to_record_batch_empty() {
         let batch = spans_to_record_batch(&[]).unwrap();
         assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 80);
+        assert_eq!(batch.num_columns(), 83);
     }
 
     #[test]
@@ -1040,6 +1064,9 @@ mod tests {
             mcp_server_name: "data-server".to_string(),
             mcp_tool_input: "{\"id\": 1}".to_string(),
             mcp_tool_output: "{\"status\": \"ok\"}".to_string(),
+            evaluation_name: "safety_eval".to_string(),
+            evaluation_explanation: "Passed content moderation".to_string(),
+            evaluation_passed: 1,
             ..Span::default()
         };
         let batch = spans_to_record_batch(&[span]).unwrap();
@@ -1059,6 +1086,12 @@ mod tests {
         assert_eq!(recovered[0].mcp_server_name, "data-server");
         assert_eq!(recovered[0].mcp_tool_input, "{\"id\": 1}");
         assert_eq!(recovered[0].mcp_tool_output, "{\"status\": \"ok\"}");
+        assert_eq!(recovered[0].evaluation_name, "safety_eval");
+        assert_eq!(
+            recovered[0].evaluation_explanation,
+            "Passed content moderation"
+        );
+        assert_eq!(recovered[0].evaluation_passed, 1);
     }
 
     /// All three `llm_cache_hit` states (unknown `-1`, miss `0`, hit `1`) must

@@ -168,6 +168,13 @@ pub struct Span {
     pub mcp_tool_output: String,
 
     // ============================================================
+    // OTel GenAI evaluation conventions
+    // ============================================================
+    pub evaluation_name: String,
+    pub evaluation_explanation: String,
+    pub evaluation_passed: i16, // tri-state: -1 unknown, 0 failed, 1 passed
+
+    // ============================================================
     // Flexible Attributes (JSON)
     // ============================================================
     pub model_parameters: String, // JSON: {"temperature": 0.7, ...}
@@ -283,6 +290,9 @@ impl Default for Span {
             mcp_server_name: String::new(),
             mcp_tool_input: String::new(),
             mcp_tool_output: String::new(),
+            evaluation_name: String::new(),
+            evaluation_explanation: String::new(),
+            evaluation_passed: -1,
             model_parameters: "{}".to_string(),
             attributes: "{}".to_string(),
             created_at: now,

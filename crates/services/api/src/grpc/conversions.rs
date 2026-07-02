@@ -514,6 +514,9 @@ pub fn span_detail_to_proto(s: &SpanDetail) -> query_proto::SpanDetail {
         mcp_tool_output: s.mcp_tool_output.clone(),
         agent_version: s.agent_version.clone(),
         sdk_version: s.sdk_version.clone(),
+        evaluation_name: s.evaluation_name.clone(),
+        evaluation_explanation: s.evaluation_explanation.clone(),
+        evaluation_passed: s.evaluation_passed.map(|v| v as i32),
     }
 }
 

@@ -795,6 +795,71 @@ dual_transport_test!(
     test_agentic_fields_extraction_body
 );
 
+async fn test_evaluation_fields_extraction_body(env: TestEnv) -> Result<()> {
+    let trace_id = TestDataGenerator::trace_id();
+    let span_id = TestDataGenerator::span_id();
+
+    let request = build_trace_with_attributes(
+        "evaluation-service",
+        &trace_id,
+        &span_id,
+        "eval_run",
+        vec![
+            (
+                "gen_ai.evaluation.name",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "toxicity_check".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.evaluation.explanation",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                            "Safe content".to_string(),
+                        ),
+                    ),
+                },
+            ),
+            (
+                "gen_ai.evaluation.passed",
+                AnyValue {
+                    value: Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue(true),
+                    ),
+                },
+            ),
+        ],
+        None,
+    );
+    env.otlp.export_traces(request).await?;
+
+    let trace_id_hex = hex::encode(trace_id);
+    let trace_data = wait_for_trace_default(&env.client, &trace_id_hex).await?;
+    let spans = trace_data["spans"].as_array().expect("Should have spans");
+    let span = &spans[0];
+
+    assert_eq!(span["span_type"].as_str().unwrap(), "EVALUATOR");
+    assert_eq!(span["evaluation_name"].as_str().unwrap(), "toxicity_check");
+    assert_eq!(
+        span["evaluation_explanation"].as_str().unwrap(),
+        "Safe content"
+    );
+    assert_eq!(span["evaluation_passed"].as_i64().unwrap(), 1);
+
+    println!("✅ Evaluation fields extracted and typed correctly in functional test");
+    Ok(())
+}
+
+dual_transport_test!(
+    test_evaluation_fields_extraction,
+    test_evaluation_fields_extraction_body
+);
+
 async fn test_mcp_fields_extraction_body(env: TestEnv) -> Result<()> {
     let trace_id = TestDataGenerator::trace_id();
     let span_id = TestDataGenerator::span_id();

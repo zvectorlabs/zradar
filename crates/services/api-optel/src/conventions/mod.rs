@@ -18,6 +18,7 @@ pub mod agent;
 pub mod aiq;
 pub mod attr_view;
 pub mod db;
+pub mod gen_ai_evaluation;
 pub mod gen_ai_legacy;
 pub mod gen_ai_memory;
 pub mod gen_ai_task;
@@ -79,6 +80,7 @@ pub fn default_conventions() -> Vec<Box<dyn AttributeConvention>> {
         Box::new(agent::AgentConvention),
         Box::new(gen_ai_task::GenAiTaskConvention),
         Box::new(gen_ai_memory::GenAiMemoryConvention),
+        Box::new(gen_ai_evaluation::GenAiEvaluationConvention),
         Box::new(vertex::VertexConvention),
         Box::new(llm::LlmConvention),
         // GenAI 1.29 before legacy — newer key names win when both present.

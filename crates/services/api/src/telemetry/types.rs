@@ -408,6 +408,10 @@ pub struct SpanDetail {
     // Versioning
     pub agent_version: Option<String>,
     pub sdk_version: Option<String>,
+    // OTel GenAI evaluation conventions
+    pub evaluation_name: Option<String>,
+    pub evaluation_explanation: Option<String>,
+    pub evaluation_passed: Option<i16>,
     // Phase 4 R4.4 — gen_ai.request.* sampling params parsed back from the
     // model_parameters JSON column. None when no allowlisted params present.
     pub model_parameters: Option<serde_json::Value>,
