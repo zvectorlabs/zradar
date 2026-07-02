@@ -1,0 +1,910 @@
+🚀 Running benchmarks...
+cargo bench 
+   Compiling num-traits v0.2.19
+   Compiling tokio v1.52.3
+   Compiling crossbeam-epoch v0.9.18
+   Compiling rayon-core v1.13.0
+   Compiling alloca v0.4.0
+   Compiling anstyle v1.0.14
+   Compiling clap_lex v1.1.0
+   Compiling ciborium-io v0.2.2
+   Compiling plotters-backend v0.3.7
+   Compiling cast v0.3.0
+   Compiling tinytemplate v1.2.1
+   Compiling page_size v0.6.0
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling fnv v1.0.7
+   Compiling ident_case v1.0.1
+   Compiling chacha20 v0.10.1
+   Compiling openssl-probe v0.2.1
+   Compiling wait-timeout v0.2.1
+   Compiling encoding_rs v0.8.35
+   Compiling diff v0.1.13
+   Compiling bit-vec v0.8.0
+   Compiling yansi v1.0.1
+   Compiling deunicode v1.6.2
+   Compiling quick-error v1.2.3
+   Compiling rand_xorshift v0.4.0
+   Compiling urlencoding v2.1.3
+   Compiling darling_core v0.20.11
+   Compiling unarray v0.1.4
+   Compiling rustls-native-certs v0.8.4
+   Compiling clap_builder v4.6.0
+   Compiling criterion-plot v0.8.2
+   Compiling bit-set v0.8.0
+   Compiling plotters-svg v0.3.7
+   Compiling rusty-fork v0.3.1
+   Compiling crossbeam-deque v0.8.6
+   Compiling rand v0.10.1
+   Compiling pretty_assertions v1.4.1
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling chrono v0.4.39
+   Compiling atoi v2.0.0
+   Compiling half v2.7.1
+   Compiling num-integer v0.1.46
+   Compiling num-complex v0.4.6
+   Compiling ordered-float v2.10.1
+   Compiling plotters v0.3.7
+   Compiling proptest v1.11.0
+   Compiling thrift v0.17.0
+   Compiling rayon v1.12.0
+   Compiling ciborium-ll v0.2.2
+   Compiling num-bigint v0.4.6
+   Compiling num-iter v0.1.45
+   Compiling darling_macro v0.20.11
+   Compiling ciborium v0.2.2
+   Compiling darling v0.20.11
+   Compiling dummy v0.12.0
+   Compiling chrono-tz v0.10.4
+   Compiling fake v5.1.0
+   Compiling num-rational v0.4.2
+   Compiling bigdecimal v0.4.10
+   Compiling clap v4.6.1
+   Compiling num v0.4.3
+   Compiling arrow-buffer v53.4.1
+   Compiling tokio-util v0.7.18
+   Compiling tokio-stream v0.1.18
+   Compiling object_store v0.11.2
+   Compiling async-compression v0.4.19
+   Compiling tokio-rustls v0.26.4
+   Compiling datafusion-common-runtime v44.0.0
+   Compiling criterion v0.8.2
+   Compiling backon v0.4.4
+   Compiling tokio-retry v0.3.2
+   Compiling arrow-data v53.4.1
+   Compiling sqlx-core v0.8.6
+   Compiling h2 v0.4.15
+   Compiling tower v0.5.3
+   Compiling tower-http v0.7.0
+   Compiling tower-http v0.6.11
+   Compiling arrow-array v53.4.1
+   Compiling sqlx-postgres v0.8.6
+   Compiling hyper v1.10.1
+   Compiling arrow-select v53.4.1
+   Compiling arrow-row v53.4.1
+   Compiling arrow-arith v53.4.1
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.8.9
+   Compiling hyper-timeout v0.5.2
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.12.28
+   Compiling reqwest v0.13.4
+   Compiling sqlx v0.8.6
+   Compiling zradar-models v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-models)
+   Compiling arrow-cast v53.4.1
+   Compiling arrow-string v53.4.1
+   Compiling arrow-ord v53.4.1
+   Compiling zradar-policy v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-policy)
+   Compiling zradar-wal v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-wal)
+   Compiling zradar-metrics v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-metrics)
+   Compiling reqsign v0.16.5
+   Compiling zradar-traits v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-traits)
+   Compiling tonic v0.14.6
+   Compiling utoipa-swagger-ui v9.0.2
+   Compiling zradar-retention v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-retention)
+   Compiling zradar-auth-config v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/auth/zradar-auth-config)
+   Compiling zradar-plugin-postgres v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/plugins/zradar-plugin-postgres)
+   Compiling opendal v0.49.2
+   Compiling tonic-prost v0.14.6
+   Compiling tonic-web v0.14.6
+   Compiling opentelemetry-proto v0.32.0
+   Compiling tonic-reflection v0.14.6
+   Compiling api v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/services/api)
+   Compiling api-optel v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/services/api-optel)
+   Compiling zradar-plugin-s3 v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/plugins/zradar-plugin-s3)
+   Compiling arrow-ipc v53.4.1
+   Compiling arrow-json v53.4.1
+   Compiling arrow-csv v53.4.1
+   Compiling parquet v53.4.1
+   Compiling arrow v53.4.1
+   Compiling datafusion-common v44.0.0
+   Compiling zradar-functional-tests v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/test_functional)
+   Compiling datafusion-expr-common v44.0.0
+   Compiling datafusion-physical-expr-common v44.0.0
+   Compiling datafusion-functions-aggregate-common v44.0.0
+   Compiling datafusion-functions-window-common v44.0.0
+   Compiling datafusion-expr v44.0.0
+   Compiling datafusion-physical-expr v44.0.0
+   Compiling datafusion-execution v44.0.0
+   Compiling datafusion-sql v44.0.0
+   Compiling datafusion-functions v44.0.0
+   Compiling datafusion-physical-plan v44.0.0
+   Compiling datafusion-functions-aggregate v44.0.0
+   Compiling datafusion-optimizer v44.0.0
+   Compiling datafusion-functions-window v44.0.0
+   Compiling datafusion-catalog v44.0.0
+   Compiling datafusion-physical-optimizer v44.0.0
+   Compiling datafusion-functions-table v44.0.0
+   Compiling datafusion-functions-nested v44.0.0
+   Compiling datafusion v44.0.0
+   Compiling zradar-parquet v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/core/zradar-parquet)
+   Compiling zradar-runtime v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/runtime/zradar-runtime)
+   Compiling zradar-server v0.10.0 (/mnt/data/projects/zvectorlabs/zradar-oss/zradar/crates/applications/zradar-server)
+    Finished `bench` profile [optimized] target(s) in 4m 45s
+     Running unittests src/lib.rs (target/release/deps/api-767c0453d92b569c)
+
+running 7 tests
+test grpc::auth::tests::authorize_query_reads_bearer_metadata ... ignored
+test grpc::auth::tests::authorize_query_rejects_missing_bearer ... ignored
+test telemetry::types::tests::test_parse_invalid_span_type ... ignored
+test telemetry::types::tests::test_parse_multiple_span_types ... ignored
+test telemetry::types::tests::test_parse_single_span_type ... ignored
+test telemetry::types::tests::test_parse_span_types_with_whitespace ... ignored
+test telemetry::types::tests::test_spandetail_attributes_preserves_non_string_values ... ignored
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/api_optel-47a2a384f73832b8)
+
+running 171 tests
+test auth::tests::test_authenticate_grpc_applies_header_context_in_test_mode ... ignored
+test auth::tests::test_authenticate_grpc_ignores_header_context_by_default ... ignored
+test circuit_breaker::tests::closed_when_thresholds_not_exceeded ... ignored
+test circuit_breaker::tests::exposes_queue_depth_snapshot ... ignored
+test circuit_breaker::tests::open_when_queue_depth_exceeds_threshold ... ignored
+test conventions::agent::tests::test_agent_convention_accepts_dotted_invocation_id ... ignored
+test conventions::agent::tests::test_agent_convention_accepts_zradar_dotted_invocation_id ... ignored
+test conventions::agent::tests::test_agent_convention_no_keys_leaves_span_untouched ... ignored
+test conventions::agent::tests::test_agent_convention_populates_fields ... ignored
+test conventions::agent::tests::test_agent_convention_precedence_zradar_over_other_forms ... ignored
+test conventions::aiq::tests::test_aiq_agent_name_does_not_overwrite_existing ... ignored
+test conventions::aiq::tests::test_aiq_convention_populates_all_fields ... ignored
+test conventions::aiq::tests::test_aiq_marks_keys_consumed ... ignored
+test conventions::aiq::tests::test_aiq_missing_attrs_leaves_span_default ... ignored
+test conventions::aiq::tests::test_aiq_overwrites_nat_framework ... ignored
+test conventions::aiq::tests::test_aiq_overwrites_nat_workflow_run_id ... ignored
+test conventions::aiq::tests::test_aiq_session_id_does_not_overwrite_existing ... ignored
+test conventions::attr_view::tests::test_contains_and_iter ... ignored
+test conventions::attr_view::tests::test_get_f64_and_bool ... ignored
+test conventions::attr_view::tests::test_get_i64_and_u64 ... ignored
+test conventions::attr_view::tests::test_get_str_missing_returns_none ... ignored
+test conventions::attr_view::tests::test_get_str_returns_borrowed_value ... ignored
+test conventions::attr_view::tests::test_mark_consumed_tracks_keys ... ignored
+test conventions::attr_view::tests::test_wrong_type_returns_none ... ignored
+test conventions::db::tests::test_db_convention_populates_from_stable ... ignored
+test conventions::gen_ai_evaluation::tests::test_evaluation_convention_populates_fields ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_does_not_overwrite_v1_29_tokens ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_does_not_overwrite_zero_v1_29_tokens ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_overwrites_existing_llm_values ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_populates_fields ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_populates_when_v1_29_absent ... ignored
+test conventions::gen_ai_legacy::tests::test_gen_ai_legacy_token_counts_saturate_at_i32_max ... ignored
+test conventions::gen_ai_memory::tests::test_memory_convention_populates_fields ... ignored
+test conventions::gen_ai_task::tests::test_task_convention_populates_fields ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_input_tokens_wins_over_legacy_prompt_tokens ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_marks_keys_consumed ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_missing_attrs_leaves_span_default ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_negative_int_ignored_for_u64_tokens ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_no_response_id_leaves_empty ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_populates_all_fields ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_response_id_populates_llm_response_id ... ignored
+test conventions::gen_ai_v1_29::tests::test_gen_ai_v1_29_response_model_distinct_from_request_model ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_bool_false_yields_zero ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_ignores_wrong_typed_bool ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_ignores_wrong_typed_int ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_llm_cache_hit_false ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_llm_cache_hit_string_ignored ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_llm_cache_hit_true ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_marks_keys_consumed ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_missing_attrs_leaves_span_default ... ignored
+test conventions::guardrails::tests::test_guardrails_convention_populates_all_fields ... ignored
+test conventions::llm::tests::test_llm_convention_ignores_gen_ai_aliases ... ignored
+test conventions::llm::tests::test_llm_convention_populates_model_io_usage_cost ... ignored
+test conventions::mcp::tests::test_mcp_convention_populates_fields ... ignored
+test conventions::nat::tests::test_nat_convention_agent_name_does_not_overwrite_existing ... ignored
+test conventions::nat::tests::test_nat_convention_marks_keys_consumed ... ignored
+test conventions::nat::tests::test_nat_convention_missing_attrs_leaves_span_default ... ignored
+test conventions::nat::tests::test_nat_convention_populates_all_fields ... ignored
+test conventions::nat::tests::test_nat_convention_session_id_does_not_overwrite_existing ... ignored
+test conventions::nat::tests::test_nat_convention_workflow_run_id_always_overwrites ... ignored
+test conventions::openinference::tests::test_openinference_convention_is_currently_noop ... ignored
+test conventions::prompt::tests::test_prompt_convention_ignores_unrelated ... ignored
+test conventions::prompt::tests::test_prompt_convention_populates_fields ... ignored
+test conventions::resource::tests::test_resource_convention_populates_all_known_fields ... ignored
+test conventions::resource::tests::test_ttft_ms_alias_populates_same_field ... ignored
+test conventions::sampling_params::tests::test_sampling_params_collects_all_allowlisted_keys ... ignored
+test conventions::sampling_params::tests::test_sampling_params_ignores_non_allowlisted_gen_ai_keys ... ignored
+test conventions::sampling_params::tests::test_sampling_params_marks_keys_consumed ... ignored
+test conventions::sampling_params::tests::test_sampling_params_no_keys_leaves_default ... ignored
+test conventions::sampling_params::tests::test_sampling_params_partial_keys_only_records_present ... ignored
+test conventions::tool::tests::test_tool_convention_gen_ai_alias_wins_on_conflict ... ignored
+test conventions::tool::tests::test_tool_convention_populates_from_canonical ... ignored
+test conventions::tool::tests::test_tool_convention_populates_from_gen_ai_alias ... ignored
+test conventions::vertex::tests::test_vertex_convention_ignores_generic_keys ... ignored
+test conventions::vertex::tests::test_vertex_convention_populates_fields ... ignored
+test converter::tests::test_content_capture_disabled_clears_llm_fields ... ignored
+test converter::tests::test_duration_ns_dangling_span_end_zero_is_zero ... ignored
+test converter::tests::test_duration_ns_end_before_start_is_zero ... ignored
+test converter::tests::test_duration_ns_normal_span_is_positive ... ignored
+test converter::tests::test_extract_resource_string_absent_returns_none ... ignored
+test converter::tests::test_extract_resource_string_empty_value_returns_none ... ignored
+test converter::tests::test_extract_resource_string_no_resource_returns_none ... ignored
+test converter::tests::test_extract_resource_string_non_string_returns_none ... ignored
+test converter::tests::test_extract_resource_string_present ... ignored
+test converter::tests::test_normalize_parent_span_id_arbitrary_length_all_zero_returns_empty ... ignored
+test converter::tests::test_normalize_parent_span_id_eight_zero_bytes_returns_empty_string ... ignored
+test converter::tests::test_normalize_parent_span_id_empty_bytes_returns_empty_string ... ignored
+test converter::tests::test_normalize_parent_span_id_one_nonzero_byte_is_not_root ... ignored
+test converter::tests::test_normalize_parent_span_id_real_parent_hex_encoded ... ignored
+test logs_converter::tests::test_severity_number_error ... ignored
+test logs_converter::tests::test_severity_number_info ... ignored
+test logs_converter::tests::test_severity_number_unknown ... ignored
+test metrics_converter::tests::test_attrs_to_json_empty ... ignored
+test metrics_converter::tests::test_extract_string_attr_found ... ignored
+test metrics_converter::tests::test_extract_string_attr_not_found ... ignored
+test otlp_http::handlers::tests::test_check_content_type_json_rejected ... ignored
+test otlp_http::handlers::tests::test_check_content_type_missing_rejected ... ignored
+test otlp_http::handlers::tests::test_check_content_type_protobuf_accepted ... ignored
+test otlp_http::handlers::tests::test_cors_layer_on_otlp_http_router ... ignored
+test otlp_http::handlers::tests::test_cors_layer_with_allowlist ... ignored
+test otlp_util::tests::attrs_to_json_empty_is_empty_object ... ignored
+test otlp_util::tests::attrs_to_json_filtered_skips_keys_and_matches_reference ... ignored
+test otlp_util::tests::attrs_to_json_matches_map_reference_byte_for_byte ... ignored
+test otlp_util::tests::test_array_value ... ignored
+test otlp_util::tests::test_attrs_to_json_all_types ... ignored
+test otlp_util::tests::test_bool_value ... ignored
+test otlp_util::tests::test_bytes_value_hex_encoded ... ignored
+test otlp_util::tests::test_double_value ... ignored
+test otlp_util::tests::test_int_value ... ignored
+test otlp_util::tests::test_kvlist_value ... ignored
+test otlp_util::tests::test_none_value ... ignored
+test otlp_util::tests::test_string_value ... ignored
+test parser_caps::tests::test_logs_caps_reject_too_many_records ... ignored
+test parser_caps::tests::test_metrics_caps_reject_too_many_metrics ... ignored
+test parser_caps::tests::test_trace_caps_reject_too_many_spans ... ignored
+test rate_limiter::tests::allows_burst_up_to_twice_rate ... ignored
+test rate_limiter::tests::rejects_when_bucket_empty ... ignored
+test rate_limiter::tests::zero_rate_rejects ... ignored
+test score_extractor::tests::test_extract_scores_requires_trace_id_and_name ... ignored
+test score_extractor::tests::test_extract_scores_skips_null_attr_without_aborting ... ignored
+test score_extractor::tests::test_extract_scores_skips_records_without_score_prefix ... ignored
+test score_extractor::tests::test_extract_scores_valid_record ... ignored
+test span_events::tests::test_byte_budget_truncation_appends_marker ... ignored
+test span_events::tests::test_empty_events_leaves_default ... ignored
+test span_events::tests::test_gen_ai_content_completion_populates_llm_output ... ignored
+test span_events::tests::test_gen_ai_content_prompt_populates_llm_input ... ignored
+test span_events::tests::test_inference_detail_event_populates_llm_input_and_output ... ignored
+test span_events::tests::test_llm_input_already_set_is_not_overwritten_by_event ... ignored
+test span_events::tests::test_max_events_per_span_cap ... ignored
+test span_events::tests::test_nat_new_token_event_is_dropped ... ignored
+test span_events::tests::test_oq18_noise_dropped_before_count_cap ... ignored
+test span_events::tests::test_unrecognized_events_preserved_in_events_json ... ignored
+test span_links::tests::test_empty_links_leaves_default ... ignored
+test span_links::tests::test_exactly_max_links_no_truncation_marker ... ignored
+test span_links::tests::test_link_attributes_propagate_into_json ... ignored
+test span_links::tests::test_link_count_cap_appends_truncation_marker ... ignored
+test span_links::tests::test_link_trace_state_present_when_non_empty ... ignored
+test span_links::tests::test_multiple_links_preserved_in_order ... ignored
+test span_links::tests::test_single_link_serializes_trace_and_span_id_as_hex ... ignored
+test span_type_mapper::tests::test_default_span_type ... ignored
+test span_type_mapper::tests::test_priority_1_5_explicit_zradar_type_still_wins_over_guardrails ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_action_name_alone_not_guardrail ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_action_name_with_rail ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_action_name_with_service ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_op_name ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_rail_type ... ignored
+test span_type_mapper::tests::test_priority_1_5_guardrails_span_name ... ignored
+test span_type_mapper::tests::test_priority_1_5_runs_before_openinference ... ignored
+test span_type_mapper::tests::test_priority_1_explicit_zradar_type ... ignored
+test span_type_mapper::tests::test_priority_1_explicit_zradar_type_lowercase ... ignored
+test span_type_mapper::tests::test_priority_2_openinference_chain ... ignored
+test span_type_mapper::tests::test_priority_2_openinference_llm ... ignored
+test span_type_mapper::tests::test_priority_2_openinference_reranker ... ignored
+test span_type_mapper::tests::test_priority_2_openinference_retriever ... ignored
+test span_type_mapper::tests::test_priority_3_gen_ai_chat ... ignored
+test span_type_mapper::tests::test_priority_3_gen_ai_embeddings ... ignored
+test span_type_mapper::tests::test_priority_3_gen_ai_invoke_agent ... ignored
+test span_type_mapper::tests::test_priority_4_5_database ... ignored
+test span_type_mapper::tests::test_priority_4_vercel_generate_text ... ignored
+test span_type_mapper::tests::test_priority_4_vercel_tool_call ... ignored
+test span_type_mapper::tests::test_priority_5_5_evaluation_detection ... ignored
+test span_type_mapper::tests::test_priority_5_model_heuristic ... ignored
+test span_type_mapper::tests::test_priority_5_model_heuristic_response_model ... ignored
+test span_type_mapper::tests::test_priority_6_tool_detection ... ignored
+test span_type_mapper::tests::test_priority_6_tool_detection_gen_ai ... ignored
+test span_type_mapper::tests::test_priority_6_tool_detection_mcp ... ignored
+test span_type_mapper::tests::test_priority_7_agent_detection ... ignored
+test span_type_mapper::tests::test_priority_7_agent_detection_type ... ignored
+test span_type_mapper::tests::test_priority_8_zero_duration_event ... ignored
+test span_type_mapper::tests::test_priority_order_explicit_overrides_all ... ignored
+test span_type_mapper::tests::test_priority_order_openinference_over_model ... ignored
+
+test result: ok. 0 passed; 0 failed; 171 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running benches/converter_bench.rs (target/release/deps/converter_bench-b6789847362a343b)
+Gnuplot not found, using plotters backend
+Benchmarking converter/convert_resource_spans/tiny_1_attr
+Benchmarking converter/convert_resource_spans/tiny_1_attr: Warming up for 3.0000 s
+Benchmarking converter/convert_resource_spans/tiny_1_attr: Collecting 100 samples in estimated 5.0152 s (1.5M iterations)
+Benchmarking converter/convert_resource_spans/tiny_1_attr: Analyzing
+converter/convert_resource_spans/tiny_1_attr
+                        time:   [2.7821 µs 2.7982 µs 2.8146 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking converter/convert_resource_spans/med_20_attr_nat_llm
+Benchmarking converter/convert_resource_spans/med_20_attr_nat_llm: Warming up for 3.0000 s
+Benchmarking converter/convert_resource_spans/med_20_attr_nat_llm: Collecting 100 samples in estimated 5.0089 s (530k iterations)
+Benchmarking converter/convert_resource_spans/med_20_attr_nat_llm: Analyzing
+converter/convert_resource_spans/med_20_attr_nat_llm
+                        time:   [7.4666 µs 7.5916 µs 7.7231 µs]
+Found 13 outliers among 100 measurements (13.00%)
+  9 (9.00%) high mild
+  4 (4.00%) high severe
+Benchmarking converter/convert_resource_spans/fat_100_attr_30_events
+Benchmarking converter/convert_resource_spans/fat_100_attr_30_events: Warming up for 3.0000 s
+Benchmarking converter/convert_resource_spans/fat_100_attr_30_events: Collecting 100 samples in estimated 5.0414 s (76k iterations)
+Benchmarking converter/convert_resource_spans/fat_100_attr_30_events: Analyzing
+converter/convert_resource_spans/fat_100_attr_30_events
+                        time:   [49.483 µs 50.103 µs 50.866 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking converter/convert_resource_spans/wide_512_attr_200_events
+Benchmarking converter/convert_resource_spans/wide_512_attr_200_events: Warming up for 3.0000 s
+Benchmarking converter/convert_resource_spans/wide_512_attr_200_events: Collecting 100 samples in estimated 5.7621 s (20k iterations)
+Benchmarking converter/convert_resource_spans/wide_512_attr_200_events: Analyzing
+converter/convert_resource_spans/wide_512_attr_200_events
+                        time:   [199.82 µs 201.64 µs 204.29 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) low mild
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+
+     Running unittests src/lib.rs (target/release/deps/zradar_auth_config-a5774968cf155a8f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests lib.rs (target/release/deps/functional_tests-a617d636d8e2ab23)
+
+running 6 tests
+test helpers::nim_mocks::tests::dcgm_payload_covers_documented_metrics ... ignored
+test helpers::nim_mocks::tests::locate_otelcol_bin_ignores_env_when_path_missing ... ignored
+test helpers::nim_mocks::tests::locate_otelcol_bin_respects_zradar_env_override_when_path_valid ... ignored
+test helpers::nim_mocks::tests::nim_payload_covers_all_documented_metrics ... ignored
+test helpers::nim_mocks::tests::rendered_config_contains_required_keys ... ignored
+test helpers::nim_mocks::tests::rendered_config_uses_distinct_scrape_jobs ... ignored
+
+test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests fixtures/nemo/build.rs (target/release/deps/gen_nemo_fixtures-7aeb8e8b8cba1fe4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_metrics-fee26195cf9cf2b0)
+
+running 8 tests
+test hub::tests::forget_workspace_drops_series ... ignored
+test hub::tests::rejections_carry_reason_label ... ignored
+test hub::tests::system_metrics_always_recorded ... ignored
+test hub::tests::workspace_metrics_only_when_observed ... ignored
+test primitive::tests::counter_and_gauge ... ignored
+test primitive::tests::help_type_emitted_once_per_name ... ignored
+test primitive::tests::histogram_buckets_are_cumulative ... ignored
+test primitive::tests::label_values_are_escaped ... ignored
+
+test result: ok. 0 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_models-f852cb86db9bbd2d)
+
+running 24 tests
+test evaluation_score::tests::test_eval_data_type_conversion ... ignored
+test evaluation_score::tests::test_eval_data_type_try_from_str ... ignored
+test evaluation_score::tests::test_eval_data_type_try_from_string ... ignored
+test evaluation_score::tests::test_eval_source_conversion ... ignored
+test evaluation_score::tests::test_eval_source_try_from_str ... ignored
+test evaluation_score::tests::test_eval_source_try_from_string ... ignored
+test evaluation_score::tests::test_evaluation_score_clone ... ignored
+test evaluation_score::tests::test_evaluation_score_default ... ignored
+test evaluation_score::tests::test_evaluation_score_serialization ... ignored
+test file_list::tests::test_file_list_filter_default ... ignored
+test file_list::tests::test_stream_stats_update_fields ... ignored
+test ingest_batch::tests::derives_time_bounds_and_count ... ignored
+test ingest_batch::tests::empty_batch_has_zeroed_metadata ... ignored
+test ingest_batch::tests::from_vec_constructs_typed_batch ... ignored
+test ingest_batch::tests::homogeneous_workspace_is_parsed ... ignored
+test ingest_batch::tests::mixed_workspace_is_none ... ignored
+test ingest_batch::tests::non_uuid_workspace_is_none_but_rows_kept ... ignored
+test ingest_batch::tests::signal_type_storage_tags ... ignored
+test ingest_batch::tests::split_empty_returns_empty ... ignored
+test ingest_batch::tests::split_groups_by_workspace_preserving_order ... ignored
+test ingest_batch::tests::split_single_workspace_returns_one ... ignored
+test span::tests::test_default_span_type ... ignored
+test span::tests::test_validate_span_type_invalid ... ignored
+test span::tests::test_validate_span_type_valid ... ignored
+
+test result: ok. 0 passed; 0 failed; 24 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_parquet-78291abb8b5b6a60)
+
+running 103 tests
+test compactor::tests::test_compact_group_merges_small_files ... ignored
+test compactor::tests::test_compact_skips_group_below_min_files ... ignored
+test compactor::tests::test_group_by_bucket_groups_correctly ... ignored
+test disk_cache::tests::test_get_or_fetch_cache_hit_on_second_call ... ignored
+test disk_cache::tests::test_get_or_fetch_downloads_and_caches ... ignored
+test engine::tests::test_shared_engine_clone ... ignored
+test engine::tests::test_shared_engine_contexts_do_not_share_table_registrations ... ignored
+test engine::tests::test_shared_engine_new_context_is_independent ... ignored
+test file_mover::tests::file_mover_skips_leased_file_and_resumes_after_release ... ignored
+test file_mover::tests::file_mover_uploads_when_no_lease ... ignored
+test file_mover::tests::test_file_mover_cancel_stops_loop ... ignored
+test file_mover::tests::test_file_mover_no_files_does_nothing ... ignored
+test file_mover::tests::test_s3_key_for_local_file_collapses_duplicate_data_dir_basename ... ignored
+test file_mover::tests::test_s3_key_for_local_file_preserves_non_duplicate_relative_prefix ... ignored
+test flush_worker::tests::test_flush_worker_drains_on_cancel ... ignored
+test flush_worker::tests::test_flush_worker_empty_shutdown ... ignored
+test memory_cache::tests::test_eviction_when_over_budget ... ignored
+test memory_cache::tests::test_insert_and_get_hit ... ignored
+test memory_cache::tests::test_miss_returns_none ... ignored
+test memory_cache::tests::test_multiple_shards_distribute_load ... ignored
+test memory_cache::tests::test_overwrite_updates_used_bytes ... ignored
+test memory_cache::tests::test_remove ... ignored
+test reader::tests::query_with_lease_registry_releases_all_leases_on_return ... ignored
+test reader::tests::test_multi_file_listing_table_query ... ignored
+test reader::tests::test_query_parquet_populates_memory_cache ... ignored
+test reader::tests::test_query_parquet_returns_empty_when_no_files ... ignored
+test reader::tests::test_round_trip_write_then_query ... ignored
+test recovery::tests::test_recover_handles_nested_directories ... ignored
+test recovery::tests::test_recover_noop_when_dir_missing ... ignored
+test recovery::tests::test_recover_removes_par_files ... ignored
+test schema::logs::tests::test_log_arrow_schema_field_count ... ignored
+test schema::logs::tests::test_logs_to_record_batch_empty ... ignored
+test schema::logs::tests::test_round_trip ... ignored
+test schema::metrics::tests::test_metric_arrow_schema_field_count ... ignored
+test schema::metrics::tests::test_metrics_to_record_batch_empty ... ignored
+test schema::metrics::tests::test_round_trip ... ignored
+test schema::scores::tests::test_categorical_score_value_in_string_value ... ignored
+test schema::scores::tests::test_record_batch_to_scores_empty ... ignored
+test schema::scores::tests::test_round_trip_multiple_scores ... ignored
+test schema::scores::tests::test_round_trip_preserves_all_fields ... ignored
+test schema::scores::tests::test_round_trip_single_score ... ignored
+test schema::scores::tests::test_score_arrow_schema_field_count ... ignored
+test schema::scores::tests::test_scores_to_record_batch_empty ... ignored
+test schema::spans::tests::test_agentic_and_mcp_columns_round_trip ... ignored
+test schema::spans::tests::test_db_columns_round_trip ... ignored
+test schema::spans::tests::test_llm_cache_hit_tristate_round_trips ... ignored
+test schema::spans::tests::test_on_disk_45_col_legacy_parquet_reads_on_51_col_code ... ignored
+test schema::spans::tests::test_optional_string_col_errors_on_wrong_type ... ignored
+test schema::spans::tests::test_optional_string_col_returns_none_when_absent ... ignored
+test schema::spans::tests::test_optional_string_col_returns_some_when_present ... ignored
+test schema::spans::tests::test_phase4_columns_round_trip ... ignored
+test schema::spans::tests::test_record_batch_to_spans_tolerates_45_col_legacy_file ... ignored
+test schema::spans::tests::test_record_batch_to_spans_tolerates_56_col_legacy_file ... ignored
+test schema::spans::tests::test_record_batch_to_spans_tolerates_59_col_legacy_file ... ignored
+test schema::spans::tests::test_record_batch_to_spans_tolerates_missing_columns ... ignored
+test schema::spans::tests::test_round_trip ... ignored
+test schema::spans::tests::test_round_trip_100_spans ... ignored
+test schema::spans::tests::test_round_trip_nullable_completion_start_time ... ignored
+test schema::spans::tests::test_span_arrow_schema_field_count ... ignored
+test schema::spans::tests::test_spans_to_record_batch_empty ... ignored
+test telemetry_reader::tests::test_escape_sql_str ... ignored
+test telemetry_reader::tests::test_pagination_custom ... ignored
+test telemetry_reader::tests::test_pagination_defaults ... ignored
+test telemetry_reader::tests::test_trace_file_filter_converts_ns_to_us ... ignored
+test telemetry_writer::tests::test_buffered_insert_spans_goes_to_buffer_not_file ... ignored
+test telemetry_writer::tests::test_direct_insert_spans_mixed_tenants_registers_per_partition ... ignored
+test telemetry_writer::tests::test_insert_batch_homogeneous_single_partition ... ignored
+test telemetry_writer::tests::test_insert_batch_mixed_tenants_partitioned ... ignored
+test telemetry_writer::tests::test_insert_batch_warm_slot_accumulates ... ignored
+test telemetry_writer::tests::test_insert_metrics_always_succeeds ... ignored
+test telemetry_writer::tests::test_insert_scores_mixed_tenants_no_leak ... ignored
+test telemetry_writer::tests::test_insert_spans_empty_is_noop ... ignored
+test telemetry_writer::tests::test_insert_spans_homogeneous_single_partition ... ignored
+test telemetry_writer::tests::test_insert_spans_mixed_tenants_and_hours_partitioned ... ignored
+test telemetry_writer::tests::test_stream_name_defaults_when_service_empty ... ignored
+test telemetry_writer::tests::test_stream_name_derived_from_service_name ... ignored
+test telemetry_writer::tests::test_stream_name_helper_empty ... ignored
+test telemetry_writer::tests::test_stream_name_helper_non_empty ... ignored
+test util::tests::test_quote_identifier_accepts_dotted_name ... ignored
+test util::tests::test_quote_identifier_accepts_simple_name ... ignored
+test util::tests::test_quote_identifier_rejects_backslash ... ignored
+test util::tests::test_quote_identifier_rejects_empty ... ignored
+test util::tests::test_quote_identifier_rejects_empty_segments ... ignored
+test util::tests::test_quote_identifier_rejects_injection_sequences ... ignored
+test util::tests::test_quote_identifier_rejects_leading_digit ... ignored
+test util::tests::test_quote_identifier_rejects_quotes ... ignored
+test util::tests::test_quote_identifier_rejects_spaces ... ignored
+test util::tests::test_quote_identifier_rejects_unicode ... ignored
+test write_buffer::tests::test_different_keys_give_different_slots ... ignored
+test write_buffer::tests::test_drain_all_clears_buffer ... ignored
+test write_buffer::tests::test_drain_eligible_by_size ... ignored
+test write_buffer::tests::test_push_spans_accumulates_in_slot ... ignored
+test write_buffer::tests::test_push_spans_owned_moves_and_accumulates ... ignored
+test write_buffer::tests::test_record_count ... ignored
+test write_buffer::tests::test_record_count_drops_after_drain_all ... ignored
+test write_buffer::tests::test_size_threshold_triggers_notify ... ignored
+test writer::tests::test_parse_uuid_or_nil_invalid ... ignored
+test writer::tests::test_parse_uuid_or_nil_valid ... ignored
+test writer::tests::test_ts_ns_to_date_path ... ignored
+test writer::tests::test_ts_ns_to_date_path_zero ... ignored
+test writer::tests::test_write_spans_produces_parquet_not_par ... ignored
+test writer::tests::test_write_spans_round_trip_datafusion ... ignored
+test writer::tests::test_writer_config_default_bloom_columns ... ignored
+
+test result: ok. 0 passed; 0 failed; 103 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running benches/buffer_bench.rs (target/release/deps/buffer_bench-005d2a426f011c3c)
+Gnuplot not found, using plotters backend
+Benchmarking buffer_push/clone_empty_slot/1000
+Benchmarking buffer_push/clone_empty_slot/1000: Warming up for 3.0000 s
+Benchmarking buffer_push/clone_empty_slot/1000: Collecting 100 samples in estimated 8.1097 s (10k iterations)
+Benchmarking buffer_push/clone_empty_slot/1000: Analyzing
+buffer_push/clone_empty_slot/1000
+                        time:   [561.32 µs 592.25 µs 627.82 µs]
+                        thrpt:  [1.5928 Melem/s 1.6885 Melem/s 1.7815 Melem/s]
+Found 8 outliers among 100 measurements (8.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  6 (6.00%) high severe
+Benchmarking buffer_push/move_empty_slot/1000
+Benchmarking buffer_push/move_empty_slot/1000: Warming up for 3.0000 s
+Benchmarking buffer_push/move_empty_slot/1000: Collecting 100 samples in estimated 9.5550 s (10k iterations)
+Benchmarking buffer_push/move_empty_slot/1000: Analyzing
+buffer_push/move_empty_slot/1000
+                        time:   [473.38 ns 493.40 ns 517.00 ns]
+                        thrpt:  [1.9342 Gelem/s 2.0267 Gelem/s 2.1125 Gelem/s]
+Found 17 outliers among 100 measurements (17.00%)
+  4 (4.00%) high mild
+  13 (13.00%) high severe
+Benchmarking buffer_push/clone_warm_slot/1000
+Benchmarking buffer_push/clone_warm_slot/1000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.4s, enable flat sampling, or reduce sample count to 50.
+Benchmarking buffer_push/clone_warm_slot/1000: Collecting 100 samples in estimated 9.4086 s (5050 iterations)
+Benchmarking buffer_push/clone_warm_slot/1000: Analyzing
+buffer_push/clone_warm_slot/1000
+                        time:   [609.71 µs 627.99 µs 649.31 µs]
+                        thrpt:  [1.5401 Melem/s 1.5924 Melem/s 1.6401 Melem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking buffer_push/move_warm_slot/1000
+Benchmarking buffer_push/move_warm_slot/1000: Warming up for 3.0000 s
+Benchmarking buffer_push/move_warm_slot/1000: Collecting 100 samples in estimated 5.1080 s (2500 iterations)
+Benchmarking buffer_push/move_warm_slot/1000: Analyzing
+buffer_push/move_warm_slot/1000
+                        time:   [180.98 µs 183.46 µs 186.11 µs]
+                        thrpt:  [5.3733 Melem/s 5.4508 Melem/s 5.5253 Melem/s]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+Benchmarking buffer_push/clone_empty_slot/10000
+Benchmarking buffer_push/clone_empty_slot/10000: Warming up for 3.0000 s
+Benchmarking buffer_push/clone_empty_slot/10000: Collecting 100 samples in estimated 5.7363 s (600 iterations)
+Benchmarking buffer_push/clone_empty_slot/10000: Analyzing
+buffer_push/clone_empty_slot/10000
+                        time:   [6.1930 ms 6.4244 ms 6.7023 ms]
+                        thrpt:  [1.4920 Melem/s 1.5566 Melem/s 1.6147 Melem/s]
+Found 25 outliers among 100 measurements (25.00%)
+  6 (6.00%) low mild
+  5 (5.00%) high mild
+  14 (14.00%) high severe
+Benchmarking buffer_push/move_empty_slot/10000
+Benchmarking buffer_push/move_empty_slot/10000: Warming up for 3.0000 s
+Benchmarking buffer_push/move_empty_slot/10000: Collecting 100 samples in estimated 5.0996 s (500 iterations)
+Benchmarking buffer_push/move_empty_slot/10000: Analyzing
+buffer_push/move_empty_slot/10000
+                        time:   [1.4589 µs 1.5082 µs 1.5656 µs]
+                        thrpt:  [6.3873 Gelem/s 6.6306 Gelem/s 6.8545 Gelem/s]
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) high mild
+  4 (4.00%) high severe
+Benchmarking buffer_push/clone_warm_slot/10000
+Benchmarking buffer_push/clone_warm_slot/10000: Warming up for 3.0000 s
+Benchmarking buffer_push/clone_warm_slot/10000: Collecting 100 samples in estimated 6.1790 s (300 iterations)
+Benchmarking buffer_push/clone_warm_slot/10000: Analyzing
+buffer_push/clone_warm_slot/10000
+                        time:   [7.6764 ms 7.8519 ms 8.0583 ms]
+                        thrpt:  [1.2409 Melem/s 1.2736 Melem/s 1.3027 Melem/s]
+Found 11 outliers among 100 measurements (11.00%)
+  2 (2.00%) high mild
+  9 (9.00%) high severe
+Benchmarking buffer_push/move_warm_slot/10000
+Benchmarking buffer_push/move_warm_slot/10000: Warming up for 3.0000 s
+Benchmarking buffer_push/move_warm_slot/10000: Collecting 100 samples in estimated 7.0365 s (300 iterations)
+Benchmarking buffer_push/move_warm_slot/10000: Analyzing
+buffer_push/move_warm_slot/10000
+                        time:   [3.0504 ms 3.1021 ms 3.1610 ms]
+                        thrpt:  [3.1635 Melem/s 3.2236 Melem/s 3.2782 Melem/s]
+Found 14 outliers among 100 measurements (14.00%)
+  4 (4.00%) high mild
+  10 (10.00%) high severe
+
+     Running benches/query_bench.rs (target/release/deps/query_bench-39dab1dbed3dc1c0)
+Gnuplot not found, using plotters backend
+Benchmarking query/query_traces/10k
+Benchmarking query/query_traces/10k: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.1s, or reduce sample count to 80.
+Benchmarking query/query_traces/10k: Collecting 100 samples in estimated 6.1285 s (100 iterations)
+Benchmarking query/query_traces/10k: Analyzing
+query/query_traces/10k  time:   [59.572 ms 61.389 ms 63.045 ms]
+                        thrpt:  [158.62 Kelem/s 162.90 Kelem/s 167.86 Kelem/s]
+Found 8 outliers among 100 measurements (8.00%)
+  5 (5.00%) low severe
+  3 (3.00%) low mild
+Benchmarking query/query_traces/100k
+Benchmarking query/query_traces/100k: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 16.1s, or reduce sample count to 30.
+Benchmarking query/query_traces/100k: Collecting 100 samples in estimated 16.055 s (100 iterations)
+Benchmarking query/query_traces/100k: Analyzing
+query/query_traces/100k time:   [141.73 ms 149.33 ms 156.98 ms]
+                        thrpt:  [637.02 Kelem/s 669.64 Kelem/s 705.58 Kelem/s]
+
+     Running benches/write_bench.rs (target/release/deps/write_bench-88f131aef5a3448e)
+Gnuplot not found, using plotters backend
+Benchmarking write/spans_to_record_batch/1000
+Benchmarking write/spans_to_record_batch/1000: Warming up for 3.0000 s
+Benchmarking write/spans_to_record_batch/1000: Collecting 100 samples in estimated 5.7698 s (20k iterations)
+Benchmarking write/spans_to_record_batch/1000: Analyzing
+write/spans_to_record_batch/1000
+                        time:   [311.10 µs 324.21 µs 339.36 µs]
+                        thrpt:  [2.9467 Melem/s 3.0845 Melem/s 3.2144 Melem/s]
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+Benchmarking write/spans_to_record_batch/10000
+Benchmarking write/spans_to_record_batch/10000: Warming up for 3.0000 s
+Benchmarking write/spans_to_record_batch/10000: Collecting 100 samples in estimated 5.3600 s (700 iterations)
+Benchmarking write/spans_to_record_batch/10000: Analyzing
+write/spans_to_record_batch/10000
+                        time:   [7.6022 ms 7.6809 ms 7.7649 ms]
+                        thrpt:  [1.2878 Melem/s 1.3019 Melem/s 1.3154 Melem/s]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking write/spans_to_record_batch/100000
+Benchmarking write/spans_to_record_batch/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 12.2s, or reduce sample count to 40.
+Benchmarking write/spans_to_record_batch/100000: Collecting 100 samples in estimated 12.152 s (100 iterations)
+Benchmarking write/spans_to_record_batch/100000: Analyzing
+write/spans_to_record_batch/100000
+                        time:   [123.73 ms 127.45 ms 131.56 ms]
+                        thrpt:  [760.10 Kelem/s 784.63 Kelem/s 808.20 Kelem/s]
+Found 16 outliers among 100 measurements (16.00%)
+  13 (13.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking write/parquet_file/1000
+Benchmarking write/parquet_file/1000: Warming up for 3.0000 s
+Benchmarking write/parquet_file/1000: Collecting 100 samples in estimated 5.2232 s (1500 iterations)
+Benchmarking write/parquet_file/1000: Analyzing
+write/parquet_file/1000 time:   [2.5769 ms 2.7266 ms 2.8783 ms]
+                        thrpt:  [347.43 Kelem/s 366.75 Kelem/s 388.07 Kelem/s]
+Benchmarking write/parquet_file/10000
+Benchmarking write/parquet_file/10000: Warming up for 3.0000 s
+Benchmarking write/parquet_file/10000: Collecting 100 samples in estimated 6.0477 s (300 iterations)
+Benchmarking write/parquet_file/10000: Analyzing
+write/parquet_file/10000
+                        time:   [16.427 ms 16.980 ms 17.622 ms]
+                        thrpt:  [567.48 Kelem/s 588.93 Kelem/s 608.75 Kelem/s]
+Found 18 outliers among 100 measurements (18.00%)
+  2 (2.00%) low mild
+  7 (7.00%) high mild
+  9 (9.00%) high severe
+Benchmarking write/parquet_file/100000
+Benchmarking write/parquet_file/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 14.7s, or reduce sample count to 30.
+Benchmarking write/parquet_file/100000: Collecting 100 samples in estimated 14.741 s (100 iterations)
+Benchmarking write/parquet_file/100000: Analyzing
+write/parquet_file/100000
+                        time:   [139.54 ms 145.87 ms 152.90 ms]
+                        thrpt:  [654.03 Kelem/s 685.53 Kelem/s 716.66 Kelem/s]
+Found 16 outliers among 100 measurements (16.00%)
+  2 (2.00%) high mild
+  14 (14.00%) high severe
+
+     Running unittests src/lib.rs (target/release/deps/zradar_plugin_postgres-680b70367e7fa0f2)
+
+running 13 tests
+test repositories::file_list::tests::test_file_list_filter_no_overlap ... ignored
+test repositories::file_list::tests::test_file_list_filter_overlap_logic ... ignored
+test repositories::policy::tests::min_option_uses_most_restrictive_present_value ... ignored
+test repositories::policy::tests::parses_round_trip_names ... ignored
+test repositories::policy::tests::resolve_cached_policy_prefers_most_restrictive_specific_and_default_limits ... ignored
+test repositories::policy::tests::rows_to_cache_skips_invalid_rows_and_keeps_valid_rows ... ignored
+test repositories::usage::tests::aggregate_ingestion_daily_groups_by_tenant_project_signal_day ... ignored
+test repositories::usage::tests::aggregate_monthly_usage_groups_by_operation_and_month ... ignored
+test repositories::usage::tests::aggregate_query_daily_groups_by_tenant_project_signal_day ... ignored
+test repositories::usage::tests::rollup_value_builders_do_not_insert_separators_inside_timestamp_expression ... ignored
+test repositories::usage::tests::signal_kind_round_trips_supported_values ... ignored
+test repositories::usage::tests::threshold_dedupe_uses_period_or_hour_bucket ... ignored
+test repositories::usage::tests::usage_tracker_metrics_render_prometheus_names ... ignored
+
+test result: ok. 0 passed; 0 failed; 13 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_plugin_s3-8a06309b2699d5de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_policy-3e18b94cf73050a0)
+
+running 12 tests
+test enforcer::tests::between_limit_and_grace_allows_with_grace ... ignored
+test enforcer::tests::block_decision_is_written_to_decision_audit_sink ... ignored
+test enforcer::tests::empty_policy_allows_ingest ... ignored
+test enforcer::tests::hard_block_uses_configured_percentage ... ignored
+test enforcer::tests::huge_day_limits_do_not_overflow_query_range_math ... ignored
+test enforcer::tests::oversized_u64_limits_fail_closed_instead_of_bypassing ... ignored
+test enforcer::tests::recorded_query_usage_drives_scanned_byte_quota_block ... ignored
+test traits::tests::upsert_many_default_delegates_to_upsert_for_each_policy ... ignored
+test types::tests::decision_summary_maps_all_variants ... ignored
+test types::tests::resolved_policy_defaults_to_no_limits ... ignored
+test usage::tests::aggregates_all_signals_for_period_usage_and_stored_bytes ... ignored
+test usage::tests::records_current_ingest_rate_and_period_usage ... ignored
+
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_retention-9cbf70967c364c02)
+
+running 15 tests
+test cleanup::tests::test_cancel_stops_scheduled_loop ... ignored
+test cleanup::tests::test_cleanup_marks_expired_without_physical_delete ... ignored
+test cleanup::tests::test_run_now_no_files_returns_empty_stats ... ignored
+test config::tests::test_cutoff_us_zero_days_is_approximately_now ... ignored
+test config::tests::test_global_default_when_no_workspace_config ... ignored
+test config::tests::test_workspace_override_wins ... ignored
+test enforcer::tests::test_clamp_start_before_cutoff ... ignored
+test enforcer::tests::test_no_clamp_when_start_within_retention ... ignored
+test enforcer::tests::test_none_start_uses_cutoff ... ignored
+test enforcer::tests::test_reject_strategy_errors_on_old_start ... ignored
+test enforcer::tests::test_workspace_override_used_in_enforcement ... ignored
+test file_reclaimer::tests::reclaimer_physically_removes_soft_deleted_local_file ... ignored
+test file_reclaimer::tests::reclaimer_reclaims_compactor_orphan ... ignored
+test file_reclaimer::tests::reclaimer_skips_leased_file_and_retries_after_release ... ignored
+test file_reclaimer::tests::test_extract_s3_key ... ignored
+
+test result: ok. 0 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_runtime-44a6d5def6f0eea7)
+
+running 5 tests
+test config_key::tests::query_and_admin_share_same_key ... ignored
+test config_key::tests::test_header_context_applies_to_both ... ignored
+test health::tests::test_health_check ... ignored
+test health::tests::test_liveness ... ignored
+test health::tests::test_readiness_no_pool ... ignored
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/release/deps/zradar-58e2e7795a58c4ce)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_traits-d6c7ba8d6ed9ae8d)
+
+running 10 tests
+test content_capture::tests::test_noop_always_captures ... ignored
+test file_lease::tests::acquire_returns_one_lease_per_file_id ... ignored
+test file_lease::tests::active_lease_count_reflects_distinct_files ... ignored
+test file_lease::tests::concurrent_acquire_and_release_is_race_free ... ignored
+test file_lease::tests::dropping_partial_vec_releases_only_dropped_files ... ignored
+test file_lease::tests::is_leased_reports_active_leases ... ignored
+test file_lease::tests::multiple_concurrent_leases_on_same_file_all_release ... ignored
+test file_lease::tests::release_of_unknown_file_is_silent ... ignored
+test repositories::settings::tests::test_cache_hits_and_misses ... ignored
+test repositories::settings::tests::test_cache_update_on_upsert ... ignored
+
+test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/release/deps/zradar_wal-86feb1b1f284eb1c)
+
+running 44 tests
+test backpressure::tests::test_disk_full_forces_reject ... ignored
+test backpressure::tests::test_slowdown_delay_linear ... ignored
+test backpressure::tests::test_state_transitions_at_thresholds ... ignored
+test batch::tests::empty_payload_is_legacy_shape ... ignored
+test batch::tests::legacy_json_payload_returns_none ... ignored
+test batch::tests::missing_length_prefix_errors ... ignored
+test batch::tests::round_trip_empty_batch_is_valid ... ignored
+test batch::tests::round_trip_multiple_rows_preserves_order_and_bytes ... ignored
+test batch::tests::short_magic_prefixed_payload_errors ... ignored
+test batch::tests::single_row_batch_matches_raw_row_bytes ... ignored
+test batch::tests::truncated_row_payload_errors ... ignored
+test batch::tests::unknown_encoding_errors ... ignored
+test checkpoint::tests::test_checkpoint_atomic_write_no_corruption ... ignored
+test checkpoint::tests::test_checkpoint_missing_file_returns_none ... ignored
+test checkpoint::tests::test_checkpoint_roundtrip ... ignored
+test flusher::tests::test_flusher_drains_records ... ignored
+test flusher::tests::test_flusher_idempotent_on_re_run ... ignored
+test group_commit::tests::test_fsync_queue_drain_notifies_all ... ignored
+test group_commit::tests::test_group_commit_coalesces_fsyncs ... ignored
+test janitor::tests::test_janitor_deletes_flushed_sealed_segments ... ignored
+test janitor::tests::test_janitor_never_deletes_active ... ignored
+test metrics::tests::test_metrics_default_zero ... ignored
+test metrics::tests::test_metrics_render_prometheus ... ignored
+test record::proptests::prop_random_sizes_and_corruptions_never_panic ... ignored
+test record::tests::test_crc_mismatch_returns_torn_write ... ignored
+test record::tests::test_round_trip_all_signal_types ... ignored
+test record::tests::test_signal_type_from_u8_round_trip ... ignored
+test record::tests::test_truncated_body ... ignored
+test record::tests::test_truncated_length_prefix ... ignored
+test replay::tests::test_replay_corrupt_header_returns_error ... ignored
+test replay::tests::test_replay_empty_wal ... ignored
+test replay::tests::test_replay_handles_torn_write ... ignored
+test replay::tests::test_replay_recovers_unflushed_records ... ignored
+test replay::tests::test_replay_skips_already_flushed ... ignored
+test segment::tests::test_list_segments ... ignored
+test segment::tests::test_segment_header_validation ... ignored
+test segment::tests::test_segment_symlink ... ignored
+test segment::tests::test_segment_write_and_read ... ignored
+test segment::tests::test_torn_write_truncation ... ignored
+test tests::test_append_and_sync ... ignored
+test tests::test_concurrent_appends_preserve_order ... ignored
+test tests::test_group_commit_coalesces ... ignored
+test tests::test_open_fresh_wal ... ignored
+test tests::test_segment_rotation ... ignored
+
+test result: ok. 0 passed; 0 failed; 44 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running benches/load.rs (target/release/deps/load-8ccfbbe48d10c3a8)
+Gnuplot not found, using plotters backend
+Benchmarking wal_append_sequential_1kb
+Benchmarking wal_append_sequential_1kb: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.6s, enable flat sampling, or reduce sample count to 50.
+Benchmarking wal_append_sequential_1kb: Collecting 100 samples in estimated 8.5674 s (5050 iterations)
+Benchmarking wal_append_sequential_1kb: Analyzing
+wal_append_sequential_1kb
+                        time:   [1.4580 ms 1.5954 ms 1.7225 ms]
+Found 19 outliers among 100 measurements (19.00%)
+  4 (4.00%) high mild
+  15 (15.00%) high severe
+
+Benchmarking wal_append_concurrent_100_writers
+Benchmarking wal_append_concurrent_100_writers: Warming up for 3.0000 s
+Benchmarking wal_append_concurrent_100_writers: Collecting 100 samples in estimated 6.4505 s (300 iterations)
+Benchmarking wal_append_concurrent_100_writers: Analyzing
+wal_append_concurrent_100_writers
+                        time:   [21.274 ms 21.368 ms 21.463 ms]
+
+Benchmarking wal_append_with_rotation
+Benchmarking wal_append_with_rotation: Warming up for 3.0000 s
+Benchmarking wal_append_with_rotation: Collecting 100 samples in estimated 5.7748 s (15k iterations)
+Benchmarking wal_append_with_rotation: Analyzing
+wal_append_with_rotation
+                        time:   [309.81 µs 338.12 µs 367.06 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+
+Benchmarking wal_append_durable_roundtrip
+Benchmarking wal_append_durable_roundtrip: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 21.8s, or reduce sample count to 20.
+Benchmarking wal_append_durable_roundtrip: Collecting 100 samples in estimated 21.775 s (100 iterations)
+Benchmarking wal_append_durable_roundtrip: Analyzing
+wal_append_durable_roundtrip
+                        time:   [215.97 ms 216.57 ms 217.17 ms]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+
