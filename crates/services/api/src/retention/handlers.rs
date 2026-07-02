@@ -39,7 +39,7 @@ pub struct RunCleanupParams {
 }
 
 /// Response body for a cleanup run.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RunCleanupResponse {
     pub stats: RetentionRunStats,
 }

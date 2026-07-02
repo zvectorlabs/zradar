@@ -51,14 +51,14 @@ tonic-prost-build = "0.14"
 tonic-prost = "0.14"
 tonic-web = "0.14"
 tonic-reflection = "0.14"
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.52", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.1"
 
 # Logging
 tracing = "0.1"
@@ -66,11 +66,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.23", features = ["v4", "v7", "serde"] }
 hex = "0.4"
 async-trait = "0.1"
 
@@ -79,12 +79,12 @@ opendal = { version = "0.49", features = ["services-s3"] }
 
 # Web framework (upgraded to 0.7 for utoipa support)
 axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["trace", "cors", "compression-gzip"] }
 
 # Auto-documentation
-utoipa = { version = "4.2", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+utoipa = { version = "5.5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 
 # Database (rustls for pure Rust TLS, no libssl-dev needed)
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "migrate"] }
@@ -96,9 +96,9 @@ parquet = { version = "53", features = ["arrow", "async"] }
 datafusion = { version = "44", features = ["parquet"] }
 
 # Concurrent data structures
-dashmap = "5"
+dashmap = "6"
 parking_lot = "0.12"
-lru = "0.12"
+lru = "0.18"
 
 # Byte buffers
 bytes = "1"
@@ -107,7 +107,7 @@ bytes = "1"
 crc32fast = "1"
 
 # Benchmarking
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 # Internal workspace crates (Core)
 zradar-models = { path = "crates/core/zradar-models" }

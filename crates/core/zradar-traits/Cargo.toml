@@ -14,7 +14,7 @@ sqlx = []
 [dependencies]
 async-trait = { workspace = true }
 # Concurrency: backs the in-process FileLeaseRegistry refcount map.
-dashmap = "5"
+dashmap = "6"
 uuid = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

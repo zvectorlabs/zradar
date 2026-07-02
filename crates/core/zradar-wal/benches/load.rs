@@ -4,7 +4,8 @@
 /// Scenario B: Concurrent appends (N writers, measure throughput + fsync coalescing)
 /// Scenario C: Append under segment rotation (small segment_max_bytes)
 /// Scenario D: Append + durable() round-trip latency
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
