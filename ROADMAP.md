@@ -30,10 +30,10 @@ Items marked 🔲 are on the horizon. Items marked 🔄 are in progress. Items m
 
 Model Context Protocol is becoming the standard for agent–tool communication. Every MCP tool call should be a first-class queryable span — not a generic HTTP trace.
 
-- 🔲 `McpConvention` — maps `mcp.tool.name`, `mcp.server.name`, `mcp.tool.input`, `mcp.tool.output` to queryable fields
-- 🔲 `mcp_tool_name`, `mcp_server_name` added to the span model + migration
-- 🔲 MCP span type detection in `SpanTypeMapper`
-- 🔲 End-to-end example: Claude + MCP server instrumented to zradar
+- ✅ `McpConvention` — maps `mcp.tool.name`, `mcp.server.name`, `mcp.tool.input`, `mcp.tool.output` to queryable fields
+- ✅ `mcp_tool_name`, `mcp_server_name` added to the span model + migration
+- ✅ MCP span type detection in `SpanTypeMapper`
+- ✅ End-to-end example: Claude + MCP server instrumented to zradar
 
 **Why it matters:** Claude users running MCP servers have zero visibility into tool call behavior today. This makes zradar the first tool to give it to them.
 
@@ -43,10 +43,10 @@ Model Context Protocol is becoming the standard for agent–tool communication. 
 
 The OTel GenAI SIG is standardizing `gen_ai.agent.*`, `gen_ai.team.*`, and `gen_ai.memory.*` attributes for multi-agent systems.
 
-- 🔲 `gen_ai.agent.id`, `gen_ai.agent.goal`, `gen_ai.agent.status` in `AgentConvention`
-- 🔲 `GenAiTeamConvention` — maps `gen_ai.team.*` for multi-agent pipelines
-- 🔲 `GenAiMemoryConvention` — maps `gen_ai.memory.type`, `gen_ai.memory.key`
-- 🔲 Model fields + migration for new attributes
+- ✅ `gen_ai.agent.id`, `gen_ai.agent.goal`/`description`, `gen_ai.agent.status` in `AgentConvention`
+- 🔲 `GenAiTeamConvention` — (Deferred: team spec deferred by OTel GenAI SIG)
+- ✅ `GenAiMemoryConvention` — maps `gen_ai.memory.type`, `gen_ai.memory.key`
+- ✅ Model fields + migration for new attributes
 
 **Why it matters:** Being the reference implementation of a spec-in-progress means zradar gets cited. Every OTel GenAI SIG participant is a potential contributor.
 
