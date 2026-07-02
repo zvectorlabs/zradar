@@ -389,6 +389,29 @@ pub struct SpanDetail {
     pub db_query_summary: Option<String>,
     pub db_collection_name: Option<String>,
     pub db_response_status_code: Option<String>,
+    // Agentic semantic conventions (OTel GenAI SIG)
+    pub agent_id: Option<String>,
+    pub agent_description: Option<String>,
+    pub agent_task_id: Option<String>,
+    pub agent_task_parent_id: Option<String>,
+    pub agent_task_name: Option<String>,
+    pub agent_task_kind: Option<String>,
+    pub agent_task_state: Option<String>,
+    pub agent_task_status: Option<String>,
+    pub memory_type: Option<String>,
+    pub memory_key: Option<String>,
+    // MCP fields
+    pub mcp_tool_name: Option<String>,
+    pub mcp_server_name: Option<String>,
+    pub mcp_tool_input: Option<String>,
+    pub mcp_tool_output: Option<String>,
+    // Versioning
+    pub agent_version: Option<String>,
+    pub sdk_version: Option<String>,
+    // OTel GenAI evaluation conventions
+    pub evaluation_name: Option<String>,
+    pub evaluation_explanation: Option<String>,
+    pub evaluation_passed: Option<i16>,
     // Phase 4 R4.4 — gen_ai.request.* sampling params parsed back from the
     // model_parameters JSON column. None when no allowlisted params present.
     pub model_parameters: Option<serde_json::Value>,

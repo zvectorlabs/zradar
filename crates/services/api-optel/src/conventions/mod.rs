@@ -18,10 +18,14 @@ pub mod agent;
 pub mod aiq;
 pub mod attr_view;
 pub mod db;
+pub mod gen_ai_evaluation;
 pub mod gen_ai_legacy;
+pub mod gen_ai_memory;
+pub mod gen_ai_task;
 pub mod gen_ai_v1_29;
 pub mod guardrails;
 pub mod llm;
+pub mod mcp;
 pub mod nat;
 pub mod openinference;
 pub mod prompt;
@@ -74,6 +78,9 @@ pub fn default_conventions() -> Vec<Box<dyn AttributeConvention>> {
         Box::new(openinference::OpenInferenceConvention),
         Box::new(guardrails::GuardrailsConvention),
         Box::new(agent::AgentConvention),
+        Box::new(gen_ai_task::GenAiTaskConvention),
+        Box::new(gen_ai_memory::GenAiMemoryConvention),
+        Box::new(gen_ai_evaluation::GenAiEvaluationConvention),
         Box::new(vertex::VertexConvention),
         Box::new(llm::LlmConvention),
         // GenAI 1.29 before legacy — newer key names win when both present.
@@ -83,6 +90,7 @@ pub fn default_conventions() -> Vec<Box<dyn AttributeConvention>> {
         Box::new(nat::NatConvention),
         Box::new(aiq::AiqConvention),
         Box::new(db::DbConvention),
+        Box::new(mcp::McpConvention),
         Box::new(tool::ToolConvention),
         Box::new(prompt::PromptConvention),
         Box::new(resource::ResourceConvention),

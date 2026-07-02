@@ -529,6 +529,29 @@ message SpanDetail {
   optional string db_query_summary = 43;
   optional string db_collection_name = 44;
   optional string db_response_status_code = 45;
+  // Agentic semantic conventions (OTel GenAI SIG)
+  optional string agent_id = 46;
+  optional string agent_description = 47;
+  optional string agent_task_id = 48;
+  optional string agent_task_parent_id = 49;
+  optional string agent_task_name = 50;
+  optional string agent_task_kind = 51;
+  optional string agent_task_state = 52;
+  optional string agent_task_status = 53;
+  optional string memory_type = 54;
+  optional string memory_key = 55;
+  // MCP fields
+  optional string mcp_tool_name = 56;
+  optional string mcp_server_name = 57;
+  optional string mcp_tool_input = 58;
+  optional string mcp_tool_output = 59;
+  // Versioning
+  optional string agent_version = 60;
+  optional string sdk_version = 61;
+  // OTel GenAI evaluation conventions
+  optional string evaluation_name = 62;
+  optional string evaluation_explanation = 63;
+  optional int32 evaluation_passed = 64;
 }
 
 // Log record detail.

@@ -143,6 +143,11 @@ impl SpanTypeMapper {
             return "GENERATION".to_string();
         }
 
+        // Priority 5.5: Evaluation detection
+        if Self::has_evaluation_info(attributes) {
+            return "EVALUATOR".to_string();
+        }
+
         // Priority 6: Tool detection
         if Self::has_tool_info(attributes) {
             return "TOOL".to_string();
@@ -170,9 +175,16 @@ impl SpanTypeMapper {
             || attributes.has_key("ai.model.id")
     }
 
+    /// Check if attributes contain evaluation information
+    fn has_evaluation_info<A: AttrSource>(attributes: &A) -> bool {
+        attributes.has_key("gen_ai.evaluation.name")
+    }
+
     /// Check if attributes contain tool information
     fn has_tool_info<A: AttrSource>(attributes: &A) -> bool {
-        attributes.has_key("tool.name") || attributes.has_key("gen_ai.tool.name")
+        attributes.has_key("tool.name")
+            || attributes.has_key("gen_ai.tool.name")
+            || attributes.has_key("mcp.tool.name")
     }
 
     /// Check if attributes contain database information
@@ -357,6 +369,21 @@ mod tests {
     fn test_priority_6_tool_detection_gen_ai() {
         let attrs = make_attrs(vec![("gen_ai.tool.name", json!("calculator"))]);
         assert_eq!(SpanTypeMapper::detect_type(&attrs, 1000, "", ""), "TOOL");
+    }
+
+    #[test]
+    fn test_priority_6_tool_detection_mcp() {
+        let attrs = make_attrs(vec![("mcp.tool.name", json!("fetch_webpage"))]);
+        assert_eq!(SpanTypeMapper::detect_type(&attrs, 1000, "", ""), "TOOL");
+    }
+
+    #[test]
+    fn test_priority_5_5_evaluation_detection() {
+        let attrs = make_attrs(vec![("gen_ai.evaluation.name", json!("safety_check"))]);
+        assert_eq!(
+            SpanTypeMapper::detect_type(&attrs, 1000, "", ""),
+            "EVALUATOR"
+        );
     }
 
     #[test]
