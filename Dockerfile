@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     g++ \
     protobuf-compiler \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
