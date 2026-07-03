@@ -32,7 +32,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 rust-version = "1.93.0"
 license = "Apache-2.0"
@@ -91,9 +91,9 @@ sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "uuid"
 
 # Arrow / Parquet / DataFusion
 # DataFusion 44 uses arrow/parquet 53 internally; pin to the same major to avoid duplicate crates.
-arrow = "53"
-parquet = { version = "53", features = ["arrow", "async"] }
-datafusion = { version = "44", features = ["parquet"] }
+arrow = "58"
+parquet = { version = "58", features = ["arrow", "async"] }
+datafusion = { version = "54", features = ["parquet"] }
 
 # Concurrent data structures
 dashmap = "6"
