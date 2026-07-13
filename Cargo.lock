@@ -96,7 +96,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "api"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "api-optel"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "allocation-counter",
  "anyhow",
@@ -680,9 +680,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bzip2"
@@ -1984,7 +1984,7 @@ dependencies = [
  "deunicode",
  "dummy",
  "either",
- "rand 0.10.1",
+ "rand 0.10.2",
  "uuid",
 ]
 
@@ -2880,9 +2880,9 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lru"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -3702,9 +3702,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2e8e8bcc7961af1fdac401278c6a831614941f6164ee3bf4ce61b7edb162207"
+checksum = "c7f5fa3a058cd35567ef9bfa5e75732bee0f9e4c55fa90477bef2dfcdbc4be80"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -4895,7 +4895,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a129d95275ebf4c493ec53bf0f8cd95f5ac161bc4f381700809a54f595d4470"
 dependencies = [
  "pin-project-lite",
- "rand 0.10.1",
+ "rand 0.10.2",
  "tokio",
 ]
 
@@ -5364,9 +5364,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.23.4"
+version = "1.23.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
+checksum = "ea5fab0d6c3c01ae70085a09cb03d4c7a1d6314e2b3e075392783396d724ca0a"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",
@@ -6059,7 +6059,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-auth-config"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6069,7 +6069,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-functional-tests"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "api",
@@ -6083,7 +6083,7 @@ dependencies = [
  "pretty_assertions",
  "prost",
  "prost-types",
- "rand 0.10.1",
+ "rand 0.10.2",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-metrics"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "dashmap",
  "uuid",
@@ -6108,7 +6108,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-models"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6122,7 +6122,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-parquet"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "arrow",
@@ -6147,7 +6147,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-postgres"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-s3"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6183,7 +6183,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-policy"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6198,7 +6198,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-retention"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6217,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-runtime"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "api",
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-server"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "tokio",
@@ -6267,7 +6267,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-traits"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6285,7 +6285,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-wal"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
