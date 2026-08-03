@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -39,7 +39,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo index
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -56,10 +56,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mold protobuf-compiler build-essential pkg-config
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Install just + nextest
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: just,cargo-nextest
 
@@ -73,7 +73,7 @@ jobs:
         run: cargo test --workspace --exclude zradar-functional-tests
 
       - name: Cache test fixtures
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           # Cache only generated binpb/json outputs, NOT build.rs source — restoring
           # source files via restore-keys fallback would silently overwrite new source
