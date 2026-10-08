@@ -96,7 +96,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "api"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "api-optel"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "allocation-counter",
  "anyhow",
@@ -464,9 +464,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.17.1"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4342d8937fc7e5dd9b1c60292261c0670c882a2cd1719cfc11b1af41731e32ad"
+checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -474,9 +474,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.42.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d9ceb1da931507a12f4fccea479dccd00da1943e1b4ae72d8e502d707361444"
+checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
 dependencies = [
  "cc",
  "cmake",
@@ -725,9 +725,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha20"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -1044,9 +1044,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1949,7 +1949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2233,9 +2233,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "h2"
-version = "0.4.15"
+version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+checksum = "7d29020232d6aa3fb1daca64c1127cf662cf97f254ae16c18c05b8ab635fc118"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2880,9 +2880,9 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lru"
-version = "0.18.0"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -2992,7 +2992,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4066,14 +4066,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.41"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -4124,7 +4124,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4135,9 +4135,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -4433,7 +4433,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4691,7 +4691,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4773,7 +4773,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5591,7 +5591,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6059,7 +6059,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-auth-config"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6069,7 +6069,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-functional-tests"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "api",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-metrics"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "dashmap",
  "uuid",
@@ -6108,7 +6108,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-models"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6122,7 +6122,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-parquet"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "arrow",
@@ -6147,7 +6147,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-postgres"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-s3"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6183,7 +6183,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-policy"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6198,7 +6198,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-retention"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6217,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-runtime"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "api",
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-server"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "tokio",
@@ -6267,7 +6267,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-traits"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6285,7 +6285,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-wal"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-trait",
