@@ -103,6 +103,19 @@ Production-grade deployment on Kubernetes with minimal operator burden.
 
 ---
 
+### Long-Running Agent Spans
+
+Agent runs that last hours are one root span held open with many short children underneath. OTLP only exports a span when it ends, so today that root is invisible until the run finishes, the trace looks like its children alone while it runs, the root lands in a stale time partition when it does arrive, and a run that never ends is never closed.
+
+- 🔲 Continuous span streaming: accept and durably record a span's state before it ends (started / progress / ended), without weakening the WAL-first ack contract
+- 🔲 Open vs. closed visible in the Query API: running traces counted, root identified while open, time-range queries match spans *active* in a window rather than only those started in it
+- 🔲 Reconcile on completion: the final closed span converges to one correct row (no duplicates, correct duration and partition); spans that never close are marked abandoned by an activity-based rule, not a fixed age
+- 🔲 Hand-crafted open-span fixture before any implementation
+
+**Status:** Problem statement captured. Solution design is next; it will go through the RFC process. Subsumes the earlier "Streaming span preview" item.
+
+---
+
 ### Rust Auto-Instrumentation SDK
 
 A `zradar-instrument` crate that zero-config instruments `async-openai` and Anthropic Rust client calls.
@@ -125,7 +138,7 @@ These are directional — no committed timeline yet.
 | Alerting | Cost threshold and error rate alerts via webhook |
 | Multi-cluster federation | Aggregate traces across multiple zradar deployments |
 | WASM plugin host | Safe, sandboxed extension points without Rust compilation |
-| Streaming span preview | Real-time span view during agent execution |
+| Streaming span preview | Folded into *Long-Running Agent Spans* (Medium Term) |
 
 ---
 
