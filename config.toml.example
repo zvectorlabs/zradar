@@ -59,6 +59,18 @@ name       = "default"
 # project_id = "another-project"
 # name       = "another"
 
+# OTLP ingest limits (load shedding). Defaults shown; uncomment to change.
+# Excess concurrent exports are rejected with HTTP 503 / gRPC UNAVAILABLE.
+# [otlp_limits]
+# max_concurrent_requests            = 256      # in-flight exports per listener, across all connections (0 = unlimited)
+# request_timeout_secs               = 30       # per-export deadline, including body upload (0 = none)
+# grpc_max_decoding_message_bytes    = 4194304  # 4 MiB decoded gRPC message cap
+# grpc_max_concurrent_streams        = 100      # HTTP/2 streams per gRPC connection (0 = unlimited)
+# grpc_http2_keepalive_interval_secs = 60       # 0 = no keepalive pings
+# grpc_http2_keepalive_timeout_secs  = 20
+# grpc_tcp_keepalive_secs            = 60       # 0 = disabled
+# http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
+
 # Ingestion / storage configuration
 [ingestor]
 # Block storage for older Parquet files: "local" (dev) or "s3" (production).

@@ -23,9 +23,11 @@ use crate::{CircuitBreaker, ProjectRateLimiter};
 use super::OtlpHttpState;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
-const MAX_BODY_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
+/// Default request body cap for OTLP/HTTP exports.
+pub const DEFAULT_MAX_BODY_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
 
-/// Build the OTLP/HTTP axum router. Mount at the server root on port 4318.
+/// Build the OTLP/HTTP axum router with the default 8 MiB body limit.
+/// Mount at the server root on port 4318.
 #[allow(clippy::too_many_arguments)]
 pub fn otlp_http_router(
     writer: Arc<dyn zradar_traits::TelemetryWriter>,
@@ -36,6 +38,33 @@ pub fn otlp_http_router(
     policy_enforcer: Arc<dyn zradar_policy::PolicyEnforcer>,
     circuit_breaker: Arc<CircuitBreaker>,
     cors_config: zradar_models::CorsConfig,
+) -> Router {
+    otlp_http_router_with_body_limit(
+        writer,
+        auth,
+        allow_test_header_context,
+        settings_repo,
+        rate_limiter,
+        policy_enforcer,
+        circuit_breaker,
+        cors_config,
+        DEFAULT_MAX_BODY_BYTES,
+    )
+}
+
+/// Build the OTLP/HTTP axum router with an explicit request body cap.
+/// Bodies larger than `max_body_bytes` are rejected with `413 Payload Too Large`.
+#[allow(clippy::too_many_arguments)]
+pub fn otlp_http_router_with_body_limit(
+    writer: Arc<dyn zradar_traits::TelemetryWriter>,
+    auth: Option<Arc<dyn Authenticator>>,
+    allow_test_header_context: bool,
+    settings_repo: Arc<dyn SettingsRepository>,
+    rate_limiter: Arc<ProjectRateLimiter>,
+    policy_enforcer: Arc<dyn zradar_policy::PolicyEnforcer>,
+    circuit_breaker: Arc<CircuitBreaker>,
+    cors_config: zradar_models::CorsConfig,
+    max_body_bytes: usize,
 ) -> Router {
     let state = OtlpHttpState {
         writer,
@@ -66,7 +95,7 @@ pub fn otlp_http_router(
         .route("/v1/traces", post(export_traces))
         .route("/v1/metrics", post(export_metrics))
         .route("/v1/logs", post(export_logs))
-        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(cors_layer)
         .with_state(state)
 }
@@ -599,5 +628,108 @@ mod tests {
                 .get("access-control-allow-origin")
                 .is_none()
         );
+    }
+
+    mod body_limit {
+        use super::*;
+        use axum::http::Request;
+        use std::path::PathBuf;
+        use tower::ServiceExt;
+
+        struct NoopWriter;
+        #[tonic::async_trait]
+        impl zradar_traits::TelemetryWriter for NoopWriter {
+            async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_metrics(
+                &self,
+                _metrics: &[zradar_models::Metric],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_logs(&self, _logs: &[zradar_models::LogRecord]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_scores(
+                &self,
+                _scores: &[zradar_models::EvaluationScore],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct EmptySettings;
+        #[tonic::async_trait]
+        impl zradar_traits::SettingsRepository for EmptySettings {
+            async fn get_settings(
+                &self,
+                _workspace_id: zradar_models::WorkspaceId,
+            ) -> anyhow::Result<Option<zradar_models::WorkspaceSettings>> {
+                Ok(None)
+            }
+            async fn upsert_settings(
+                &self,
+                _settings: zradar_models::NewWorkspaceSettings,
+            ) -> anyhow::Result<zradar_models::WorkspaceSettings> {
+                anyhow::bail!("not supported in tests")
+            }
+            async fn list_all_settings(
+                &self,
+            ) -> anyhow::Result<Vec<zradar_models::WorkspaceSettings>> {
+                Ok(vec![])
+            }
+        }
+
+        struct AllowAll;
+        #[tonic::async_trait]
+        impl zradar_policy::PolicyEnforcer for AllowAll {
+            async fn check_ingest(
+                &self,
+                _ctx: zradar_policy::IngestCtx,
+            ) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+            async fn check_query(&self, _ctx: zradar_policy::QueryCtx) -> zradar_policy::Decision {
+                zradar_policy::Decision::Allow
+            }
+        }
+
+        fn router(max_body_bytes: usize) -> Router {
+            otlp_http_router_with_body_limit(
+                Arc::new(NoopWriter),
+                None,
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+                zradar_models::CorsConfig::default(),
+                max_body_bytes,
+            )
+        }
+
+        fn post(body: Vec<u8>) -> Request<axum::body::Body> {
+            Request::builder()
+                .method("POST")
+                .uri("/v1/traces")
+                .header("content-type", PROTOBUF_CONTENT_TYPE)
+                .body(axum::body::Body::from(body))
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn rejects_body_over_configured_limit() {
+            let response = router(16).oneshot(post(vec![0u8; 17])).await.unwrap();
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        }
+
+        #[tokio::test]
+        async fn accepts_body_within_configured_limit() {
+            // An empty export request is valid protobuf and fits the limit.
+            let response = router(16).oneshot(post(Vec::new())).await.unwrap();
+            assert_ne!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            assert!(response.status().is_success(), "{}", response.status());
+        }
     }
 }

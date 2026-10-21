@@ -37,8 +37,9 @@ use api::{
     telemetry::QueryService,
 };
 use api_optel::{
-    CircuitBreaker, LogsServiceServer, MetricsServiceServer, OtlpLogsService, OtlpMetricsService,
-    OtlpTraceService, ProjectRateLimiter, TraceServiceServer, otlp_http_router,
+    AdmissionLayer, CircuitBreaker, IngestProtocol, LogsServiceServer, MetricsServiceServer,
+    OtlpLogsService, OtlpMetricsService, OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    otlp_http_router_with_body_limit,
 };
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
@@ -1089,24 +1090,55 @@ impl ZradarRuntimeBuilder {
         // Run servers
         // =====================================================================
 
+        let otlp_limits = config.otlp_limits.clone();
+        let otlp_request_timeout = secs_or_none(otlp_limits.request_timeout_secs);
+        let grpc_max_message = otlp_limits.grpc_max_decoding_message_bytes;
+        info!(
+            max_concurrent_requests = otlp_limits.max_concurrent_requests,
+            request_timeout_secs = otlp_limits.request_timeout_secs,
+            grpc_max_decoding_message_bytes = grpc_max_message,
+            http_max_body_bytes = otlp_limits.http_max_body_bytes,
+            "OTLP ingest limits"
+        );
+
         let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
+        let otlp_grpc_admission = AdmissionLayer::new(
+            otlp_limits.max_concurrent_requests,
+            otlp_request_timeout,
+            IngestProtocol::Grpc,
+        );
         let otlp_server = async move {
             info!("OTLP gRPC server listening on {}", otlp_addr);
             Server::builder()
+                .max_concurrent_streams(
+                    (otlp_limits.grpc_max_concurrent_streams > 0)
+                        .then_some(otlp_limits.grpc_max_concurrent_streams),
+                )
+                .http2_keepalive_interval(secs_or_none(
+                    otlp_limits.grpc_http2_keepalive_interval_secs,
+                ))
+                .http2_keepalive_timeout(secs_or_none(
+                    otlp_limits.grpc_http2_keepalive_timeout_secs,
+                ))
+                .tcp_keepalive(secs_or_none(otlp_limits.grpc_tcp_keepalive_secs))
+                .layer(otlp_grpc_admission)
                 .add_service(
                     TraceServiceServer::new(trace_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .add_service(
                     LogsServiceServer::new(logs_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .serve(otlp_addr)
                 .await
@@ -1123,7 +1155,7 @@ impl ZradarRuntimeBuilder {
         };
 
         let otlp_http_server = if otlp_http_port > 0 {
-            let otlp_http_app = otlp_http_router(
+            let otlp_http_app = otlp_http_router_with_body_limit(
                 otlp_writer.clone(),
                 otlp_auth_ext.clone(),
                 allow_test_header_context,
@@ -1132,7 +1164,13 @@ impl ZradarRuntimeBuilder {
                 policy_enforcer.clone(),
                 circuit_breaker.clone(),
                 config.cors.clone(),
-            );
+                config.otlp_limits.http_max_body_bytes,
+            )
+            .layer(AdmissionLayer::new(
+                config.otlp_limits.max_concurrent_requests,
+                otlp_request_timeout,
+                IngestProtocol::Http,
+            ));
             let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
             Some(async move {
                 info!("OTLP/HTTP receiver listening on http://{}", otlp_http_addr);
@@ -1208,4 +1246,9 @@ impl ZradarRuntimeBuilder {
 
         Ok(())
     }
+}
+
+/// `Some(Duration)` for a positive number of seconds, `None` for `0` (disabled).
+fn secs_or_none(secs: u64) -> Option<Duration> {
+    (secs > 0).then(|| Duration::from_secs(secs))
 }

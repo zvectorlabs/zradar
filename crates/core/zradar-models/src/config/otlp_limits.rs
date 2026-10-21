@@ -1,0 +1,121 @@
+//! Admission control and protocol limits for the OTLP ingest listeners.
+//!
+//! These limits keep the public ingest endpoints (gRPC :4317, HTTP :4318)
+//! responsive under request floods: excess requests are rejected immediately
+//! with a retryable status (gRPC `UNAVAILABLE`, HTTP `503`) instead of queueing
+//! until clients time out.
+//!
+//! ```toml
+//! [otlp_limits]
+//! max_concurrent_requests = 256
+//! request_timeout_secs    = 30
+//! ```
+
+use serde::Deserialize;
+
+/// OTLP ingest limits. Every field has a serde default, and `Default` matches
+/// those defaults exactly.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OtlpLimitsConfig {
+    /// Maximum in-flight export requests per listener, shared across all
+    /// connections (gRPC and HTTP each get their own budget). Requests beyond
+    /// the limit are rejected immediately. `0` disables the limit.
+    /// Default: 256
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
+
+    /// Maximum time a single export request may take, including reading the
+    /// request body. `0` disables the timeout. Default: 30
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    /// Maximum size of a decoded (decompressed) OTLP gRPC message in bytes.
+    /// Default: 4 MiB, matching the common gRPC and OpenTelemetry Collector
+    /// receiver default.
+    #[serde(default = "default_grpc_max_decoding_message_bytes")]
+    pub grpc_max_decoding_message_bytes: usize,
+
+    /// Maximum concurrent HTTP/2 streams per gRPC connection. Default: 100
+    #[serde(default = "default_grpc_max_concurrent_streams")]
+    pub grpc_max_concurrent_streams: u32,
+
+    /// Interval between HTTP/2 keepalive pings on gRPC connections, in
+    /// seconds. `0` disables keepalive pings. Default: 60
+    #[serde(default = "default_grpc_http2_keepalive_interval_secs")]
+    pub grpc_http2_keepalive_interval_secs: u64,
+
+    /// How long to wait for a keepalive ping acknowledgement before closing
+    /// the connection, in seconds. Default: 20
+    #[serde(default = "default_grpc_http2_keepalive_timeout_secs")]
+    pub grpc_http2_keepalive_timeout_secs: u64,
+
+    /// TCP keepalive for accepted gRPC connections, in seconds. `0` disables
+    /// it. Default: 60
+    #[serde(default = "default_grpc_tcp_keepalive_secs")]
+    pub grpc_tcp_keepalive_secs: u64,
+
+    /// Maximum OTLP/HTTP request body size in bytes. Default: 8 MiB
+    #[serde(default = "default_http_max_body_bytes")]
+    pub http_max_body_bytes: usize,
+}
+
+impl Default for OtlpLimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_requests: default_max_concurrent_requests(),
+            request_timeout_secs: default_request_timeout_secs(),
+            grpc_max_decoding_message_bytes: default_grpc_max_decoding_message_bytes(),
+            grpc_max_concurrent_streams: default_grpc_max_concurrent_streams(),
+            grpc_http2_keepalive_interval_secs: default_grpc_http2_keepalive_interval_secs(),
+            grpc_http2_keepalive_timeout_secs: default_grpc_http2_keepalive_timeout_secs(),
+            grpc_tcp_keepalive_secs: default_grpc_tcp_keepalive_secs(),
+            http_max_body_bytes: default_http_max_body_bytes(),
+        }
+    }
+}
+
+fn default_max_concurrent_requests() -> usize {
+    256
+}
+fn default_request_timeout_secs() -> u64 {
+    30
+}
+fn default_grpc_max_decoding_message_bytes() -> usize {
+    4 * 1024 * 1024
+}
+fn default_grpc_max_concurrent_streams() -> u32 {
+    100
+}
+fn default_grpc_http2_keepalive_interval_secs() -> u64 {
+    60
+}
+fn default_grpc_http2_keepalive_timeout_secs() -> u64 {
+    20
+}
+fn default_grpc_tcp_keepalive_secs() -> u64 {
+    60
+}
+fn default_http_max_body_bytes() -> usize {
+    8 * 1024 * 1024
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_matches_serde_defaults() {
+        let from_toml: OtlpLimitsConfig = toml::from_str("").expect("empty table parses");
+        assert_eq!(OtlpLimitsConfig::default(), from_toml);
+    }
+
+    #[test]
+    fn overrides_parse() {
+        let cfg: OtlpLimitsConfig =
+            toml::from_str("max_concurrent_requests = 1\nhttp_max_body_bytes = 1024\n")
+                .expect("parses");
+        assert_eq!(cfg.max_concurrent_requests, 1);
+        assert_eq!(cfg.http_max_body_bytes, 1024);
+        assert_eq!(cfg.request_timeout_secs, 30);
+    }
+}
