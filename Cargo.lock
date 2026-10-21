@@ -140,6 +140,7 @@ dependencies = [
  "hex",
  "opentelemetry-proto",
  "prost",
+ "rustix",
  "serde",
  "serde_json",
  "thiserror",
