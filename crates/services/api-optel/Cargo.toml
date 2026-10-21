@@ -22,6 +22,7 @@ tokio = { workspace = true }
 # HTTP (OTLP/HTTP receiver on :4318)
 axum = { workspace = true }
 bytes = { workspace = true }
+tower = { workspace = true }
 tower-http = { workspace = true }
 
 # Error handling
@@ -48,9 +49,14 @@ dashmap = { workspace = true }
 # `[dev-dependencies]`); the feature gate keeps it out of normal builds.
 allocation-counter = { version = "0.8", optional = true }
 
+[target.'cfg(unix)'.dependencies]
+# In-process disk usage for the circuit breaker (statvfs, no subprocesses).
+rustix = { workspace = true }
+
 [dev-dependencies]
 criterion = { workspace = true }
-tower = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
+tower = { workspace = true, features = ["util"] }
 
 [features]
 # Enable the OQ15 zero-copy invariant test. Activates the custom global

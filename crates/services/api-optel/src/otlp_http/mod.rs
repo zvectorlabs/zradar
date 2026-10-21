@@ -2,7 +2,7 @@
 //!
 //! Accepts protobuf-encoded OTLP exports over HTTP/1.1 and HTTP/2.
 //! JSON body is rejected with 415 Unsupported Media Type.
-//! Body size is capped at 8 MiB.
+//! Body size is capped (8 MiB by default; see [`otlp_http_router_with_body_limit`]).
 //!
 //! Routes:
 //!   POST /v1/traces   → ExportTraceServiceRequest
@@ -11,7 +11,7 @@
 
 mod handlers;
 
-pub use handlers::otlp_http_router;
+pub use handlers::{DEFAULT_MAX_BODY_BYTES, otlp_http_router, otlp_http_router_with_body_limit};
 
 /// Shared state threaded through all OTLP/HTTP handlers.
 #[derive(Clone)]

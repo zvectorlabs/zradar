@@ -77,6 +77,8 @@ Controls how OTLP and Admin API requests are authenticated.
 # otlp_require_api_key = false  # set to false for open ingest (dev/testing only)
 ```
 
+`otlp_require_api_key` defaults to `true`, including when zradar starts without a `config.toml`.
+
 ### [[api_keys]]
 
 Define one entry per project. Every OTLP export and Admin API request must carry the key as a Bearer token.
@@ -143,6 +145,32 @@ memory_cache_enabled             = false   # cache hot Parquet pages in memory
 ```
 
 > **WAL note:** Every ingest is durably written to the WAL and fsynced before gRPC OK is returned regardless of these settings. The write buffer only affects how quickly spans land in Parquet files.
+
+---
+
+## [otlp_limits]
+
+Admission control and protocol limits for the OTLP listeners (gRPC `4317`, HTTP `4318`). They keep the ingest endpoints responsive under request floods: once `max_concurrent_requests` exports are in flight, further requests are rejected immediately instead of queueing. All values below are the defaults.
+
+```toml
+[otlp_limits]
+max_concurrent_requests            = 256      # in-flight exports per listener, across all connections (0 = unlimited)
+request_timeout_secs               = 30       # per-export deadline, including body upload (0 = none)
+grpc_max_decoding_message_bytes    = 4194304  # 4 MiB decoded gRPC message cap
+grpc_max_concurrent_streams        = 100      # HTTP/2 streams per gRPC connection (0 = unlimited)
+grpc_http2_keepalive_interval_secs = 60       # 0 = no keepalive pings
+grpc_http2_keepalive_timeout_secs  = 20
+grpc_tcp_keepalive_secs            = 60       # 0 = disabled
+http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
+```
+
+| Condition | OTLP/HTTP | OTLP/gRPC |
+|-----------|-----------|-----------|
+| Too many concurrent exports | `503` + `Retry-After: 1` | `UNAVAILABLE` |
+| Export exceeds `request_timeout_secs` | `504` | `DEADLINE_EXCEEDED` |
+| Body / message too large | `413` | `OUT_OF_RANGE` |
+
+The overload and timeout responses are retryable under the OTLP specification, so standard exporters back off and retry. Size `max_concurrent_requests` so that `max_concurrent_requests × max message size` fits comfortably in memory.
 
 ---
 

@@ -5,6 +5,7 @@
 //! Provides trace, metrics, and logs ingestion over gRPC.
 //! Authentication is handled via `Arc<dyn Authenticator>` from `zradar-traits`.
 
+mod admission;
 mod auth;
 mod circuit_breaker;
 pub mod conventions;
@@ -25,6 +26,7 @@ mod span_links;
 mod span_type_mapper;
 mod trace_service;
 
+pub use admission::{Admission, AdmissionLayer, IngestProtocol};
 pub use circuit_breaker::CircuitBreaker;
 pub use conventions::{AttrView, AttributeConvention, default_conventions};
 pub use converter::OtlpConverter;
@@ -32,7 +34,7 @@ pub use logs_converter::OtlpLogsConverter;
 pub use logs_service::OtlpLogsService;
 pub use metrics_converter::OtlpMetricsConverter;
 pub use metrics_service::OtlpMetricsService;
-pub use otlp_http::otlp_http_router;
+pub use otlp_http::{otlp_http_router, otlp_http_router_with_body_limit};
 pub use rate_limiter::ProjectRateLimiter;
 pub use span_type_mapper::SpanTypeMapper;
 pub use trace_service::OtlpTraceService;

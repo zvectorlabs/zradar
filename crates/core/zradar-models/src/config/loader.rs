@@ -51,6 +51,10 @@ pub struct Config {
     /// CORS configuration block.
     #[serde(default)]
     pub cors: CorsConfig,
+
+    /// Admission control and protocol limits for the OTLP listeners.
+    #[serde(default)]
+    pub otlp_limits: OtlpLimitsConfig,
 }
 
 impl Config {
@@ -88,6 +92,7 @@ impl Config {
                 query_grpc_port: None,
                 admin_grpc_port: None,
                 cors: CorsConfig::default(),
+                otlp_limits: OtlpLimitsConfig::default(),
             }
         };
 

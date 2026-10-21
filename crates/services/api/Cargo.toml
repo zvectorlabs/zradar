@@ -19,7 +19,6 @@ tower-http = { workspace = true }
 
 # Auto-documentation
 utoipa = { workspace = true }
-utoipa-swagger-ui = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

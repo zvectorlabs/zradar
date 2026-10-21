@@ -62,7 +62,7 @@ fn default_wal_replay_batch_max_bytes() -> u64 {
     64 * 1024 * 1024
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StorageConfig {
     #[serde(default)]
     pub s3: Option<S3StorageConfig>,
@@ -259,6 +259,18 @@ impl Default for ParquetStorageConfig {
     }
 }
 
+impl Default for StorageConfig {
+    // Hand-written so it matches the serde defaults: a derived `Default` would
+    // leave `parquet_data_dir` empty when `[ingestor]` omits `[ingestor.storage]`.
+    fn default() -> Self {
+        Self {
+            s3: None,
+            parquet_data_dir: default_parquet_data_dir(),
+            parquet: ParquetStorageConfig::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct S3StorageConfig {
     pub bucket: String,
@@ -342,4 +354,24 @@ fn default_compaction_min_files() -> usize {
 }
 fn default_compaction_max_file_size_bytes() -> i64 {
     52_428_800 // 50 MiB
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_default_matches_serde_defaults() {
+        let from_toml: StorageConfig = toml::from_str("").expect("empty storage config parses");
+        let from_default = StorageConfig::default();
+        assert_eq!(from_default.parquet_data_dir, from_toml.parquet_data_dir);
+        assert_eq!(from_default.parquet_data_dir, "./data/parquet-files");
+        assert!(from_default.s3.is_none());
+    }
+
+    #[test]
+    fn ingestor_without_storage_section_uses_default_data_dir() {
+        let cfg: IngestorConfig = toml::from_str("").expect("empty ingestor config parses");
+        assert_eq!(cfg.storage.parquet_data_dir, "./data/parquet-files");
+    }
 }
