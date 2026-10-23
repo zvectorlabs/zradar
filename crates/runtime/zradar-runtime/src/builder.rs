@@ -809,6 +809,14 @@ impl ZradarRuntimeBuilder {
                         groups.entry(workspace_id).or_default().push(bytes);
                     }
 
+                    // Refuse the whole request before appending any group, so a
+                    // retry after a free-space rejection does not duplicate the
+                    // groups that were already made durable.
+                    self.wal
+                        .check_free_space()
+                        .await
+                        .map_err(|e| wal_append_error(&e))?;
+
                     let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
                     let mut handles = Vec::with_capacity(groups.len());
 
@@ -821,18 +829,11 @@ impl ZradarRuntimeBuilder {
                             assigned_offset: 0,
                             payload: envelope,
                         };
-                        let handle = self.wal.append(record).await.map_err(|e| {
-                            if e.is_retryable() {
-                                // Transient (e.g. WAL disk below its free-space
-                                // floor): surface as retryable to OTLP clients.
-                                anyhow::Error::new(zradar_traits::WriteUnavailable::new(
-                                    format!("WAL append: {e}"),
-                                    WAL_RETRY_AFTER,
-                                ))
-                            } else {
-                                anyhow::anyhow!("WAL append: {}", e)
-                            }
-                        })?;
+                        let handle = self
+                            .wal
+                            .append(record)
+                            .await
+                            .map_err(|e| wal_append_error(&e))?;
                         handles.push(handle);
                     }
 
@@ -1272,7 +1273,42 @@ impl ZradarRuntimeBuilder {
 /// janitor to reclaim segments, short enough not to stall exporters.
 const WAL_RETRY_AFTER: Duration = Duration::from_secs(5);
 
+/// WAL append failure as a writer error. Transient failures (free-space floor,
+/// full disk) become [`zradar_traits::WriteUnavailable`] so OTLP clients retry.
+fn wal_append_error(error: &zradar_wal::group_commit::AppendError) -> anyhow::Error {
+    if error.is_retryable() {
+        anyhow::Error::new(zradar_traits::WriteUnavailable::new(
+            format!("WAL append: {error}"),
+            WAL_RETRY_AFTER,
+        ))
+    } else {
+        anyhow::anyhow!("WAL append: {}", error)
+    }
+}
+
 /// `Some(Duration)` for a positive number of seconds, `None` for `0` (disabled).
 fn secs_or_none(secs: u64) -> Option<Duration> {
     (secs > 0).then(|| Duration::from_secs(secs))
+}
+
+#[cfg(test)]
+mod wal_error_tests {
+    use super::*;
+    use zradar_wal::group_commit::AppendError;
+
+    #[test]
+    fn transient_wal_failures_are_write_unavailable() {
+        let floor = AppendError::InsufficientDiskSpace {
+            available: 1,
+            required: 2,
+        };
+        let full = AppendError::Io(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        for err in [floor, full] {
+            let mapped = wal_append_error(&err);
+            let transient = zradar_traits::WriteUnavailable::find(&mapped).expect("retryable");
+            assert_eq!(transient.retry_after, WAL_RETRY_AFTER);
+        }
+        let corrupt = AppendError::Io(std::io::Error::other("corrupt"));
+        assert!(zradar_traits::WriteUnavailable::find(&wal_append_error(&corrupt)).is_none());
+    }
 }

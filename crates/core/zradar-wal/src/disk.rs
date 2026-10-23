@@ -127,6 +127,9 @@ impl DiskSpaceGuard {
             // Another caller is sampling; keep using the cached value.
             return;
         }
+        // Clear the flag even if this future is dropped mid-sample (client
+        // disconnect, request timeout); otherwise sampling would stop forever.
+        let _sampling = SamplingFlag(&self.sampling);
 
         let dir = self.dir.clone();
         let sample = tokio::task::spawn_blocking(move || available_bytes(&dir))
@@ -152,7 +155,6 @@ impl DiskSpaceGuard {
         }
         self.last_sample_ms
             .store(self.elapsed_ms(), Ordering::Release);
-        self.sampling.store(false, Ordering::Release);
     }
 
     fn sample_due(&self, attempt: u64) -> bool {
@@ -168,9 +170,19 @@ impl DiskSpaceGuard {
     }
 }
 
+/// Resets the single-flight sampling flag when dropped.
+struct SamplingFlag<'a>(&'a AtomicBool);
+
+impl Drop for SamplingFlag<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
     use tempfile::TempDir;
 
     #[cfg(unix)]
@@ -247,6 +259,26 @@ mod tests {
         // A stale sample is refreshed regardless of the attempt count.
         tokio::time::sleep(MAX_SAMPLE_AGE + Duration::from_millis(50)).await;
         assert!(guard.sample_due(1));
+    }
+
+    #[tokio::test]
+    async fn cancelled_sample_does_not_block_later_samples() {
+        let tmp = TempDir::new().unwrap();
+        let guard = DiskSpaceGuard::new(tmp.path(), 1, 1);
+        {
+            // Start a sample and drop it before the blocking task reports back.
+            let mut admit = Box::pin(guard.admit());
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            let _ = admit.as_mut().poll(&mut cx);
+            assert!(guard.sampling.load(Ordering::Acquire), "sample in flight");
+        }
+        assert!(
+            !guard.sampling.load(Ordering::Acquire),
+            "dropping a sample must release the single-flight flag"
+        );
+        guard.admit().await.unwrap();
+        assert_ne!(guard.last_sample_ms.load(Ordering::Acquire), NEVER_SAMPLED);
     }
 
     #[cfg(unix)]

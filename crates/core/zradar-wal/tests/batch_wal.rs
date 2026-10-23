@@ -24,6 +24,7 @@ fn open_wal_default(
     cancel: CancellationToken,
 ) -> impl std::future::Future<Output = Wal> + use<'_> {
     let cfg = WalConfig {
+        wal_min_free_bytes: 0,
         segment_max_bytes: 10 * 1024 * 1024,
         group_commit_window_ms: 1,
         ..Default::default()
@@ -238,6 +239,7 @@ async fn batched_appends_coalesce_into_few_fsyncs() {
     let tmp = TempDir::new().unwrap();
     let cancel = CancellationToken::new();
     let cfg = WalConfig {
+        wal_min_free_bytes: 0,
         segment_max_bytes: 10 * 1024 * 1024,
         group_commit_window_ms: 5,
         ..Default::default()

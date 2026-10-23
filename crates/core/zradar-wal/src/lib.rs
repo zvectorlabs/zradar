@@ -175,23 +175,16 @@ impl Wal {
 
         // Check if we need to seal and rotate
         if writer.size() + serialized.len() as u64 > self.inner.config.segment_max_bytes {
-            writer
-                .fsync()
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+            writer.fsync().map_err(segment_append_error)?;
             let new_id = writer.id() + 1;
-            let new_writer = SegmentWriter::create(&self.inner.dir, new_id)
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
-            update_current_symlink(&self.inner.dir, new_id)
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+            let new_writer =
+                SegmentWriter::create(&self.inner.dir, new_id).map_err(segment_append_error)?;
+            update_current_symlink(&self.inner.dir, new_id).map_err(segment_append_error)?;
             *writer = new_writer;
         }
 
-        writer
-            .append(&serialized)
-            .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
-        writer
-            .flush()
-            .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+        writer.append(&serialized).map_err(segment_append_error)?;
+        writer.flush().map_err(segment_append_error)?;
 
         drop(writer);
 
@@ -217,6 +210,13 @@ impl Wal {
     /// Path to the WAL directory.
     pub fn dir(&self) -> &Path {
         &self.inner.dir
+    }
+
+    /// Check the free-space floor without appending. Lets callers that append
+    /// several records for one request refuse the whole request up front
+    /// rather than after part of it is durable.
+    pub async fn check_free_space(&self) -> Result<(), AppendError> {
+        self.inner.disk_guard.admit().await
     }
 
     /// Last sampled free bytes on the WAL filesystem (`None` if the
@@ -252,6 +252,15 @@ pub enum WalError {
 
     #[error("segment error: {0}")]
     Segment(#[from] segment::SegmentError),
+}
+
+/// Convert a segment failure into an append error, keeping the I/O error kind
+/// so a full disk (`StorageFull`) stays recognizable as retryable.
+fn segment_append_error(error: segment::SegmentError) -> AppendError {
+    match error {
+        segment::SegmentError::Io(io) => AppendError::Io(io),
+        other => AppendError::Io(std::io::Error::other(other.to_string())),
+    }
 }
 
 /// Reopen an existing segment for appending (seek to end).
@@ -294,6 +303,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -311,6 +321,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -331,6 +342,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 2,
             ..Default::default()
@@ -375,6 +387,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 5, // 5ms window to coalesce
             ..Default::default()
@@ -425,6 +438,7 @@ mod tests {
             "{err:?}"
         );
         assert!(err.is_retryable());
+        assert!(wal.check_free_space().await.is_err());
         // A refused append consumes no offset and writes nothing.
         let header_only = wal.active_segment_size().await;
         assert_eq!(wal.next_offset(), 0);
@@ -464,6 +478,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 500, // very small to force rotation
             group_commit_window_ms: 1,
             ..Default::default()
