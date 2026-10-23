@@ -6,13 +6,13 @@
 use axum::{
     Extension,
     extract::FromRequestParts,
-    http::{StatusCode, request::Parts},
+    http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
 use uuid::Uuid;
 use zradar_models::RequestContext;
-use zradar_traits::{AdminAuthorizer, QueryAuthorizer};
+use zradar_traits::{AdminAuthorizer, AuthUnavailable, QueryAuthorizer};
 
 use crate::errors::{ControlError, Result as ApiResult};
 
@@ -168,31 +168,57 @@ impl IntoResponse for AuthError {
     }
 }
 
+/// Map an authorizer failure: `503` with `Retry-After` when the verification
+/// backend could not be reached ([`AuthUnavailable`]), `401` otherwise.
+fn rejection_response(error: &anyhow::Error) -> Response {
+    match AuthUnavailable::find(error) {
+        Some(transient) => {
+            // Per request, so debug only: the authorizer owns backend error logging.
+            tracing::debug!(reason = %transient.reason, "credential verification unavailable");
+            let secs = transient
+                .retry_after
+                .as_secs()
+                .saturating_add(u64::from(transient.retry_after.subsec_nanos() > 0))
+                .max(1);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::RETRY_AFTER, HeaderValue::from(secs))],
+                "Credential verification temporarily unavailable",
+            )
+                .into_response()
+        }
+        None => AuthError("Invalid credentials".to_string()).into_response(),
+    }
+}
+
 impl<S> FromRequestParts<S> for AuthContext
 where
     S: Send + Sync,
 {
-    type Rejection = AuthError;
+    /// `401` ([`AuthError`]) for missing or rejected credentials, `503` with
+    /// `Retry-After` when the authorizer reports [`AuthUnavailable`].
+    type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let Extension(mode): Extension<AuthMode> = Extension::from_request_parts(parts, state)
             .await
-            .map_err(|_| AuthError("Auth mode not configured".to_string()))?;
+            .map_err(|_| AuthError("Auth mode not configured".to_string()).into_response())?;
 
         let resolution = if let Some(query) = parts.extensions.get::<Arc<dyn QueryAuthorizer>>() {
             query
                 .authorize(&parts.headers)
                 .await
-                .map_err(|_| AuthError("Invalid credentials".to_string()))?
+                .map_err(|error| rejection_response(&error))?
         } else if let Some(admin) = parts.extensions.get::<Arc<dyn AdminAuthorizer>>() {
             admin
                 .authorize(&parts.headers)
                 .await
-                .map_err(|_| AuthError("Invalid credentials".to_string()))?
+                .map_err(|error| rejection_response(&error))?
         } else {
-            return Err(AuthError(
-                "QueryAuthorizer or AdminAuthorizer not configured".to_string(),
-            ));
+            return Err(
+                AuthError("QueryAuthorizer or AdminAuthorizer not configured".to_string())
+                    .into_response(),
+            );
         };
 
         // Convert wire capability keys into strongly-typed Capability values.
@@ -233,4 +259,78 @@ pub fn parse_capabilities(header: &str) -> Vec<Capability> {
         .split(',')
         .filter_map(|p| Capability::from_key(p.trim()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use axum::{Router, body::Body, http::Request, routing::get};
+    use std::time::Duration;
+    use tower::ServiceExt;
+    use zradar_traits::AuthResolution;
+
+    /// `Bearer ok` passes, `Bearer down` reports the backend unavailable, and
+    /// anything else is rejected.
+    struct StubAuthorizer;
+
+    #[async_trait]
+    impl QueryAuthorizer for StubAuthorizer {
+        async fn authorize(
+            &self,
+            headers: &axum::http::HeaderMap,
+        ) -> anyhow::Result<AuthResolution> {
+            match headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+            {
+                Some("Bearer ok") => Ok(AuthResolution {
+                    context: RequestContext::new(Uuid::nil().into()),
+                    capability_keys: Vec::new(),
+                }),
+                Some("Bearer down") => Err(anyhow::Error::new(AuthUnavailable::new(
+                    "key backend unreachable",
+                    Duration::from_millis(2500),
+                ))
+                .context("authorizing")),
+                _ => anyhow::bail!("invalid"),
+            }
+        }
+    }
+
+    async fn status_for(token: &str) -> Response {
+        let authorizer: Arc<dyn QueryAuthorizer> = Arc::new(StubAuthorizer);
+        let app = Router::new()
+            .route("/", get(|_auth: AuthContext| async { "ok" }))
+            .layer(Extension(authorizer))
+            .layer(Extension(AuthMode::Standalone));
+        app.oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn valid_credentials_pass() {
+        assert_eq!(status_for("ok").await.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn invalid_credentials_are_401() {
+        let response = status_for("nope").await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+    }
+
+    #[tokio::test]
+    async fn unavailable_backend_is_503_with_retry_after() {
+        let response = status_for("down").await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "3");
+    }
 }

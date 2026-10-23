@@ -20,5 +20,14 @@ pub trait AdminAuthorizer: Send + Sync {
     /// Validate the request headers and return the resolved [`AdminAuth`].
     ///
     /// Returns `Err` to reject the request (caller maps to 401 or 403).
+    ///
+    /// `headers` holds every request header: the HTTP headers on HTTP routes,
+    /// and all request metadata on gRPC (ASCII and `-bin` entries, in their
+    /// wire form).
+    ///
+    /// Return [`AuthUnavailable`](crate::AuthUnavailable) (anywhere in the
+    /// `anyhow` chain) when the verification backend is unreachable, timed out
+    /// or failed; callers answer a retryable `503` / `UNAVAILABLE` instead of
+    /// `401` / `UNAUTHENTICATED`.
     async fn authorize(&self, headers: &HeaderMap) -> anyhow::Result<AdminAuth>;
 }

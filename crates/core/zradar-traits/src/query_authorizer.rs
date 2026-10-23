@@ -15,5 +15,14 @@ pub type QueryAuth = AuthResolution;
 #[async_trait]
 pub trait QueryAuthorizer: Send + Sync {
     /// Validate request headers and return resolved auth.
+    ///
+    /// `headers` holds every request header: the HTTP headers on HTTP routes,
+    /// and all request metadata on gRPC (ASCII and `-bin` entries, in their
+    /// wire form).
+    ///
+    /// Return [`AuthUnavailable`](crate::AuthUnavailable) (anywhere in the
+    /// `anyhow` chain) when the verification backend is unreachable, timed out
+    /// or failed; callers answer a retryable `503` / `UNAVAILABLE` instead of
+    /// `401` / `UNAUTHENTICATED`.
     async fn authorize(&self, headers: &HeaderMap) -> anyhow::Result<QueryAuth>;
 }

@@ -103,6 +103,47 @@ impl fmt::Display for WriteUnavailable {
 
 impl std::error::Error for WriteUnavailable {}
 
+/// A credential check that could not be completed because the verification
+/// backend (an identity service, key store, gateway, …) is unreachable, timed
+/// out, or failed. It says nothing about whether the credential is valid.
+///
+/// [`Authenticator`](crate::Authenticator), [`QueryAuthorizer`](crate::QueryAuthorizer)
+/// and [`AdminAuthorizer`](crate::AdminAuthorizer) implementations return it
+/// (inside `anyhow::Error`, anywhere in the chain) for backend failures. The
+/// transports map it to a retryable response — gRPC `UNAVAILABLE` with
+/// `RetryInfo`, HTTP `503` with `Retry-After` — so OTLP exporters back off and
+/// retry instead of dropping data. Any other error is treated as a rejected
+/// credential (`UNAUTHENTICATED` / `401`), which exporters do not retry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthUnavailable {
+    /// Human-readable cause. Must not contain the credential.
+    pub reason: String,
+    /// Suggested delay before the client retries.
+    pub retry_after: Duration,
+}
+
+impl AuthUnavailable {
+    pub fn new(reason: impl Into<String>, retry_after: Duration) -> Self {
+        Self {
+            reason: reason.into(),
+            retry_after,
+        }
+    }
+
+    /// Find an `AuthUnavailable` anywhere in an `anyhow` error chain.
+    pub fn find(error: &anyhow::Error) -> Option<&Self> {
+        error.chain().find_map(|cause| cause.downcast_ref::<Self>())
+    }
+}
+
+impl fmt::Display for AuthUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "credential verification unavailable: {}", self.reason)
+    }
+}
+
+impl std::error::Error for AuthUnavailable {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +158,21 @@ mod tests {
 
         let other = anyhow::anyhow!("boom");
         assert!(WriteUnavailable::find(&other).is_none());
+    }
+
+    #[test]
+    fn auth_unavailable_is_found_through_context() {
+        let err = anyhow::Error::new(AuthUnavailable::new(
+            "key store timed out",
+            Duration::from_secs(3),
+        ))
+        .context("verifying API key");
+        let found = AuthUnavailable::find(&err).expect("found in chain");
+        assert_eq!(found.reason, "key store timed out");
+        assert_eq!(found.retry_after, Duration::from_secs(3));
+
+        assert!(AuthUnavailable::find(&anyhow::anyhow!("Invalid API key")).is_none());
+        // The two transient markers are distinct.
+        assert!(WriteUnavailable::find(&err).is_none());
     }
 }
