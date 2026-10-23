@@ -72,6 +72,8 @@ name       = "default"
 # http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
 # http_header_read_timeout_secs      = 30       # time to start a request and send its headers; also HTTP/1 keep-alive idle limit (0 = none)
 # http_body_read_timeout_secs        = 15       # time to send the request body, 408 after; keep below request_timeout_secs (0 = none)
+# http_max_decoded_body_bytes        = 8388608  # OTLP/HTTP body cap after gzip/zstd decompression, 413 above this (default: http_max_body_bytes)
+# auth_timeout_secs                  = 10       # API-key verification limit; slower is 503/UNAVAILABLE, retryable (0 = none)
 
 # Ingestion / storage configuration
 [ingestor]

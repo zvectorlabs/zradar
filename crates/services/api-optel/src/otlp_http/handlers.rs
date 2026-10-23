@@ -1,16 +1,19 @@
 //! Axum handlers for OTLP/HTTP protocol (R1.1).
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, FromRequestParts, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use prost::Message;
 use std::sync::Arc;
+use std::time::Duration;
 use zradar_models::RequestContext;
 use zradar_policy::SignalKind;
 use zradar_traits::{Authenticator, SettingsRepository};
 
+use crate::auth::{DEFAULT_AUTH_TIMEOUT, IngestAuth};
 use crate::converter::OtlpConverter;
 use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings_and_get};
 use crate::logs_converter::OtlpLogsConverter;
@@ -21,6 +24,7 @@ use crate::score_extractor::extract_scores;
 use crate::{CircuitBreaker, ProjectRateLimiter};
 
 use super::OtlpHttpState;
+use super::encoding::{ContentEncoding, decode_body};
 use super::server::OtlpBody;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
@@ -54,7 +58,9 @@ pub fn otlp_http_router(
 }
 
 /// Build the OTLP/HTTP axum router with an explicit request body cap.
-/// Bodies larger than `max_body_bytes` are rejected with `413 Payload Too Large`.
+/// Bodies larger than `max_body_bytes` — on the wire, or once decompressed —
+/// are rejected with `413 Payload Too Large`. API-key verification is limited
+/// to [`DEFAULT_AUTH_TIMEOUT`]. See [`otlp_http_router_with_limits`].
 #[allow(clippy::too_many_arguments)]
 pub fn otlp_http_router_with_body_limit(
     writer: Arc<dyn zradar_traits::TelemetryWriter>,
@@ -67,6 +73,63 @@ pub fn otlp_http_router_with_body_limit(
     cors_config: zradar_models::CorsConfig,
     max_body_bytes: usize,
 ) -> Router {
+    otlp_http_router_with_limits(
+        writer,
+        auth,
+        allow_test_header_context,
+        settings_repo,
+        rate_limiter,
+        policy_enforcer,
+        circuit_breaker,
+        cors_config,
+        OtlpHttpLimits {
+            max_body_bytes,
+            max_decoded_body_bytes: max_body_bytes,
+            auth_timeout: Some(DEFAULT_AUTH_TIMEOUT),
+        },
+    )
+}
+
+/// Request limits for the OTLP/HTTP router.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtlpHttpLimits {
+    /// Maximum request body size on the wire (`413` above it).
+    pub max_body_bytes: usize,
+    /// Maximum request body size after `Content-Encoding` is removed (`413`
+    /// above it). Also bounds uncompressed bodies.
+    pub max_decoded_body_bytes: usize,
+    /// Maximum time for one API-key verification; slower verifications get
+    /// `503` + `Retry-After`. `None` disables the limit.
+    pub auth_timeout: Option<Duration>,
+}
+
+impl Default for OtlpHttpLimits {
+    fn default() -> Self {
+        Self {
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            max_decoded_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            auth_timeout: Some(DEFAULT_AUTH_TIMEOUT),
+        }
+    }
+}
+
+/// Build the OTLP/HTTP axum router with explicit [`OtlpHttpLimits`].
+///
+/// Every export is authenticated from its headers, and its `Content-Type` and
+/// `Content-Encoding` checked, before the body is read.
+#[allow(clippy::too_many_arguments)]
+pub fn otlp_http_router_with_limits(
+    writer: Arc<dyn zradar_traits::TelemetryWriter>,
+    auth: Option<Arc<dyn Authenticator>>,
+    allow_test_header_context: bool,
+    settings_repo: Arc<dyn SettingsRepository>,
+    rate_limiter: Arc<ProjectRateLimiter>,
+    policy_enforcer: Arc<dyn zradar_policy::PolicyEnforcer>,
+    circuit_breaker: Arc<CircuitBreaker>,
+    cors_config: zradar_models::CorsConfig,
+    limits: OtlpHttpLimits,
+) -> Router {
+    let max_body_bytes = limits.max_body_bytes;
     let state = OtlpHttpState {
         writer,
         auth,
@@ -75,6 +138,8 @@ pub fn otlp_http_router_with_body_limit(
         rate_limiter: Some(rate_limiter),
         policy_enforcer: Some(policy_enforcer),
         circuit_breaker: Some(circuit_breaker),
+        max_decoded_body_bytes: limits.max_decoded_body_bytes,
+        auth_timeout: limits.auth_timeout,
     };
 
     let cors_layer = if cors_config.allowed_origins.is_empty() {
@@ -114,36 +179,36 @@ fn check_content_type(headers: &HeaderMap) -> Result<(), StatusCode> {
     }
 }
 
-async fn authenticate_http(
-    auth: &Option<Arc<dyn Authenticator>>,
-    headers: &HeaderMap,
-    allow_test_header_context: bool,
-) -> Result<RequestContext, StatusCode> {
-    let Some(authenticator) = auth else {
-        return Ok(RequestContext::new(uuid::Uuid::nil().into()));
-    };
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let mut context = authenticator
-        .authenticate(token)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+/// What an export request's headers establish, checked before its body is
+/// read: a protobuf `Content-Type` (`415`), a supported `Content-Encoding`
+/// (`415`) and a valid API key (`401`, or `503` + `Retry-After` when the key
+/// cannot be verified right now). Unacceptable requests are rejected without
+/// buffering or decompressing their body.
+///
+/// Must precede the body extractor in handler arguments: axum runs
+/// extractors in order, and only the last one may consume the body.
+struct ExportPreflight {
+    context: RequestContext,
+    encoding: ContentEncoding,
+}
 
-    if allow_test_header_context
-        && let Some(workspace_id) = headers
-            .get("x-workspace-id")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok())
-    {
-        context.workspace_id = workspace_id;
+impl FromRequestParts<OtlpHttpState> for ExportPreflight {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &OtlpHttpState,
+    ) -> Result<Self, Self::Rejection> {
+        check_content_type(&parts.headers).map_err(IntoResponse::into_response)?;
+        let encoding =
+            ContentEncoding::from_headers(&parts.headers).map_err(IntoResponse::into_response)?;
+        let context = IngestAuth::new(state.auth.clone(), state.allow_test_header_context)
+            .with_timeout(state.auth_timeout)
+            .authenticate(&parts.headers)
+            .await
+            .map_err(|rejection| rejection.into_http_response())?;
+        Ok(Self { context, encoding })
     }
-
-    Ok(context)
 }
 
 async fn check_circuit_breaker(circuit_breaker: &Option<Arc<CircuitBreaker>>) -> Option<Response> {
@@ -170,17 +235,13 @@ async fn enforce_http_policy(
 
 async fn export_traces(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    ExportPreflight { context, encoding }: ExportPreflight,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
         return response;
     }
@@ -243,17 +304,13 @@ async fn export_traces(
 
 async fn export_metrics(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    ExportPreflight { context, encoding }: ExportPreflight,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
         return response;
     }
@@ -295,17 +352,13 @@ async fn export_metrics(
 
 async fn export_logs(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    ExportPreflight { context, encoding }: ExportPreflight,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
         return response;
     }
@@ -961,6 +1014,180 @@ mod tests {
             }
             let response = response(&mut stream).await;
             assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        }
+    }
+
+    /// Checks made from headers alone, before the body is read, and request
+    /// body decoding.
+    mod preflight {
+        use super::body_limit::{AllowAll, EmptySettings, NoopWriter};
+        use super::*;
+        use crate::otlp_http::encoding::tests::{gzip, zstd};
+        use axum::http::{Request, header};
+        use std::path::PathBuf;
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::task::{Context, Poll};
+        use std::time::Duration;
+        use tokio_stream::Stream;
+        use tower::ServiceExt;
+        use zradar_traits::AuthUnavailable;
+
+        /// Accepts `Bearer good`; reports its backend down for `Bearer down`.
+        struct KeyCheck;
+        #[tonic::async_trait]
+        impl Authenticator for KeyCheck {
+            async fn authenticate(&self, token: &str) -> anyhow::Result<RequestContext> {
+                match token {
+                    "good" => Ok(RequestContext::new(uuid::Uuid::nil().into())),
+                    "down" => {
+                        Err(AuthUnavailable::new("backend down", Duration::from_secs(2)).into())
+                    }
+                    _ => anyhow::bail!("Invalid API key"),
+                }
+            }
+        }
+
+        fn router(max_decoded_body_bytes: usize) -> Router {
+            otlp_http_router_with_limits(
+                Arc::new(NoopWriter),
+                Some(Arc::new(KeyCheck)),
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+                zradar_models::CorsConfig::default(),
+                OtlpHttpLimits {
+                    max_body_bytes: 1024 * 1024,
+                    max_decoded_body_bytes,
+                    auth_timeout: Some(Duration::from_secs(5)),
+                },
+            )
+        }
+
+        /// A request body that never yields data and records being polled.
+        struct UnreadBody(Arc<AtomicBool>);
+        impl Stream for UnreadBody {
+            type Item = Result<axum::body::Bytes, std::io::Error>;
+            fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+                self.0.store(true, Ordering::SeqCst);
+                Poll::Pending
+            }
+        }
+
+        fn export(
+            key: &str,
+            encoding: Option<&str>,
+            body: axum::body::Body,
+        ) -> Request<axum::body::Body> {
+            let mut builder = Request::builder()
+                .method("POST")
+                .uri("/v1/traces")
+                .header("content-type", PROTOBUF_CONTENT_TYPE)
+                .header(header::AUTHORIZATION, format!("Bearer {key}"));
+            if let Some(encoding) = encoding {
+                builder = builder.header(header::CONTENT_ENCODING, encoding);
+            }
+            builder.body(body).unwrap()
+        }
+
+        async fn send(router: Router, request: Request<axum::body::Body>) -> Response {
+            tokio::time::timeout(Duration::from_secs(5), router.oneshot(request))
+                .await
+                .expect("answered without reading the body")
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn rejected_requests_are_answered_without_reading_the_body() {
+            for (key, encoding, expected) in [
+                ("bad", None, StatusCode::UNAUTHORIZED),
+                ("down", None, StatusCode::SERVICE_UNAVAILABLE),
+                ("good", Some("br"), StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            ] {
+                let polled = Arc::new(AtomicBool::new(false));
+                let body = axum::body::Body::from_stream(UnreadBody(polled.clone()));
+                let response = send(router(1024), export(key, encoding, body)).await;
+                assert_eq!(response.status(), expected, "key {key}");
+                assert!(
+                    !polled.load(Ordering::SeqCst),
+                    "body was read for key {key}"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn unavailable_key_backend_is_503_with_retry_after() {
+            let response = send(
+                router(1024),
+                export("down", None, axum::body::Body::empty()),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "2");
+        }
+
+        fn one_span() -> Vec<u8> {
+            use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+            use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+            ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans: vec![Span {
+                            trace_id: vec![1; 16],
+                            span_id: vec![2; 8],
+                            name: "op".into(),
+                            start_time_unix_nano: 1,
+                            end_time_unix_nano: 2,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec()
+        }
+
+        #[tokio::test]
+        async fn compressed_exports_are_accepted() {
+            let payload = one_span();
+            for (encoding, body) in [("gzip", gzip(&payload)), ("zstd", zstd(&payload))] {
+                let response = send(
+                    router(1024),
+                    export("good", Some(encoding), axum::body::Body::from(body)),
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK, "{encoding}");
+            }
+        }
+
+        #[tokio::test]
+        async fn decompression_bombs_are_413() {
+            let bomb = vec![0u8; 16 * 1024 * 1024];
+            for (encoding, body) in [("gzip", gzip(&bomb)), ("zstd", zstd(&bomb))] {
+                let response = send(
+                    router(64 * 1024),
+                    export("good", Some(encoding), axum::body::Body::from(body)),
+                )
+                .await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "{encoding}"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn corrupt_compressed_body_is_400() {
+            let response = send(
+                router(1024),
+                export("good", Some("gzip"), axum::body::Body::from(one_span())),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         }
     }
 }
