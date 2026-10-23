@@ -44,7 +44,7 @@ COPY scripts /app/scripts/
 
 USER zradar
 
-EXPOSE 4317 8081
+EXPOSE 4317 4318 8081
 
 # Built-in probe of the admin liveness endpoint; the image ships no HTTP client.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
