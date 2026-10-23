@@ -35,6 +35,21 @@ pub enum AppendError {
 
     #[error("WAL resource exhausted (backpressure reject)")]
     ResourceExhausted,
+
+    /// The WAL filesystem is below its free-space floor. Transient: the
+    /// write may succeed once the flusher and janitor reclaim space.
+    #[error("WAL disk space low: {available} bytes free, {required} required (wal_min_free_bytes)")]
+    InsufficientDiskSpace { available: u64, required: u64 },
+}
+
+impl AppendError {
+    /// Whether the caller may retry the same write later.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::ResourceExhausted | Self::InsufficientDiskSpace { .. }
+        )
+    }
 }
 
 /// Tracks pending fsync notifications for the group-commit window.

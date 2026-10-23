@@ -6205,6 +6205,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "proptest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

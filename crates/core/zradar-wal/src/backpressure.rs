@@ -132,34 +132,13 @@ fn compute_fill_pct(wal: &Wal, config: &WalConfig) -> u8 {
     pct.min(100)
 }
 
-/// Get free bytes on the filesystem containing the WAL directory.
+/// Free bytes on the filesystem containing the WAL directory.
 ///
-/// Uses `std::fs::metadata` and platform-specific APIs. Falls back to `u64::MAX`
-/// (assume plenty of space) if the check fails.
+/// Blocking (`statvfs`). Falls back to `u64::MAX` (assume plenty of space)
+/// when the measurement is unavailable, so an unsupported platform never
+/// forces the ladder into `Reject`.
 fn get_dir_free_bytes(dir: &std::path::Path) -> u64 {
-    fs_free_space(dir).unwrap_or(u64::MAX)
-}
-
-fn fs_free_space(path: &std::path::Path) -> Option<u64> {
-    // std::fs::available_space isn't yet stable on all platforms we target.
-    // Use a simple heuristic: read the parent metadata; on failure assume plenty.
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
-        // SAFETY: statvfs is a read-only syscall with a valid path
-        // However, since unsafe is forbidden, we'll use the nix crate approach
-        // or just skip for now and return None to indicate unknown.
-        // For the initial implementation, we rely on the periodic check not
-        // having libc access and just return a heuristic.
-        let _ = c_path;
-        None
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        None
-    }
+    crate::disk::available_bytes(dir).unwrap_or(u64::MAX)
 }
 
 /// Background task that periodically updates the backpressure state.
@@ -176,8 +155,20 @@ pub async fn backpressure_monitor_loop(
             _ = tokio::time::sleep(interval) => {}
         }
 
-        let fill_pct = compute_fill_pct(&wal, monitor.config());
-        let free_bytes = get_dir_free_bytes(wal.dir());
+        // Directory listing, metadata and statvfs all block: keep them off
+        // the async executor.
+        let sample_wal = wal.clone();
+        let config = monitor.config().clone();
+        let Ok((fill_pct, free_bytes)) = tokio::task::spawn_blocking(move || {
+            (
+                compute_fill_pct(&sample_wal, &config),
+                get_dir_free_bytes(sample_wal.dir()),
+            )
+        })
+        .await
+        else {
+            continue;
+        };
 
         monitor.update(fill_pct, free_bytes);
         debug!(fill_pct, free_bytes, state = ?monitor.state(), "backpressure tick");
@@ -251,6 +242,18 @@ mod tests {
         // Plenty of space → normal
         monitor.update(10, 2_000_000_000);
         assert_eq!(monitor.state(), BackpressureState::Normal);
+    }
+
+    #[test]
+    fn test_dir_free_bytes_is_measured() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let free = get_dir_free_bytes(tmp.path());
+        assert!(free > 0);
+        if cfg!(unix) {
+            assert!(free < u64::MAX, "statvfs must report a real value");
+        }
+        // Unmeasurable paths fall back to "plenty of space".
+        assert_eq!(get_dir_free_bytes(&tmp.path().join("missing")), u64::MAX);
     }
 
     #[test]

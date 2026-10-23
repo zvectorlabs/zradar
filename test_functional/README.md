@@ -76,6 +76,10 @@ The script times out if `/health` never responds. Typical causes:
 
 The OTLP circuit breaker rejects writes when the filesystem hosting `parquet_data_dir` is above 95% (default). Free disk space on that volume and re-run the suite.
 
+**Common failure: `Unavailable` / "WAL disk space low"**
+
+The WAL refuses appends while its filesystem has less than `[ingestor.wal] wal_min_free_bytes` free (1 GiB by default). Free disk space on that volume and re-run the suite.
+
 ## 🛠️ Test Structure
 
 ```

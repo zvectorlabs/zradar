@@ -84,6 +84,13 @@ path = "./data/trace-batches"
 # bucket = "zradar-traces-prod"
 # region = "us-east-1"
 
+# Write-ahead log. Every accepted export is fsynced here before it is acked.
+# Defaults shown; uncomment to change.
+# [ingestor.wal]
+# wal_dir             = "./data/wal"
+# wal_min_free_bytes  = 1073741824  # 1 GiB; below this, exports get gRPC UNAVAILABLE / HTTP 503 (0 = off)
+# disk_check_interval = 1024        # appends between free-space samples (also sampled every second)
+
 # Parquet ingestion lifecycle (write buffer, compaction, memory cache, fsync).
 # All of these are durability/throughput tuning knobs; the durable-by-default
 # path is direct write (no buffer) with fsync + atomic rename.

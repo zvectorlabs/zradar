@@ -617,6 +617,8 @@ impl ZradarRuntimeBuilder {
                 flush_interval_ms: wal_config.flush_interval_ms,
                 group_commit_window_ms: wal_config.group_commit_window_ms,
                 replay_batch_max_bytes: wal_config.replay_batch_max_bytes,
+                wal_min_free_bytes: wal_config.wal_min_free_bytes,
+                disk_check_interval: wal_config.disk_check_interval,
                 ..WalConfig::default()
             };
 
