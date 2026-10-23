@@ -38,6 +38,18 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `zradar healthcheck` — probe this instance's liveness endpoint and exit
+    // 0 if it answers 2xx, non-zero otherwise. Lets container health checks
+    // run without an HTTP client in the image. Reads the same config as the
+    // server to find the admin port.
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        let config = Config::load()?;
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], config.effective_admin_port()));
+        zradar_runtime::health_probe(addr, "/health/live", std::time::Duration::from_secs(3))
+            .await?;
+        return Ok(());
+    }
+
     info!("Starting zradar server...");
 
     let config = Config::load()?;

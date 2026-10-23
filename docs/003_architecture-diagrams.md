@@ -344,8 +344,8 @@ sequenceDiagram
 
     OtlpSvc->>CB: check_status()
     alt threshold exceeded (disk / memory / queue)
-        CB-->>OtlpSvc: RESOURCE_EXHAUSTED
-        OtlpSvc-->>Client: gRPC RESOURCE_EXHAUSTED
+        CB-->>OtlpSvc: UNAVAILABLE + RetryInfo
+        OtlpSvc-->>Client: gRPC UNAVAILABLE (retryable; HTTP 503 + Retry-After)
     else OK
         CB-->>OtlpSvc: OK
     end

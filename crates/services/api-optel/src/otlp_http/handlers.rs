@@ -1,7 +1,6 @@
 //! Axum handlers for OTLP/HTTP protocol (R1.1).
 
 use axum::Router;
-use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -17,10 +16,12 @@ use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings_a
 use crate::logs_converter::OtlpLogsConverter;
 use crate::metrics_converter::OtlpMetricsConverter;
 use crate::parser_caps::{validate_logs_request, validate_metrics_request, validate_trace_request};
+use crate::retry::{retry_delay, with_retry_after, write_error_response};
 use crate::score_extractor::extract_scores;
 use crate::{CircuitBreaker, ProjectRateLimiter};
 
 use super::OtlpHttpState;
+use super::server::OtlpBody;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 /// Default request body cap for OTLP/HTTP exports.
@@ -147,11 +148,11 @@ async fn authenticate_http(
 
 async fn check_circuit_breaker(circuit_breaker: &Option<Arc<CircuitBreaker>>) -> Option<Response> {
     let circuit_breaker = circuit_breaker.as_ref()?;
-    if circuit_breaker.check_status().await.is_err() {
-        Some(StatusCode::SERVICE_UNAVAILABLE.into_response())
-    } else {
-        None
-    }
+    circuit_breaker
+        .check_status()
+        .await
+        .err()
+        .map(status_to_response)
 }
 
 async fn enforce_http_policy(
@@ -170,7 +171,7 @@ async fn enforce_http_policy(
 async fn export_traces(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();
@@ -232,8 +233,10 @@ async fn export_traces(
             Err(_) => return StatusCode::BAD_REQUEST.into_response(),
         }
     }
-    if !all_spans.is_empty() && state.writer.insert_spans(&all_spans).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if !all_spans.is_empty()
+        && let Err(error) = state.writer.insert_spans(&all_spans).await
+    {
+        return write_error_response(&error);
     }
     StatusCode::OK.into_response()
 }
@@ -241,7 +244,7 @@ async fn export_traces(
 async fn export_metrics(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();
@@ -282,8 +285,10 @@ async fn export_metrics(
     {
         return status_to_response(status);
     }
-    if !metrics.is_empty() && state.writer.insert_metrics(&metrics).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if !metrics.is_empty()
+        && let Err(error) = state.writer.insert_metrics(&metrics).await
+    {
+        return write_error_response(&error);
     }
     StatusCode::OK.into_response()
 }
@@ -291,7 +296,7 @@ async fn export_metrics(
 async fn export_logs(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();
@@ -343,25 +348,34 @@ async fn export_logs(
     // Extract evaluation scores from log attributes (R1.8): HTTP transport must
     // persist scores through the same WAL + Parquet pipeline as gRPC.
     let scores = extract_scores(&request, &context);
-    if !scores.is_empty() && state.writer.insert_scores(&scores).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if !scores.is_empty()
+        && let Err(error) = state.writer.insert_scores(&scores).await
+    {
+        return write_error_response(&error);
     }
     let logs = OtlpLogsConverter::convert(request, &context);
-    if !logs.is_empty() && state.writer.insert_logs(&logs).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if !logs.is_empty()
+        && let Err(error) = state.writer.insert_logs(&logs).await
+    {
+        return write_error_response(&error);
     }
     StatusCode::OK.into_response()
 }
 
+/// Map a gRPC-style status to an OTLP/HTTP response. A `RetryInfo` detail
+/// on the status becomes a `Retry-After` header.
 fn status_to_response(status: tonic::Status) -> axum::response::Response {
-    match status.code() {
+    let code = match status.code() {
         tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
         tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
         tonic::Code::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
         tonic::Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    match retry_delay(&status) {
+        Some(delay) => with_retry_after(code, delay),
+        None => code.into_response(),
     }
-    .into_response()
 }
 
 #[cfg(test)]
@@ -636,7 +650,7 @@ mod tests {
         use std::path::PathBuf;
         use tower::ServiceExt;
 
-        struct NoopWriter;
+        pub(super) struct NoopWriter;
         #[tonic::async_trait]
         impl zradar_traits::TelemetryWriter for NoopWriter {
             async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
@@ -659,7 +673,7 @@ mod tests {
             }
         }
 
-        struct EmptySettings;
+        pub(super) struct EmptySettings;
         #[tonic::async_trait]
         impl zradar_traits::SettingsRepository for EmptySettings {
             async fn get_settings(
@@ -681,7 +695,7 @@ mod tests {
             }
         }
 
-        struct AllowAll;
+        pub(super) struct AllowAll;
         #[tonic::async_trait]
         impl zradar_policy::PolicyEnforcer for AllowAll {
             async fn check_ingest(
@@ -730,6 +744,223 @@ mod tests {
             let response = router(16).oneshot(post(Vec::new())).await.unwrap();
             assert_ne!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
             assert!(response.status().is_success(), "{}", response.status());
+        }
+    }
+
+    mod retryable_rejections {
+        use super::body_limit::{AllowAll, EmptySettings};
+        use super::*;
+        use axum::http::{Request, header};
+        use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        use std::path::PathBuf;
+        use std::time::Duration;
+        use tower::ServiceExt;
+
+        /// Refuses every write as transiently unavailable (e.g. WAL disk low).
+        struct TransientWriter;
+        #[tonic::async_trait]
+        impl zradar_traits::TelemetryWriter for TransientWriter {
+            async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
+                Err(zradar_traits::WriteUnavailable::new(
+                    "WAL disk space low",
+                    Duration::from_secs(5),
+                )
+                .into())
+            }
+            async fn insert_metrics(
+                &self,
+                _metrics: &[zradar_models::Metric],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_logs(&self, _logs: &[zradar_models::LogRecord]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn insert_scores(
+                &self,
+                _scores: &[zradar_models::EvaluationScore],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        fn router(breaker: CircuitBreaker) -> Router {
+            otlp_http_router(
+                Arc::new(TransientWriter),
+                None,
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(breaker),
+                zradar_models::CorsConfig::default(),
+            )
+        }
+
+        fn one_span_export() -> Request<axum::body::Body> {
+            let request = ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans: vec![Span {
+                            trace_id: vec![1; 16],
+                            span_id: vec![2; 8],
+                            name: "op".into(),
+                            start_time_unix_nano: 1,
+                            end_time_unix_nano: 2,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            };
+            Request::builder()
+                .method("POST")
+                .uri("/v1/traces")
+                .header("content-type", PROTOBUF_CONTENT_TYPE)
+                .body(axum::body::Body::from(request.encode_to_vec()))
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn tripped_breaker_is_503_with_retry_after() {
+            let breaker = CircuitBreaker::new(PathBuf::from("."), 100, 100, 1);
+            breaker.set_queue_depth(2);
+            let response = router(breaker).oneshot(one_span_export()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        }
+
+        #[tokio::test]
+        async fn transient_write_failure_is_503_with_retry_after() {
+            let breaker = CircuitBreaker::new(PathBuf::from("."), 100, 100, 10);
+            let response = router(breaker).oneshot(one_span_export()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "5");
+        }
+
+        #[test]
+        fn status_mapping_keeps_retry_info() {
+            let response = status_to_response(crate::retry::unavailable(
+                "busy",
+                Duration::from_millis(2500),
+            ));
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "3");
+
+            let response = status_to_response(tonic::Status::resource_exhausted("quota"));
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        }
+    }
+
+    /// Body timeouts through the production middleware stack (body limit,
+    /// CORS, admission control) and the real listener.
+    mod slow_body {
+        use super::body_limit::{AllowAll, EmptySettings, NoopWriter};
+        use super::*;
+        use crate::admission::{AdmissionLayer, IngestProtocol};
+        use crate::otlp_http::{OtlpHttpServerOptions, serve};
+        use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        use std::path::PathBuf;
+        use std::time::{Duration, Instant};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        async fn start(body_read_timeout: Duration) -> std::net::SocketAddr {
+            let app = otlp_http_router_with_body_limit(
+                Arc::new(NoopWriter),
+                None,
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+                zradar_models::CorsConfig::default(),
+                DEFAULT_MAX_BODY_BYTES,
+            )
+            // Request timeout longer than the body timeout, as by default.
+            .layer(AdmissionLayer::new(
+                8,
+                Some(Duration::from_secs(10)),
+                IngestProtocol::Http,
+            ));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(serve(
+                listener,
+                app,
+                OtlpHttpServerOptions {
+                    header_read_timeout: Some(Duration::from_secs(5)),
+                    body_read_timeout: Some(body_read_timeout),
+                },
+            ));
+            addr
+        }
+
+        fn head(content_length: usize) -> Vec<u8> {
+            format!(
+                "POST /v1/traces HTTP/1.1\r\nHost: x\r\nContent-Type: {PROTOBUF_CONTENT_TYPE}\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+            )
+            .into_bytes()
+        }
+
+        async fn response(stream: &mut TcpStream) -> String {
+            let mut buf = Vec::new();
+            tokio::time::timeout(Duration::from_secs(8), stream.read_to_end(&mut buf))
+                .await
+                .expect("response in time")
+                .unwrap();
+            String::from_utf8_lossy(&buf).into_owned()
+        }
+
+        #[tokio::test]
+        async fn stalled_body_gets_408_before_the_request_timeout() {
+            let addr = start(Duration::from_millis(300)).await;
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            let started = Instant::now();
+            let mut request = head(100);
+            request.extend_from_slice(&[0u8; 10]);
+            stream.write_all(&request).await.unwrap();
+            let response = response(&mut stream).await;
+            assert!(response.starts_with("HTTP/1.1 408"), "{response}");
+            assert!(started.elapsed() < Duration::from_secs(5));
+        }
+
+        #[tokio::test]
+        async fn chunked_upload_within_the_deadline_succeeds() {
+            let spans = (0..2_000u32)
+                .map(|i| Span {
+                    trace_id: vec![1; 16],
+                    span_id: [i.to_be_bytes(), [2; 4]].concat(),
+                    name: format!("op-{i}"),
+                    start_time_unix_nano: 1,
+                    end_time_unix_nano: 2,
+                    ..Default::default()
+                })
+                .collect();
+            let body = ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec();
+
+            let addr = start(Duration::from_secs(3)).await;
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            stream.write_all(&head(body.len())).await.unwrap();
+            for chunk in body.chunks(body.len().div_ceil(4)) {
+                stream.write_all(chunk).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let response = response(&mut stream).await;
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         }
     }
 }

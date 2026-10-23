@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use api::{
     audit::{AuditState, audit_router},
@@ -38,7 +38,8 @@ use api::{
 };
 use api_optel::{
     AdmissionLayer, CircuitBreaker, IngestProtocol, LogsServiceServer, MetricsServiceServer,
-    OtlpLogsService, OtlpMetricsService, OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    OtlpHttpServerOptions, OtlpLogsService, OtlpMetricsService, OtlpTraceService,
+    ProjectRateLimiter, TraceServiceServer, otlp_http::serve as serve_otlp_http,
     otlp_http_router_with_body_limit,
 };
 use axum::Router;
@@ -617,6 +618,8 @@ impl ZradarRuntimeBuilder {
                 flush_interval_ms: wal_config.flush_interval_ms,
                 group_commit_window_ms: wal_config.group_commit_window_ms,
                 replay_batch_max_bytes: wal_config.replay_batch_max_bytes,
+                wal_min_free_bytes: wal_config.wal_min_free_bytes,
+                disk_check_interval: wal_config.disk_check_interval,
                 ..WalConfig::default()
             };
 
@@ -806,6 +809,14 @@ impl ZradarRuntimeBuilder {
                         groups.entry(workspace_id).or_default().push(bytes);
                     }
 
+                    // Refuse the whole request before appending any group, so a
+                    // retry after a free-space rejection does not duplicate the
+                    // groups that were already made durable.
+                    self.wal
+                        .check_free_space()
+                        .await
+                        .map_err(|e| wal_append_error(&e))?;
+
                     let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
                     let mut handles = Vec::with_capacity(groups.len());
 
@@ -822,7 +833,7 @@ impl ZradarRuntimeBuilder {
                             .wal
                             .append(record)
                             .await
-                            .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
+                            .map_err(|e| wal_append_error(&e))?;
                         handles.push(handle);
                     }
 
@@ -1172,10 +1183,30 @@ impl ZradarRuntimeBuilder {
                 IngestProtocol::Http,
             ));
             let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
+            let otlp_http_options = OtlpHttpServerOptions {
+                header_read_timeout: secs_or_none(config.otlp_limits.http_header_read_timeout_secs),
+                body_read_timeout: secs_or_none(config.otlp_limits.http_body_read_timeout_secs),
+            };
+            if let (Some(body), Some(request)) =
+                (otlp_http_options.body_read_timeout, otlp_request_timeout)
+                && body >= request
+            {
+                warn!(
+                    http_body_read_timeout_secs = body.as_secs(),
+                    request_timeout_secs = request.as_secs(),
+                    "otlp_limits: body read timeout is not below the request timeout; \
+                     slow uploads get 504 instead of 408"
+                );
+            }
             Some(async move {
-                info!("OTLP/HTTP receiver listening on http://{}", otlp_http_addr);
+                info!(
+                    header_read_timeout = ?otlp_http_options.header_read_timeout,
+                    body_read_timeout = ?otlp_http_options.body_read_timeout,
+                    "OTLP/HTTP receiver listening on http://{}",
+                    otlp_http_addr
+                );
                 let listener = tokio::net::TcpListener::bind(&otlp_http_addr).await?;
-                axum::serve(listener, otlp_http_app)
+                serve_otlp_http(listener, otlp_http_app, otlp_http_options)
                     .await
                     .map_err(|e| anyhow::anyhow!("OTLP/HTTP server failed: {}", e))
             })
@@ -1248,7 +1279,47 @@ impl ZradarRuntimeBuilder {
     }
 }
 
+/// Retry delay suggested to exporters when the WAL refuses a write for a
+/// transient reason (free-space floor). Long enough for the flusher and
+/// janitor to reclaim segments, short enough not to stall exporters.
+const WAL_RETRY_AFTER: Duration = Duration::from_secs(5);
+
+/// WAL append failure as a writer error. Transient failures (free-space floor,
+/// full disk) become [`zradar_traits::WriteUnavailable`] so OTLP clients retry.
+fn wal_append_error(error: &zradar_wal::group_commit::AppendError) -> anyhow::Error {
+    if error.is_retryable() {
+        anyhow::Error::new(zradar_traits::WriteUnavailable::new(
+            format!("WAL append: {error}"),
+            WAL_RETRY_AFTER,
+        ))
+    } else {
+        anyhow::anyhow!("WAL append: {}", error)
+    }
+}
+
 /// `Some(Duration)` for a positive number of seconds, `None` for `0` (disabled).
 fn secs_or_none(secs: u64) -> Option<Duration> {
     (secs > 0).then(|| Duration::from_secs(secs))
+}
+
+#[cfg(test)]
+mod wal_error_tests {
+    use super::*;
+    use zradar_wal::group_commit::AppendError;
+
+    #[test]
+    fn transient_wal_failures_are_write_unavailable() {
+        let floor = AppendError::InsufficientDiskSpace {
+            available: 1,
+            required: 2,
+        };
+        let full = AppendError::Io(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        for err in [floor, full] {
+            let mapped = wal_append_error(&err);
+            let transient = zradar_traits::WriteUnavailable::find(&mapped).expect("retryable");
+            assert_eq!(transient.retry_after, WAL_RETRY_AFTER);
+        }
+        let corrupt = AppendError::Io(std::io::Error::other("corrupt"));
+        assert!(zradar_traits::WriteUnavailable::find(&wal_append_error(&corrupt)).is_none());
+    }
 }

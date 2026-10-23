@@ -35,6 +35,23 @@ pub enum AppendError {
 
     #[error("WAL resource exhausted (backpressure reject)")]
     ResourceExhausted,
+
+    /// The WAL filesystem is below its free-space floor. Transient: the
+    /// write may succeed once the flusher and janitor reclaim space.
+    #[error("WAL disk space low: {available} bytes free, {required} required (wal_min_free_bytes)")]
+    InsufficientDiskSpace { available: u64, required: u64 },
+}
+
+impl AppendError {
+    /// Whether the caller may retry the same write later.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::ResourceExhausted | Self::InsufficientDiskSpace { .. } => true,
+            // Disk filled up between free-space samples.
+            Self::Io(error) => error.kind() == std::io::ErrorKind::StorageFull,
+            Self::FsyncDropped => false,
+        }
+    }
 }
 
 /// Tracks pending fsync notifications for the group-commit window.
@@ -208,5 +225,25 @@ mod tests {
         rx1.await.unwrap();
         rx2.await.unwrap();
         rx3.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod retryable_tests {
+    use super::AppendError;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn full_disk_and_free_space_floor_are_retryable() {
+        assert!(AppendError::Io(Error::from(ErrorKind::StorageFull)).is_retryable());
+        assert!(
+            AppendError::InsufficientDiskSpace {
+                available: 1,
+                required: 2
+            }
+            .is_retryable()
+        );
+        assert!(!AppendError::Io(Error::other("corrupt")).is_retryable());
+        assert!(!AppendError::FsyncDropped.is_retryable());
     }
 }

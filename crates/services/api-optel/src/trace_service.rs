@@ -159,7 +159,7 @@ impl TraceService for OtlpTraceService {
             self.writer
                 .insert_spans(&all_spans)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to insert spans: {}", e)))?;
+                .map_err(|e| crate::retry::write_error_status("spans", &e))?;
 
             tracing::info!(
                 workspace_id = %context.workspace_id,

@@ -32,6 +32,17 @@ pub struct WalIngestorConfig {
 
     #[serde(default = "default_wal_replay_batch_max_bytes")]
     pub replay_batch_max_bytes: u64,
+
+    /// Minimum free bytes on the `wal_dir` filesystem. Below it, OTLP exports
+    /// are refused with a retryable error (gRPC `UNAVAILABLE`, HTTP `503`)
+    /// until space is reclaimed. `0` disables the check. Default: 1 GiB
+    #[serde(default = "default_wal_min_free_bytes")]
+    pub wal_min_free_bytes: u64,
+
+    /// Append attempts between free-space samples. A sample is also refreshed
+    /// at least once per second. Default: 1024
+    #[serde(default = "default_wal_disk_check_interval")]
+    pub disk_check_interval: u64,
 }
 
 impl Default for WalIngestorConfig {
@@ -42,6 +53,8 @@ impl Default for WalIngestorConfig {
             flush_interval_ms: default_wal_flush_interval_ms(),
             group_commit_window_ms: default_wal_group_commit_window_ms(),
             replay_batch_max_bytes: default_wal_replay_batch_max_bytes(),
+            wal_min_free_bytes: default_wal_min_free_bytes(),
+            disk_check_interval: default_wal_disk_check_interval(),
         }
     }
 }
@@ -60,6 +73,12 @@ fn default_wal_group_commit_window_ms() -> u64 {
 }
 fn default_wal_replay_batch_max_bytes() -> u64 {
     64 * 1024 * 1024
+}
+fn default_wal_min_free_bytes() -> u64 {
+    1024 * 1024 * 1024 // 1 GiB
+}
+fn default_wal_disk_check_interval() -> u64 {
+    1024
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -367,6 +386,23 @@ mod tests {
         assert_eq!(from_default.parquet_data_dir, from_toml.parquet_data_dir);
         assert_eq!(from_default.parquet_data_dir, "./data/parquet-files");
         assert!(from_default.s3.is_none());
+    }
+
+    #[test]
+    fn wal_free_space_floor_defaults_and_overrides() {
+        let cfg: WalIngestorConfig = toml::from_str("").expect("empty wal config parses");
+        assert_eq!(cfg.wal_min_free_bytes, 1024 * 1024 * 1024);
+        assert_eq!(cfg.disk_check_interval, 1024);
+        assert_eq!(
+            WalIngestorConfig::default().wal_min_free_bytes,
+            cfg.wal_min_free_bytes
+        );
+
+        let cfg: IngestorConfig =
+            toml::from_str("[wal]\nwal_min_free_bytes = 0\ndisk_check_interval = 16\n")
+                .expect("wal overrides parse");
+        assert_eq!(cfg.wal.wal_min_free_bytes, 0);
+        assert_eq!(cfg.wal.disk_check_interval, 16);
     }
 
     #[test]

@@ -17,5 +17,6 @@ pub use builder::{RuntimeAuth, ZradarRuntimeBuilder};
 pub use config_key::{
     ApiKeyAdminAuthorizer, ApiKeyQueryAuthorizer, api_key_authorizers_from_config,
 };
+pub use health::probe as health_probe;
 pub use migrate::migrate;
 pub use zradar_traits::{AdminAuth, AdminAuthorizer, Authenticator, QueryAuth, QueryAuthorizer};

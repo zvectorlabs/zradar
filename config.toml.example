@@ -70,6 +70,8 @@ name       = "default"
 # grpc_http2_keepalive_timeout_secs  = 20
 # grpc_tcp_keepalive_secs            = 60       # 0 = disabled
 # http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
+# http_header_read_timeout_secs      = 30       # time to start a request and send its headers; also HTTP/1 keep-alive idle limit (0 = none)
+# http_body_read_timeout_secs        = 15       # time to send the request body, 408 after; keep below request_timeout_secs (0 = none)
 
 # Ingestion / storage configuration
 [ingestor]
@@ -83,6 +85,13 @@ path = "./data/trace-batches"
 # [ingestor.storage.s3]
 # bucket = "zradar-traces-prod"
 # region = "us-east-1"
+
+# Write-ahead log. Every accepted export is fsynced here before it is acked.
+# Defaults shown; uncomment to change.
+# [ingestor.wal]
+# wal_dir             = "./data/wal"
+# wal_min_free_bytes  = 1073741824  # 1 GiB; below this, exports get gRPC UNAVAILABLE / HTTP 503 (0 = off)
+# disk_check_interval = 1024        # appends between free-space samples (also sampled every second)
 
 # Parquet ingestion lifecycle (write buffer, compaction, memory cache, fsync).
 # All of these are durability/throughput tuning knobs; the durable-by-default

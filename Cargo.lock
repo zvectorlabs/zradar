@@ -138,6 +138,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "hex",
+ "hyper-util",
  "opentelemetry-proto",
  "prost",
  "rustix",
@@ -147,6 +148,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tonic-types",
  "tower",
  "tower-http 0.7.1",
  "tracing",
@@ -4816,9 +4818,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.52.3"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -5010,6 +5012,17 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-prost",
+]
+
+[[package]]
+name = "tonic-types"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab1b02061f83d519bba3caa167f88f261ef05720ab8ebc954ade70de3348e8"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tonic",
 ]
 
 [[package]]
@@ -6205,6 +6218,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "proptest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

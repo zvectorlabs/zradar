@@ -143,7 +143,7 @@ impl MetricsService for OtlpMetricsService {
             self.writer
                 .insert_metrics(&metrics)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to insert metrics: {}", e)))?;
+                .map_err(|e| crate::retry::write_error_status("metrics", &e))?;
 
             tracing::info!(
                 workspace_id = %context.workspace_id,
