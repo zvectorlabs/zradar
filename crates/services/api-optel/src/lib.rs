@@ -35,7 +35,7 @@ pub use logs_converter::OtlpLogsConverter;
 pub use logs_service::OtlpLogsService;
 pub use metrics_converter::OtlpMetricsConverter;
 pub use metrics_service::OtlpMetricsService;
-pub use otlp_http::{otlp_http_router, otlp_http_router_with_body_limit};
+pub use otlp_http::{OtlpHttpServerOptions, otlp_http_router, otlp_http_router_with_body_limit};
 pub use rate_limiter::ProjectRateLimiter;
 pub use span_type_mapper::SpanTypeMapper;
 pub use trace_service::OtlpTraceService;

@@ -138,6 +138,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "hex",
+ "hyper-util",
  "opentelemetry-proto",
  "prost",
  "rustix",

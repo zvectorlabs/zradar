@@ -1,7 +1,6 @@
 //! Axum handlers for OTLP/HTTP protocol (R1.1).
 
 use axum::Router;
-use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -22,6 +21,7 @@ use crate::score_extractor::extract_scores;
 use crate::{CircuitBreaker, ProjectRateLimiter};
 
 use super::OtlpHttpState;
+use super::server::OtlpBody;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 /// Default request body cap for OTLP/HTTP exports.
@@ -171,7 +171,7 @@ async fn enforce_http_policy(
 async fn export_traces(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();
@@ -244,7 +244,7 @@ async fn export_traces(
 async fn export_metrics(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();
@@ -296,7 +296,7 @@ async fn export_metrics(
 async fn export_logs(
     State(state): State<OtlpHttpState>,
     headers: HeaderMap,
-    body: Bytes,
+    OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     if let Err(status) = check_content_type(&headers) {
         return status.into_response();

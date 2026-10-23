@@ -38,7 +38,8 @@ use api::{
 };
 use api_optel::{
     AdmissionLayer, CircuitBreaker, IngestProtocol, LogsServiceServer, MetricsServiceServer,
-    OtlpLogsService, OtlpMetricsService, OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    OtlpHttpServerOptions, OtlpLogsService, OtlpMetricsService, OtlpTraceService,
+    ProjectRateLimiter, TraceServiceServer, otlp_http::serve as serve_otlp_http,
     otlp_http_router_with_body_limit,
 };
 use axum::Router;
@@ -1181,10 +1182,19 @@ impl ZradarRuntimeBuilder {
                 IngestProtocol::Http,
             ));
             let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
+            let otlp_http_options = OtlpHttpServerOptions {
+                header_read_timeout: secs_or_none(config.otlp_limits.http_header_read_timeout_secs),
+                body_read_timeout: secs_or_none(config.otlp_limits.http_body_read_timeout_secs),
+            };
             Some(async move {
-                info!("OTLP/HTTP receiver listening on http://{}", otlp_http_addr);
+                info!(
+                    header_read_timeout = ?otlp_http_options.header_read_timeout,
+                    body_read_timeout = ?otlp_http_options.body_read_timeout,
+                    "OTLP/HTTP receiver listening on http://{}",
+                    otlp_http_addr
+                );
                 let listener = tokio::net::TcpListener::bind(&otlp_http_addr).await?;
-                axum::serve(listener, otlp_http_app)
+                serve_otlp_http(listener, otlp_http_app, otlp_http_options)
                     .await
                     .map_err(|e| anyhow::anyhow!("OTLP/HTTP server failed: {}", e))
             })

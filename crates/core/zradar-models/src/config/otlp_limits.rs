@@ -57,6 +57,19 @@ pub struct OtlpLimitsConfig {
     /// Maximum OTLP/HTTP request body size in bytes. Default: 8 MiB
     #[serde(default = "default_http_max_body_bytes")]
     pub http_max_body_bytes: usize,
+
+    /// Maximum time for an OTLP/HTTP client to send a complete HTTP/1
+    /// request head, in seconds. Bounds slow-header ("slowloris") clients and
+    /// also closes idle keep-alive connections after this delay. `0` disables
+    /// it. Default: 10
+    #[serde(default = "default_http_header_read_timeout_secs")]
+    pub http_header_read_timeout_secs: u64,
+
+    /// Maximum time for an OTLP/HTTP client to send the whole request body,
+    /// in seconds. Slower bodies get `408 Request Timeout`. `0` disables it.
+    /// Default: 30
+    #[serde(default = "default_http_body_read_timeout_secs")]
+    pub http_body_read_timeout_secs: u64,
 }
 
 impl Default for OtlpLimitsConfig {
@@ -70,6 +83,8 @@ impl Default for OtlpLimitsConfig {
             grpc_http2_keepalive_timeout_secs: default_grpc_http2_keepalive_timeout_secs(),
             grpc_tcp_keepalive_secs: default_grpc_tcp_keepalive_secs(),
             http_max_body_bytes: default_http_max_body_bytes(),
+            http_header_read_timeout_secs: default_http_header_read_timeout_secs(),
+            http_body_read_timeout_secs: default_http_body_read_timeout_secs(),
         }
     }
 }
@@ -98,6 +113,12 @@ fn default_grpc_tcp_keepalive_secs() -> u64 {
 fn default_http_max_body_bytes() -> usize {
     8 * 1024 * 1024
 }
+fn default_http_header_read_timeout_secs() -> u64 {
+    10
+}
+fn default_http_body_read_timeout_secs() -> u64 {
+    30
+}
 
 #[cfg(test)]
 mod tests {
@@ -117,5 +138,16 @@ mod tests {
         assert_eq!(cfg.max_concurrent_requests, 1);
         assert_eq!(cfg.http_max_body_bytes, 1024);
         assert_eq!(cfg.request_timeout_secs, 30);
+        assert_eq!(cfg.http_header_read_timeout_secs, 10);
+        assert_eq!(cfg.http_body_read_timeout_secs, 30);
+    }
+
+    #[test]
+    fn http_read_timeouts_can_be_disabled() {
+        let cfg: OtlpLimitsConfig =
+            toml::from_str("http_header_read_timeout_secs = 0\nhttp_body_read_timeout_secs = 0\n")
+                .expect("parses");
+        assert_eq!(cfg.http_header_read_timeout_secs, 0);
+        assert_eq!(cfg.http_body_read_timeout_secs, 0);
     }
 }
