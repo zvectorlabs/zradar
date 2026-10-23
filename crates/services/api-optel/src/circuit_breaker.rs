@@ -19,6 +19,18 @@ use tracing::warn;
 /// How long a disk/memory sample stays valid before it is refreshed.
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Retry delay suggested when the write queue is over its limit; the queue
+/// drains quickly.
+const QUEUE_RETRY_AFTER: Duration = RESOURCE_SAMPLE_INTERVAL;
+/// Retry delay suggested under disk or memory pressure, which clears slowly.
+const RESOURCE_PRESSURE_RETRY_AFTER: Duration = Duration::from_secs(5);
+
+/// Why the breaker tripped and how long clients should wait.
+struct Trip {
+    reason: String,
+    retry_after: Duration,
+}
+
 /// Sentinel stored in the usage atomics when a measurement is unavailable.
 const UNKNOWN_PERCENT: u8 = u8::MAX;
 /// Sentinel for "never sampled".
@@ -91,42 +103,54 @@ impl CircuitBreaker {
     /// measurement is unavailable (e.g. on non-Linux hosts); a warning is
     /// logged once in that case.
     pub async fn check(&self) -> Result<(), String> {
-        self.refresh_resources_if_stale().await;
-
-        if let Some(disk_usage) = self.disk_usage_percent()
-            && disk_usage > self.max_disk_usage_percent
-        {
-            return Err(format!("disk usage {}% exceeds threshold", disk_usage));
-        }
-
-        if let Some(memory_usage) = self.memory_usage_percent()
-            && memory_usage > self.max_memory_usage_percent
-        {
-            return Err(format!("memory usage {}% exceeds threshold", memory_usage));
-        }
-
-        let queue_depth = self.queue_depth.load(Ordering::Relaxed);
-        if queue_depth > self.max_queue_depth {
-            return Err(format!("queue depth {} exceeds threshold", queue_depth));
-        }
-
-        Ok(())
+        self.evaluate().await.map_err(|trip| trip.reason)
     }
 
     /// [`check`](Self::check) as a gRPC status.
     ///
     /// A tripped breaker is transient overload, so it maps to `UNAVAILABLE`
-    /// with a `RetryInfo` delay of one sample interval. OTLP exporters retry
-    /// `UNAVAILABLE`; they treat `RESOURCE_EXHAUSTED` without `RetryInfo` as
-    /// permanent and drop the data
-    /// (<https://opentelemetry.io/docs/specs/otlp/#failures>).
+    /// with a `RetryInfo` delay. OTLP exporters retry `UNAVAILABLE`; they
+    /// treat `RESOURCE_EXHAUSTED` without `RetryInfo` as permanent and drop
+    /// the data (<https://opentelemetry.io/docs/specs/otlp/#failures>).
     pub async fn check_status(&self) -> Result<(), Status> {
-        self.check().await.map_err(|reason| {
+        self.evaluate().await.map_err(|trip| {
             crate::retry::unavailable(
-                format!("Ingestion backpressure: {}", reason),
-                RESOURCE_SAMPLE_INTERVAL,
+                format!("Ingestion backpressure: {}", trip.reason),
+                trip.retry_after,
             )
         })
+    }
+
+    async fn evaluate(&self) -> Result<(), Trip> {
+        self.refresh_resources_if_stale().await;
+
+        if let Some(disk_usage) = self.disk_usage_percent()
+            && disk_usage > self.max_disk_usage_percent
+        {
+            return Err(Trip {
+                reason: format!("disk usage {}% exceeds threshold", disk_usage),
+                retry_after: RESOURCE_PRESSURE_RETRY_AFTER,
+            });
+        }
+
+        if let Some(memory_usage) = self.memory_usage_percent()
+            && memory_usage > self.max_memory_usage_percent
+        {
+            return Err(Trip {
+                reason: format!("memory usage {}% exceeds threshold", memory_usage),
+                retry_after: RESOURCE_PRESSURE_RETRY_AFTER,
+            });
+        }
+
+        let queue_depth = self.queue_depth.load(Ordering::Relaxed);
+        if queue_depth > self.max_queue_depth {
+            return Err(Trip {
+                reason: format!("queue depth {} exceeds threshold", queue_depth),
+                retry_after: QUEUE_RETRY_AFTER,
+            });
+        }
+
+        Ok(())
     }
 
     /// Re-sample disk and memory usage if the cached sample is older than
@@ -368,9 +392,18 @@ mod tests {
             "{}",
             status.message()
         );
+        assert_eq!(crate::retry::retry_delay(&status), Some(QUEUE_RETRY_AFTER));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn disk_pressure_asks_for_a_longer_retry_delay() {
+        let breaker = CircuitBreaker::new(std::env::temp_dir(), 0, 100, 10);
+        let status = breaker.check_status().await.expect_err("0% disk trips");
+        assert_eq!(status.code(), tonic::Code::Unavailable);
         assert_eq!(
             crate::retry::retry_delay(&status),
-            Some(RESOURCE_SAMPLE_INTERVAL)
+            Some(RESOURCE_PRESSURE_RETRY_AFTER)
         );
     }
 
