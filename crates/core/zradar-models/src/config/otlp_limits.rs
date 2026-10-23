@@ -29,9 +29,11 @@ pub struct OtlpLimitsConfig {
     #[serde(default = "default_request_timeout_secs")]
     pub request_timeout_secs: u64,
 
-    /// Maximum size of a decoded (decompressed) OTLP gRPC message in bytes.
-    /// Default: 4 MiB, matching the common gRPC and OpenTelemetry Collector
-    /// receiver default.
+    /// Maximum size of an OTLP gRPC message in bytes, enforced both on the
+    /// wire (`OUT_OF_RANGE` above it) and after decompression
+    /// (`RESOURCE_EXHAUSTED` once decompressed output passes it, which stops
+    /// decompression bombs). Default: 4 MiB, matching the common gRPC and
+    /// OpenTelemetry Collector receiver default.
     #[serde(default = "default_grpc_max_decoding_message_bytes")]
     pub grpc_max_decoding_message_bytes: usize,
 
@@ -73,6 +75,26 @@ pub struct OtlpLimitsConfig {
     /// `0` disables it. Default: 15
     #[serde(default = "default_http_body_read_timeout_secs")]
     pub http_body_read_timeout_secs: u64,
+
+    /// Maximum size of an OTLP/HTTP request body after `Content-Encoding`
+    /// (`gzip`, `zstd`) is removed, in bytes. Decompression stops as soon as
+    /// the output passes it and the request gets `413 Payload Too Large`, so a
+    /// small compressed body cannot expand into an unbounded allocation
+    /// ("decompression bomb"). Uncompressed bodies are bounded by the smaller
+    /// of this and `http_max_body_bytes`. Default (unset): `http_max_body_bytes`,
+    /// so a decoded body may never exceed what an uncompressed one may be.
+    /// See [`Self::effective_http_max_decoded_body_bytes`].
+    #[serde(default)]
+    pub http_max_decoded_body_bytes: Option<usize>,
+
+    /// Maximum time to wait for the configured authenticator to verify an
+    /// ingest API key, in seconds. A verification that takes longer is
+    /// treated as the key backend being unavailable: gRPC `UNAVAILABLE` /
+    /// HTTP `503` with a retry delay, so exporters retry rather than drop
+    /// data. `0` disables the limit (the request timeout still applies).
+    /// Default: 10
+    #[serde(default = "default_auth_timeout_secs")]
+    pub auth_timeout_secs: u64,
 }
 
 impl Default for OtlpLimitsConfig {
@@ -88,7 +110,18 @@ impl Default for OtlpLimitsConfig {
             http_max_body_bytes: default_http_max_body_bytes(),
             http_header_read_timeout_secs: default_http_header_read_timeout_secs(),
             http_body_read_timeout_secs: default_http_body_read_timeout_secs(),
+            http_max_decoded_body_bytes: None,
+            auth_timeout_secs: default_auth_timeout_secs(),
         }
+    }
+}
+
+impl OtlpLimitsConfig {
+    /// The OTLP/HTTP decoded body cap: `http_max_decoded_body_bytes`, or
+    /// `http_max_body_bytes` when unset.
+    pub fn effective_http_max_decoded_body_bytes(&self) -> usize {
+        self.http_max_decoded_body_bytes
+            .unwrap_or(self.http_max_body_bytes)
     }
 }
 
@@ -122,6 +155,9 @@ fn default_http_header_read_timeout_secs() -> u64 {
 fn default_http_body_read_timeout_secs() -> u64 {
     15
 }
+fn default_auth_timeout_secs() -> u64 {
+    10
+}
 
 #[cfg(test)]
 mod tests {
@@ -144,6 +180,25 @@ mod tests {
         assert_eq!(cfg.http_header_read_timeout_secs, 30);
         assert_eq!(cfg.http_body_read_timeout_secs, 15);
         assert!(cfg.http_body_read_timeout_secs < cfg.request_timeout_secs);
+        assert_eq!(cfg.http_max_decoded_body_bytes, None);
+        // Unset, the decoded cap follows the wire cap.
+        assert_eq!(cfg.effective_http_max_decoded_body_bytes(), 1024);
+        assert_eq!(cfg.auth_timeout_secs, 10);
+        assert!(cfg.auth_timeout_secs < cfg.request_timeout_secs);
+    }
+
+    #[test]
+    fn decoded_body_cap_and_auth_timeout_parse() {
+        let cfg: OtlpLimitsConfig =
+            toml::from_str("http_max_decoded_body_bytes = 2048\nauth_timeout_secs = 0\n")
+                .expect("parses");
+        assert_eq!(cfg.http_max_decoded_body_bytes, Some(2048));
+        assert_eq!(cfg.effective_http_max_decoded_body_bytes(), 2048);
+        assert_eq!(
+            OtlpLimitsConfig::default().effective_http_max_decoded_body_bytes(),
+            8 * 1024 * 1024
+        );
+        assert_eq!(cfg.auth_timeout_secs, 0);
     }
 
     #[test]

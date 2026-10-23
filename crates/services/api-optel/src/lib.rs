@@ -3,7 +3,8 @@
 //! OpenTelemetry Protocol (OTLP) gRPC services for zradar.
 //!
 //! Provides trace, metrics, and logs ingestion over gRPC.
-//! Authentication is handled via `Arc<dyn Authenticator>` from `zradar-traits`.
+//! Authentication is handled via `Arc<dyn Authenticator>` from `zradar-traits`,
+//! before request payloads are read or decoded (see [`IngestAuthLayer`]).
 
 mod admission;
 mod auth;
@@ -28,6 +29,9 @@ mod span_type_mapper;
 mod trace_service;
 
 pub use admission::{Admission, AdmissionLayer, IngestProtocol};
+pub use auth::{
+    AUTH_LOG_INTERVAL, DEFAULT_AUTH_TIMEOUT, IngestAuth, IngestAuthLayer, IngestAuthService,
+};
 pub use circuit_breaker::CircuitBreaker;
 pub use conventions::{AttrView, AttributeConvention, default_conventions};
 pub use converter::OtlpConverter;
@@ -35,7 +39,10 @@ pub use logs_converter::OtlpLogsConverter;
 pub use logs_service::OtlpLogsService;
 pub use metrics_converter::OtlpMetricsConverter;
 pub use metrics_service::OtlpMetricsService;
-pub use otlp_http::{OtlpHttpServerOptions, otlp_http_router, otlp_http_router_with_body_limit};
+pub use otlp_http::{
+    OtlpHttpLimits, OtlpHttpServerOptions, otlp_http_router, otlp_http_router_with_body_limit,
+    otlp_http_router_with_limits,
+};
 pub use rate_limiter::ProjectRateLimiter;
 pub use span_type_mapper::SpanTypeMapper;
 pub use trace_service::OtlpTraceService;

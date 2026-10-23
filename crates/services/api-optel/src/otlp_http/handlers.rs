@@ -1,16 +1,21 @@
 //! Axum handlers for OTLP/HTTP protocol (R1.1).
 
+use axum::Extension;
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use prost::Message;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Semaphore;
 use zradar_models::RequestContext;
 use zradar_policy::SignalKind;
 use zradar_traits::{Authenticator, SettingsRepository};
 
+use crate::auth::{DEFAULT_AUTH_TIMEOUT, IngestAuth};
 use crate::converter::OtlpConverter;
 use crate::ingestion_guard::{enforce_policy_ingest, enforce_workspace_settings_and_get};
 use crate::logs_converter::OtlpLogsConverter;
@@ -21,6 +26,7 @@ use crate::score_extractor::extract_scores;
 use crate::{CircuitBreaker, ProjectRateLimiter};
 
 use super::OtlpHttpState;
+use super::encoding::{ContentEncoding, decode_body};
 use super::server::OtlpBody;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
@@ -54,7 +60,9 @@ pub fn otlp_http_router(
 }
 
 /// Build the OTLP/HTTP axum router with an explicit request body cap.
-/// Bodies larger than `max_body_bytes` are rejected with `413 Payload Too Large`.
+/// Bodies larger than `max_body_bytes` — on the wire, or once decompressed —
+/// are rejected with `413 Payload Too Large`. API-key verification is limited
+/// to [`DEFAULT_AUTH_TIMEOUT`]. See [`otlp_http_router_with_limits`].
 #[allow(clippy::too_many_arguments)]
 pub fn otlp_http_router_with_body_limit(
     writer: Arc<dyn zradar_traits::TelemetryWriter>,
@@ -67,6 +75,63 @@ pub fn otlp_http_router_with_body_limit(
     cors_config: zradar_models::CorsConfig,
     max_body_bytes: usize,
 ) -> Router {
+    otlp_http_router_with_limits(
+        writer,
+        auth,
+        allow_test_header_context,
+        settings_repo,
+        rate_limiter,
+        policy_enforcer,
+        circuit_breaker,
+        cors_config,
+        OtlpHttpLimits {
+            max_body_bytes,
+            max_decoded_body_bytes: max_body_bytes,
+            auth_timeout: Some(DEFAULT_AUTH_TIMEOUT),
+        },
+    )
+}
+
+/// Request limits for the OTLP/HTTP router.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtlpHttpLimits {
+    /// Maximum request body size on the wire (`413` above it).
+    pub max_body_bytes: usize,
+    /// Maximum request body size after `Content-Encoding` is removed (`413`
+    /// above it). Also bounds uncompressed bodies.
+    pub max_decoded_body_bytes: usize,
+    /// Maximum time for one API-key verification; slower verifications get
+    /// `503` + `Retry-After`. `None` disables the limit.
+    pub auth_timeout: Option<Duration>,
+}
+
+impl Default for OtlpHttpLimits {
+    fn default() -> Self {
+        Self {
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            max_decoded_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            auth_timeout: Some(DEFAULT_AUTH_TIMEOUT),
+        }
+    }
+}
+
+/// Build the OTLP/HTTP axum router with explicit [`OtlpHttpLimits`].
+///
+/// Every export is authenticated from its headers, and its `Content-Type` and
+/// `Content-Encoding` checked, before the body is read.
+#[allow(clippy::too_many_arguments)]
+pub fn otlp_http_router_with_limits(
+    writer: Arc<dyn zradar_traits::TelemetryWriter>,
+    auth: Option<Arc<dyn Authenticator>>,
+    allow_test_header_context: bool,
+    settings_repo: Arc<dyn SettingsRepository>,
+    rate_limiter: Arc<ProjectRateLimiter>,
+    policy_enforcer: Arc<dyn zradar_policy::PolicyEnforcer>,
+    circuit_breaker: Arc<CircuitBreaker>,
+    cors_config: zradar_models::CorsConfig,
+    limits: OtlpHttpLimits,
+) -> Router {
+    let max_body_bytes = limits.max_body_bytes;
     let state = OtlpHttpState {
         writer,
         auth,
@@ -75,6 +140,8 @@ pub fn otlp_http_router_with_body_limit(
         rate_limiter: Some(rate_limiter),
         policy_enforcer: Some(policy_enforcer),
         circuit_breaker: Some(circuit_breaker),
+        max_decoded_body_bytes: limits.max_decoded_body_bytes,
+        auth_timeout: limits.auth_timeout,
     };
 
     let cors_layer = if cors_config.allowed_origins.is_empty() {
@@ -92,10 +159,18 @@ pub fn otlp_http_router_with_body_limit(
             .allow_headers(tower_http::cors::Any)
     };
 
+    let preflight_state = PreflightState {
+        http: state.clone(),
+        drain_limit: max_body_bytes,
+    };
     Router::new()
         .route("/v1/traces", post(export_traces))
         .route("/v1/metrics", post(export_metrics))
         .route("/v1/logs", post(export_logs))
+        .route_layer(axum::middleware::from_fn_with_state(
+            preflight_state,
+            preflight,
+        ))
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(cors_layer)
         .with_state(state)
@@ -114,36 +189,104 @@ fn check_content_type(headers: &HeaderMap) -> Result<(), StatusCode> {
     }
 }
 
-async fn authenticate_http(
-    auth: &Option<Arc<dyn Authenticator>>,
-    headers: &HeaderMap,
-    allow_test_header_context: bool,
-) -> Result<RequestContext, StatusCode> {
-    let Some(authenticator) = auth else {
-        return Ok(RequestContext::new(uuid::Uuid::nil().into()));
-    };
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let mut context = authenticator
-        .authenticate(token)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+/// What an export request's headers establish, checked by [`preflight`]
+/// before its body is read.
+#[derive(Clone)]
+struct ExportPreflight {
+    context: RequestContext,
+    encoding: ContentEncoding,
+}
 
-    if allow_test_header_context
-        && let Some(workspace_id) = headers
-            .get("x-workspace-id")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok())
-    {
-        context.workspace_id = workspace_id;
+/// State for [`preflight`].
+#[derive(Clone)]
+struct PreflightState {
+    http: OtlpHttpState,
+    /// Most bytes of a rejected request's body that are drained.
+    drain_limit: usize,
+}
+
+/// Route middleware that checks an export from its headers alone, before the
+/// body is read: a protobuf `Content-Type` (`415`), a supported
+/// `Content-Encoding` (`415`), a valid API key (`401`, or `503` +
+/// `Retry-After` when the key cannot be verified right now) and the circuit
+/// breaker (`503`). Rejected requests are answered at once, without buffering,
+/// decompressing or parsing their body; see [`drain_rejected_body`].
+async fn preflight(
+    State(state): State<PreflightState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    match check_export_headers(&state.http, request.headers()).await {
+        Ok(checked) => {
+            request.extensions_mut().insert(checked);
+            next.run(request).await
+        }
+        Err(response) => {
+            drain_rejected_body(request.into_body(), state.drain_limit);
+            response
+        }
     }
+}
 
-    Ok(context)
+async fn check_export_headers(
+    state: &OtlpHttpState,
+    headers: &HeaderMap,
+) -> Result<ExportPreflight, Response> {
+    check_content_type(headers).map_err(IntoResponse::into_response)?;
+    let encoding = ContentEncoding::from_headers(headers).map_err(IntoResponse::into_response)?;
+    let context = IngestAuth::new(state.auth.clone(), state.allow_test_header_context)
+        .with_timeout(state.auth_timeout)
+        .authenticate(headers)
+        .await
+        .map_err(|rejection| rejection.into_http_response())?;
+    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
+        return Err(response);
+    }
+    Ok(ExportPreflight { context, encoding })
+}
+
+/// Rejected bodies drained at once, across all connections.
+const MAX_CONCURRENT_DRAINS: usize = 64;
+/// Longest time spent draining one rejected body.
+const DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Discard the unread body of a rejected HTTP/1 request in the background.
+///
+/// If the body were simply dropped, hyper would stop reading and close the
+/// connection while the client may still be uploading; the client's TCP stack
+/// can then see a reset instead of the rejection, which OTLP exporters treat
+/// as a retryable network error. Draining lets the client finish its upload
+/// and read the response, and keeps the connection reusable. Bytes are
+/// discarded as they arrive (no buffering); a drain stops after `limit`
+/// bytes or [`DRAIN_DEADLINE`], and at most [`MAX_CONCURRENT_DRAINS`] run at
+/// once — beyond that the body is dropped and the connection closed.
+fn drain_rejected_body(body: axum::body::Body, limit: usize) {
+    use axum::body::HttpBody;
+
+    if body.is_end_stream() {
+        return;
+    }
+    static DRAINS: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
+    let drains = DRAINS.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_DRAINS)));
+    let Ok(permit) = drains.clone().try_acquire_owned() else {
+        return;
+    };
+    tokio::spawn(async move {
+        let _permit = permit;
+        let mut body = std::pin::pin!(body);
+        let mut drained = 0usize;
+        let _ = tokio::time::timeout(DRAIN_DEADLINE, async {
+            while let Some(Ok(frame)) =
+                std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await
+            {
+                drained = drained.saturating_add(frame.data_ref().map_or(0, |data| data.len()));
+                if drained > limit {
+                    break;
+                }
+            }
+        })
+        .await;
+    });
 }
 
 async fn check_circuit_breaker(circuit_breaker: &Option<Arc<CircuitBreaker>>) -> Option<Response> {
@@ -170,20 +313,13 @@ async fn enforce_http_policy(
 
 async fn export_traces(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     let request =
         match opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
             body,
@@ -243,20 +379,13 @@ async fn export_traces(
 
 async fn export_metrics(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     let request = match opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(body) {
         Ok(r) => r,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -295,20 +424,13 @@ async fn export_metrics(
 
 async fn export_logs(
     State(state): State<OtlpHttpState>,
-    headers: HeaderMap,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
-    if let Err(status) = check_content_type(&headers) {
-        return status.into_response();
-    }
-    let context =
-        match authenticate_http(&state.auth, &headers, state.allow_test_header_context).await {
-            Ok(ctx) => ctx,
-            Err(status) => return status.into_response(),
-        };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
+    let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
+        Ok(body) => body,
+        Err(status) => return status.into_response(),
+    };
     let request =
         match opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(
             body,
@@ -961,6 +1083,264 @@ mod tests {
             }
             let response = response(&mut stream).await;
             assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        }
+    }
+
+    /// Checks made from headers alone, before the body is read, and request
+    /// body decoding.
+    mod preflight {
+        use super::body_limit::{AllowAll, EmptySettings, NoopWriter};
+        use super::*;
+        use crate::otlp_http::encoding::tests::{gzip, zstd};
+        use axum::http::{Request, header};
+        use std::path::PathBuf;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        use std::time::Duration;
+        use tokio_stream::Stream;
+        use tower::ServiceExt;
+        use zradar_traits::AuthUnavailable;
+
+        /// Accepts `Bearer good`; reports its backend down for `Bearer down`.
+        struct KeyCheck;
+        #[tonic::async_trait]
+        impl Authenticator for KeyCheck {
+            async fn authenticate(&self, token: &str) -> anyhow::Result<RequestContext> {
+                match token {
+                    "good" => Ok(RequestContext::new(uuid::Uuid::nil().into())),
+                    "down" => {
+                        Err(AuthUnavailable::new("backend down", Duration::from_secs(2)).into())
+                    }
+                    _ => anyhow::bail!("Invalid API key"),
+                }
+            }
+        }
+
+        fn router(max_decoded_body_bytes: usize) -> Router {
+            otlp_http_router_with_limits(
+                Arc::new(NoopWriter),
+                Some(Arc::new(KeyCheck)),
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+                zradar_models::CorsConfig::default(),
+                OtlpHttpLimits {
+                    max_body_bytes: 8 * 1024 * 1024,
+                    max_decoded_body_bytes,
+                    auth_timeout: Some(Duration::from_secs(5)),
+                },
+            )
+        }
+
+        /// A request body that never yields any data.
+        struct NeverBody;
+        impl Stream for NeverBody {
+            type Item = Result<axum::body::Bytes, std::io::Error>;
+            fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+                Poll::Pending
+            }
+        }
+
+        fn export(
+            key: &str,
+            encoding: Option<&str>,
+            body: axum::body::Body,
+        ) -> Request<axum::body::Body> {
+            let mut builder = Request::builder()
+                .method("POST")
+                .uri("/v1/traces")
+                .header("content-type", PROTOBUF_CONTENT_TYPE)
+                .header(header::AUTHORIZATION, format!("Bearer {key}"));
+            if let Some(encoding) = encoding {
+                builder = builder.header(header::CONTENT_ENCODING, encoding);
+            }
+            builder.body(body).unwrap()
+        }
+
+        async fn send(router: Router, request: Request<axum::body::Body>) -> Response {
+            tokio::time::timeout(Duration::from_secs(5), router.oneshot(request))
+                .await
+                .expect("answered without reading the body")
+                .unwrap()
+        }
+
+        /// Rejections come from headers alone: they are answered although the
+        /// body never arrives (a rejected body is only drained, in the
+        /// background, never buffered or decoded).
+        #[tokio::test]
+        async fn rejected_requests_are_answered_without_waiting_for_the_body() {
+            for (key, encoding, expected) in [
+                ("bad", None, StatusCode::UNAUTHORIZED),
+                ("down", None, StatusCode::SERVICE_UNAVAILABLE),
+                ("good", Some("br"), StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            ] {
+                let body = axum::body::Body::from_stream(NeverBody);
+                let response = send(router(1024), export(key, encoding, body)).await;
+                assert_eq!(response.status(), expected, "key {key}");
+            }
+        }
+
+        #[tokio::test]
+        async fn unavailable_key_backend_is_503_with_retry_after() {
+            let response = send(
+                router(1024),
+                export("down", None, axum::body::Body::empty()),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "2");
+        }
+
+        fn one_span() -> Vec<u8> {
+            use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+            use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+            ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans: vec![Span {
+                            trace_id: vec![1; 16],
+                            span_id: vec![2; 8],
+                            name: "op".into(),
+                            start_time_unix_nano: 1,
+                            end_time_unix_nano: 2,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec()
+        }
+
+        #[tokio::test]
+        async fn compressed_exports_are_accepted() {
+            let payload = one_span();
+            for (encoding, body) in [("gzip", gzip(&payload)), ("zstd", zstd(&payload))] {
+                let response = send(
+                    router(1024),
+                    export("good", Some(encoding), axum::body::Body::from(body)),
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK, "{encoding}");
+            }
+        }
+
+        #[tokio::test]
+        async fn decompression_bombs_are_413() {
+            let bomb = vec![0u8; 16 * 1024 * 1024];
+            for (encoding, body) in [("gzip", gzip(&bomb)), ("zstd", zstd(&bomb))] {
+                let response = send(
+                    router(64 * 1024),
+                    export("good", Some(encoding), axum::body::Body::from(body)),
+                )
+                .await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "{encoding}"
+                );
+            }
+        }
+
+        async fn start_server() -> std::net::SocketAddr {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(crate::otlp_http::serve(
+                listener,
+                router(1024),
+                crate::otlp_http::OtlpHttpServerOptions::default(),
+            ));
+            addr
+        }
+
+        fn head(key: &str, content_length: usize) -> String {
+            format!(
+                "POST /v1/traces HTTP/1.1\r\nHost: x\r\n\
+                 Content-Type: application/x-protobuf\r\n\
+                 Authorization: Bearer {key}\r\nContent-Length: {content_length}\r\n\r\n"
+            )
+        }
+
+        /// Read one response (status line and headers; these have no body or a
+        /// tiny one) and return its status line.
+        async fn read_status(stream: &mut tokio::net::TcpStream) -> String {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !buf.ends_with(b"\r\n\r\n") {
+                    let n = stream.read(&mut byte).await.unwrap();
+                    assert!(
+                        n > 0,
+                        "connection closed: {}",
+                        String::from_utf8_lossy(&buf)
+                    );
+                    buf.push(byte[0]);
+                }
+            })
+            .await
+            .expect("response in time");
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            // Skip a small body announced with Content-Length.
+            if let Some(len) = text
+                .lines()
+                .find_map(|l| {
+                    l.to_ascii_lowercase()
+                        .strip_prefix("content-length: ")
+                        .map(str::to_owned)
+                })
+                .and_then(|v| v.trim().parse::<usize>().ok())
+            {
+                let mut body = vec![0u8; len];
+                stream.read_exact(&mut body).await.unwrap();
+            }
+            text.lines().next().unwrap_or_default().to_owned()
+        }
+
+        #[tokio::test]
+        async fn rejected_upload_is_drained_and_the_connection_reused() {
+            use tokio::io::AsyncWriteExt;
+            let addr = start_server().await;
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+
+            // The rejection arrives before any of the body is sent.
+            let body_len = 512 * 1024;
+            stream
+                .write_all(head("bad", body_len).as_bytes())
+                .await
+                .unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 401"));
+
+            // The client can still upload the body, and reuse the connection.
+            stream.write_all(&vec![0u8; body_len]).await.unwrap();
+            stream.write_all(head("good", 0).as_bytes()).await.unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 200"));
+        }
+
+        #[tokio::test]
+        async fn client_that_uploads_before_reading_gets_the_rejection() {
+            use tokio::io::AsyncWriteExt;
+            let addr = start_server().await;
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            // Like simple exporters: send the whole request, then read.
+            let body_len = 4 * 1024 * 1024;
+            let mut request = head("bad", body_len).into_bytes();
+            request.extend(vec![0u8; body_len]);
+            stream.write_all(&request).await.unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 401"));
+        }
+
+        #[tokio::test]
+        async fn corrupt_compressed_body_is_400() {
+            let response = send(
+                router(1024),
+                export("good", Some("gzip"), axum::body::Body::from(one_span())),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         }
     }
 }

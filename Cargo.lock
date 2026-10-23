@@ -114,6 +114,7 @@ dependencies = [
  "tonic-prost",
  "tonic-prost-build",
  "tonic-reflection",
+ "tonic-types",
  "tonic-web",
  "tower",
  "tower-http 0.7.1",
@@ -137,6 +138,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "flate2",
  "hex",
  "hyper-util",
  "opentelemetry-proto",
@@ -152,10 +154,12 @@ dependencies = [
  "tower",
  "tower-http 0.7.1",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "zradar-models",
  "zradar-policy",
  "zradar-traits",
+ "zstd",
 ]
 
 [[package]]
@@ -6000,6 +6004,7 @@ dependencies = [
  "arrow",
  "chrono",
  "fake",
+ "flate2",
  "hex",
  "opentelemetry-proto",
  "parquet",
@@ -6019,6 +6024,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "zradar-models",
+ "zstd",
 ]
 
 [[package]]

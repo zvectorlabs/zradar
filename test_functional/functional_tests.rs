@@ -81,3 +81,6 @@ mod test_security;
 
 #[path = "scenarios/test_grpc_api.rs"]
 mod test_grpc_api;
+
+#[path = "scenarios/test_ingest_guards.rs"]
+mod test_ingest_guards;

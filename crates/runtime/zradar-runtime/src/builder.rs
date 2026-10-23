@@ -37,10 +37,10 @@ use api::{
     telemetry::QueryService,
 };
 use api_optel::{
-    AdmissionLayer, CircuitBreaker, IngestProtocol, LogsServiceServer, MetricsServiceServer,
-    OtlpHttpServerOptions, OtlpLogsService, OtlpMetricsService, OtlpTraceService,
-    ProjectRateLimiter, TraceServiceServer, otlp_http::serve as serve_otlp_http,
-    otlp_http_router_with_body_limit,
+    AdmissionLayer, CircuitBreaker, IngestAuth, IngestAuthLayer, IngestProtocol, LogsServiceServer,
+    MetricsServiceServer, OtlpHttpLimits, OtlpHttpServerOptions, OtlpLogsService,
+    OtlpMetricsService, OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    otlp_http::serve as serve_otlp_http, otlp_http_router_with_limits,
 };
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
@@ -943,7 +943,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let metrics_service = OtlpMetricsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -952,7 +953,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let logs_service = OtlpLogsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -961,7 +963,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
 
         info!("OTLP services initialized");
 
@@ -1104,12 +1107,31 @@ impl ZradarRuntimeBuilder {
         let otlp_limits = config.otlp_limits.clone();
         let otlp_request_timeout = secs_or_none(otlp_limits.request_timeout_secs);
         let grpc_max_message = otlp_limits.grpc_max_decoding_message_bytes;
+        let auth_timeout = secs_or_none(otlp_limits.auth_timeout_secs);
         info!(
             max_concurrent_requests = otlp_limits.max_concurrent_requests,
             request_timeout_secs = otlp_limits.request_timeout_secs,
             grpc_max_decoding_message_bytes = grpc_max_message,
             http_max_body_bytes = otlp_limits.http_max_body_bytes,
+            http_max_decoded_body_bytes = otlp_limits.effective_http_max_decoded_body_bytes(),
+            auth_timeout_secs = otlp_limits.auth_timeout_secs,
             "OTLP ingest limits"
+        );
+        if let (Some(auth), Some(request)) = (auth_timeout, otlp_request_timeout)
+            && auth >= request
+        {
+            warn!(
+                auth_timeout_secs = auth.as_secs(),
+                request_timeout_secs = request.as_secs(),
+                "otlp_limits: auth timeout is not below the request timeout; \
+                 slow key verification gets DEADLINE_EXCEEDED/504 instead of UNAVAILABLE/503"
+            );
+        }
+        // Authenticates OTLP gRPC exports from their metadata before tonic
+        // reads or decompresses the message.
+        let otlp_grpc_auth = IngestAuthLayer::new(
+            IngestAuth::new(otlp_auth_ext.clone(), allow_test_header_context)
+                .with_timeout(auth_timeout),
         );
 
         let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
@@ -1133,6 +1155,7 @@ impl ZradarRuntimeBuilder {
                 ))
                 .tcp_keepalive(secs_or_none(otlp_limits.grpc_tcp_keepalive_secs))
                 .layer(otlp_grpc_admission)
+                .layer(otlp_grpc_auth)
                 .add_service(
                     TraceServiceServer::new(trace_service)
                         .accept_compressed(CompressionEncoding::Gzip)
@@ -1166,7 +1189,7 @@ impl ZradarRuntimeBuilder {
         };
 
         let otlp_http_server = if otlp_http_port > 0 {
-            let otlp_http_app = otlp_http_router_with_body_limit(
+            let otlp_http_app = otlp_http_router_with_limits(
                 otlp_writer.clone(),
                 otlp_auth_ext.clone(),
                 allow_test_header_context,
@@ -1175,7 +1198,13 @@ impl ZradarRuntimeBuilder {
                 policy_enforcer.clone(),
                 circuit_breaker.clone(),
                 config.cors.clone(),
-                config.otlp_limits.http_max_body_bytes,
+                OtlpHttpLimits {
+                    max_body_bytes: config.otlp_limits.http_max_body_bytes,
+                    max_decoded_body_bytes: config
+                        .otlp_limits
+                        .effective_http_max_decoded_body_bytes(),
+                    auth_timeout,
+                },
             )
             .layer(AdmissionLayer::new(
                 config.otlp_limits.max_concurrent_requests,

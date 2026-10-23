@@ -162,15 +162,31 @@ grpc_http2_keepalive_interval_secs = 60       # 0 = no keepalive pings
 grpc_http2_keepalive_timeout_secs  = 20
 grpc_tcp_keepalive_secs            = 60       # 0 = disabled
 http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
+http_header_read_timeout_secs      = 30       # time to start a request and send its headers (0 = none)
+http_body_read_timeout_secs        = 15       # time to send the request body, 408 after (0 = none)
+http_max_decoded_body_bytes        = 8388608  # OTLP/HTTP body cap after decompression, 413 above (default: http_max_body_bytes)
+auth_timeout_secs                  = 10       # API-key verification limit (0 = none)
 ```
 
 | Condition | OTLP/HTTP | OTLP/gRPC |
 |-----------|-----------|-----------|
 | Too many concurrent exports | `503` + `Retry-After: 1` | `UNAVAILABLE` |
 | Export exceeds `request_timeout_secs` | `504` | `DEADLINE_EXCEEDED` |
-| Body / message too large | `413` | `OUT_OF_RANGE` |
+| Body / message too large on the wire | `413` | `OUT_OF_RANGE` |
+| Body / message too large once decompressed | `413` | `RESOURCE_EXHAUSTED` |
+| Unsupported `Content-Encoding` | `415` | — |
+| Missing or rejected API key | `401` | `UNAUTHENTICATED` |
+| Key verification unavailable or over `auth_timeout_secs` | `503` + `Retry-After` | `UNAVAILABLE` + `RetryInfo` |
 
-The overload and timeout responses are retryable under the OTLP specification, so standard exporters back off and retry. Size `max_concurrent_requests` so that `max_concurrent_requests × max message size` fits comfortably in memory.
+The overload, timeout and key-verification-unavailable responses are retryable under the OTLP specification, so standard exporters back off and retry. Size `max_concurrent_requests` so that `max_concurrent_requests × per-request memory` fits comfortably in memory. Per request, plan for the wire body plus the decoded body plus the decoded protobuf: about `http_max_body_bytes + http_max_decoded_body_bytes` (plus up to 8 MiB of zstd window for `zstd` bodies) on OTLP/HTTP, and about `2 × grpc_max_decoding_message_bytes` for compressed gRPC messages.
+
+**Compression and decoded size.** OTLP/HTTP accepts `Content-Encoding: gzip` and `zstd`. Both transports cap the *decoded* size, not just the bytes on the wire: decompression stops as soon as the output passes `http_max_decoded_body_bytes` (HTTP) or `grpc_max_decoding_message_bytes` (gRPC), so a small compressed request cannot expand into an unbounded allocation.
+
+**Authentication happens first.** The API key is checked from the request headers (gRPC metadata) before the body is read or decoded, so unauthenticated clients cannot make the server buffer, decompress or parse a payload. On OTLP/HTTP the rejection is sent at once and the unread body is discarded in the background (at most `http_max_body_bytes`, for at most 5 seconds, 64 such drains at a time) so the client can finish its upload and read the response instead of seeing a connection reset. Rejected keys are logged at `warn` at most once every 10 seconds per kind, with a count of the suppressed ones; keys are never logged, only a short prefix.
+
+**Pluggable authenticators.** A custom `Authenticator` (ingest) or `QueryAuthorizer` / `AdminAuthorizer` (query and admin APIs) receives every request header — on gRPC, all request metadata. When it cannot verify a credential because its backend is unreachable or failing, it should return `zradar_traits::AuthUnavailable` (anywhere in the `anyhow` error chain); zradar then answers `503` / `UNAVAILABLE` with a retry delay instead of `401` / `UNAUTHENTICATED`, so exporters retry rather than drop data. Any other error is treated as a rejected credential.
+
+> **Security note for gateway-style authorizers.** On the query and admin gRPC ports the authorizer receives *all* request metadata, exactly like the HTTP routes receive all headers. If your authorizer trusts context headers set by a fronting proxy (workspace, project, user or capability headers), the proxy must strip client-supplied copies of those headers on gRPC traffic too, and the authorizer should reject requests carrying more than one value for them.
 
 ---
 

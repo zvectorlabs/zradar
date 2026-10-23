@@ -75,3 +75,7 @@ urlencoding = "2.1"
 # Async streams
 tokio-stream = "0.1"
 
+# Compressed OTLP/HTTP bodies (Content-Encoding tests)
+flate2 = { workspace = true }
+zstd = { workspace = true }
+
