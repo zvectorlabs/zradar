@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     g++ \
     protobuf-compiler \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -30,7 +29,6 @@ FROM debian:bookworm-slim AS server
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 zradar
@@ -48,8 +46,9 @@ USER zradar
 
 EXPOSE 4317 8081
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8081/health || exit 1
+# Built-in probe of the admin liveness endpoint; the image ships no HTTP client.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD ["zradar", "healthcheck"]
 
 ENV RUST_LOG=info,zradar=debug
 
