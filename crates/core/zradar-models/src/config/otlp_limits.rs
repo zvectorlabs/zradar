@@ -58,16 +58,19 @@ pub struct OtlpLimitsConfig {
     #[serde(default = "default_http_max_body_bytes")]
     pub http_max_body_bytes: usize,
 
-    /// Maximum time for an OTLP/HTTP client to send a complete HTTP/1
-    /// request head, in seconds. Bounds slow-header ("slowloris") clients and
-    /// also closes idle keep-alive connections after this delay. `0` disables
-    /// it. Default: 10
+    /// Maximum time for an OTLP/HTTP client to start a request on a new
+    /// connection and to send a complete HTTP/1 request head, in seconds.
+    /// Bounds slow-header ("slowloris") clients. It is also the HTTP/1
+    /// keep-alive idle limit: an idle connection is closed after this delay,
+    /// and exporters reconnect on their next export. `0` disables it.
+    /// Default: 30
     #[serde(default = "default_http_header_read_timeout_secs")]
     pub http_header_read_timeout_secs: u64,
 
     /// Maximum time for an OTLP/HTTP client to send the whole request body,
-    /// in seconds. Slower bodies get `408 Request Timeout`. `0` disables it.
-    /// Default: 30
+    /// in seconds. Slower bodies get `408 Request Timeout`. Keep it below
+    /// `request_timeout_secs`, which also covers the body upload (`504`).
+    /// `0` disables it. Default: 15
     #[serde(default = "default_http_body_read_timeout_secs")]
     pub http_body_read_timeout_secs: u64,
 }
@@ -114,10 +117,10 @@ fn default_http_max_body_bytes() -> usize {
     8 * 1024 * 1024
 }
 fn default_http_header_read_timeout_secs() -> u64 {
-    10
+    30
 }
 fn default_http_body_read_timeout_secs() -> u64 {
-    30
+    15
 }
 
 #[cfg(test)]
@@ -138,8 +141,9 @@ mod tests {
         assert_eq!(cfg.max_concurrent_requests, 1);
         assert_eq!(cfg.http_max_body_bytes, 1024);
         assert_eq!(cfg.request_timeout_secs, 30);
-        assert_eq!(cfg.http_header_read_timeout_secs, 10);
-        assert_eq!(cfg.http_body_read_timeout_secs, 30);
+        assert_eq!(cfg.http_header_read_timeout_secs, 30);
+        assert_eq!(cfg.http_body_read_timeout_secs, 15);
+        assert!(cfg.http_body_read_timeout_secs < cfg.request_timeout_secs);
     }
 
     #[test]

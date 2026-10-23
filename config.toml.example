@@ -70,8 +70,8 @@ name       = "default"
 # grpc_http2_keepalive_timeout_secs  = 20
 # grpc_tcp_keepalive_secs            = 60       # 0 = disabled
 # http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
-# http_header_read_timeout_secs      = 10       # time to send OTLP/HTTP request headers; also idle keep-alive (0 = none)
-# http_body_read_timeout_secs        = 30       # time to send the OTLP/HTTP request body, 408 after (0 = none)
+# http_header_read_timeout_secs      = 30       # time to start a request and send its headers; also HTTP/1 keep-alive idle limit (0 = none)
+# http_body_read_timeout_secs        = 15       # time to send the request body, 408 after; keep below request_timeout_secs (0 = none)
 
 # Ingestion / storage configuration
 [ingestor]

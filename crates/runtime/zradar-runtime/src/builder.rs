@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use api::{
     audit::{AuditState, audit_router},
@@ -1187,6 +1187,17 @@ impl ZradarRuntimeBuilder {
                 header_read_timeout: secs_or_none(config.otlp_limits.http_header_read_timeout_secs),
                 body_read_timeout: secs_or_none(config.otlp_limits.http_body_read_timeout_secs),
             };
+            if let (Some(body), Some(request)) =
+                (otlp_http_options.body_read_timeout, otlp_request_timeout)
+                && body >= request
+            {
+                warn!(
+                    http_body_read_timeout_secs = body.as_secs(),
+                    request_timeout_secs = request.as_secs(),
+                    "otlp_limits: body read timeout is not below the request timeout; \
+                     slow uploads get 504 instead of 408"
+                );
+            }
             Some(async move {
                 info!(
                     header_read_timeout = ?otlp_http_options.header_read_timeout,

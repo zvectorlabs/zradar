@@ -650,7 +650,7 @@ mod tests {
         use std::path::PathBuf;
         use tower::ServiceExt;
 
-        struct NoopWriter;
+        pub(super) struct NoopWriter;
         #[tonic::async_trait]
         impl zradar_traits::TelemetryWriter for NoopWriter {
             async fn insert_spans(&self, _spans: &[zradar_models::Span]) -> anyhow::Result<()> {
@@ -852,6 +852,115 @@ mod tests {
             let response = status_to_response(tonic::Status::resource_exhausted("quota"));
             assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
             assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        }
+    }
+
+    /// Body timeouts through the production middleware stack (body limit,
+    /// CORS, admission control) and the real listener.
+    mod slow_body {
+        use super::body_limit::{AllowAll, EmptySettings, NoopWriter};
+        use super::*;
+        use crate::admission::{AdmissionLayer, IngestProtocol};
+        use crate::otlp_http::{OtlpHttpServerOptions, serve};
+        use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        use std::path::PathBuf;
+        use std::time::{Duration, Instant};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        async fn start(body_read_timeout: Duration) -> std::net::SocketAddr {
+            let app = otlp_http_router_with_body_limit(
+                Arc::new(NoopWriter),
+                None,
+                false,
+                Arc::new(EmptySettings),
+                Arc::new(ProjectRateLimiter::new()),
+                Arc::new(AllowAll),
+                Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
+                zradar_models::CorsConfig::default(),
+                DEFAULT_MAX_BODY_BYTES,
+            )
+            // Request timeout longer than the body timeout, as by default.
+            .layer(AdmissionLayer::new(
+                8,
+                Some(Duration::from_secs(10)),
+                IngestProtocol::Http,
+            ));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(serve(
+                listener,
+                app,
+                OtlpHttpServerOptions {
+                    header_read_timeout: Some(Duration::from_secs(5)),
+                    body_read_timeout: Some(body_read_timeout),
+                },
+            ));
+            addr
+        }
+
+        fn head(content_length: usize) -> Vec<u8> {
+            format!(
+                "POST /v1/traces HTTP/1.1\r\nHost: x\r\nContent-Type: {PROTOBUF_CONTENT_TYPE}\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+            )
+            .into_bytes()
+        }
+
+        async fn response(stream: &mut TcpStream) -> String {
+            let mut buf = Vec::new();
+            tokio::time::timeout(Duration::from_secs(8), stream.read_to_end(&mut buf))
+                .await
+                .expect("response in time")
+                .unwrap();
+            String::from_utf8_lossy(&buf).into_owned()
+        }
+
+        #[tokio::test]
+        async fn stalled_body_gets_408_before_the_request_timeout() {
+            let addr = start(Duration::from_millis(300)).await;
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            let started = Instant::now();
+            let mut request = head(100);
+            request.extend_from_slice(&[0u8; 10]);
+            stream.write_all(&request).await.unwrap();
+            let response = response(&mut stream).await;
+            assert!(response.starts_with("HTTP/1.1 408"), "{response}");
+            assert!(started.elapsed() < Duration::from_secs(5));
+        }
+
+        #[tokio::test]
+        async fn chunked_upload_within_the_deadline_succeeds() {
+            let spans = (0..2_000u32)
+                .map(|i| Span {
+                    trace_id: vec![1; 16],
+                    span_id: [i.to_be_bytes(), [2; 4]].concat(),
+                    name: format!("op-{i}"),
+                    start_time_unix_nano: 1,
+                    end_time_unix_nano: 2,
+                    ..Default::default()
+                })
+                .collect();
+            let body = ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec();
+
+            let addr = start(Duration::from_secs(3)).await;
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            stream.write_all(&head(body.len())).await.unwrap();
+            for chunk in body.chunks(body.len().div_ceil(4)) {
+                stream.write_all(chunk).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let response = response(&mut stream).await;
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         }
     }
 }
