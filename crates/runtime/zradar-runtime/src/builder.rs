@@ -820,11 +820,18 @@ impl ZradarRuntimeBuilder {
                             assigned_offset: 0,
                             payload: envelope,
                         };
-                        let handle = self
-                            .wal
-                            .append(record)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
+                        let handle = self.wal.append(record).await.map_err(|e| {
+                            if e.is_retryable() {
+                                // Transient (e.g. WAL disk below its free-space
+                                // floor): surface as retryable to OTLP clients.
+                                anyhow::Error::new(zradar_traits::WriteUnavailable::new(
+                                    format!("WAL append: {e}"),
+                                    WAL_RETRY_AFTER,
+                                ))
+                            } else {
+                                anyhow::anyhow!("WAL append: {}", e)
+                            }
+                        })?;
                         handles.push(handle);
                     }
 
@@ -1249,6 +1256,11 @@ impl ZradarRuntimeBuilder {
         Ok(())
     }
 }
+
+/// Retry delay suggested to exporters when the WAL refuses a write for a
+/// transient reason (free-space floor). Long enough for the flusher and
+/// janitor to reclaim segments, short enough not to stall exporters.
+const WAL_RETRY_AFTER: Duration = Duration::from_secs(5);
 
 /// `Some(Duration)` for a positive number of seconds, `None` for `0` (disabled).
 fn secs_or_none(secs: u64) -> Option<Duration> {

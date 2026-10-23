@@ -72,7 +72,7 @@ The script times out if `/health` never responds. Typical causes:
 
 **Tip:** Run with `-r` to keep Docker running and iterate: `make functional_tests_fast -r`
 
-**Common failure: `ResourceExhausted` / "Ingestion backpressure: disk usage … exceeds threshold"**
+**Common failure: `Unavailable` / "Ingestion backpressure: disk usage … exceeds threshold"**
 
 The OTLP circuit breaker rejects writes when the filesystem hosting `parquet_data_dir` is above 95% (default). Free disk space on that volume and re-run the suite.
 

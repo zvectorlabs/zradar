@@ -159,7 +159,7 @@ impl LogsService for OtlpLogsService {
             self.writer
                 .insert_scores(&scores)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to insert scores: {}", e)))?;
+                .map_err(|e| crate::retry::write_error_status("scores", &e))?;
         }
 
         // Log persistence
@@ -170,7 +170,7 @@ impl LogsService for OtlpLogsService {
             self.writer
                 .insert_logs(&logs)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to insert logs: {}", e)))?;
+                .map_err(|e| crate::retry::write_error_status("logs", &e))?;
         }
 
         tracing::debug!(

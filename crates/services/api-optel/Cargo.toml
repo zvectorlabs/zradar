@@ -16,6 +16,7 @@ opentelemetry-proto = { workspace = true }
 
 # gRPC
 tonic = { workspace = true }
+tonic-types = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
 

@@ -20,6 +20,7 @@ pub mod otlp_http;
 mod otlp_util;
 mod parser_caps;
 mod rate_limiter;
+mod retry;
 pub mod score_extractor;
 mod span_events;
 mod span_links;

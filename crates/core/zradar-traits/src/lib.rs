@@ -45,7 +45,7 @@ pub use repositories::{
 
 // Domain errors — transport-agnostic
 pub mod errors;
-pub use errors::ServiceError;
+pub use errors::{ServiceError, WriteUnavailable};
 
 // Auth context — service-layer identity envelope
 pub mod auth_context;

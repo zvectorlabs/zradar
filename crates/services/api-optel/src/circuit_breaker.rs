@@ -113,9 +113,19 @@ impl CircuitBreaker {
         Ok(())
     }
 
+    /// [`check`](Self::check) as a gRPC status.
+    ///
+    /// A tripped breaker is transient overload, so it maps to `UNAVAILABLE`
+    /// with a `RetryInfo` delay of one sample interval. OTLP exporters retry
+    /// `UNAVAILABLE`; they treat `RESOURCE_EXHAUSTED` without `RetryInfo` as
+    /// permanent and drop the data
+    /// (<https://opentelemetry.io/docs/specs/otlp/#failures>).
     pub async fn check_status(&self) -> Result<(), Status> {
         self.check().await.map_err(|reason| {
-            Status::resource_exhausted(format!("Ingestion backpressure: {}", reason))
+            crate::retry::unavailable(
+                format!("Ingestion backpressure: {}", reason),
+                RESOURCE_SAMPLE_INTERVAL,
+            )
         })
     }
 
@@ -343,6 +353,25 @@ mod tests {
         let breaker = CircuitBreaker::new(PathBuf::from("."), 100, 100, 1);
         breaker.set_queue_depth(2);
         assert!(breaker.check().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn tripped_breaker_is_retryable_unavailable() {
+        let breaker = CircuitBreaker::new(PathBuf::from("."), 100, 100, 1);
+        breaker.set_queue_depth(2);
+        let status = breaker.check_status().await.expect_err("breaker trips");
+        // RESOURCE_EXHAUSTED without RetryInfo is non-retryable for OTLP
+        // exporters; a transient overload must be UNAVAILABLE.
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+        assert!(
+            status.message().contains("queue depth"),
+            "{}",
+            status.message()
+        );
+        assert_eq!(
+            crate::retry::retry_delay(&status),
+            Some(RESOURCE_SAMPLE_INTERVAL)
+        );
     }
 
     #[tokio::test]
