@@ -943,7 +943,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let metrics_service = OtlpMetricsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -952,7 +953,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let logs_service = OtlpLogsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -961,7 +963,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
 
         info!("OTLP services initialized");
 

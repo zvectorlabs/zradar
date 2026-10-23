@@ -25,6 +25,7 @@ pub struct OtlpMetricsService {
     policy_enforcer: Option<Arc<dyn PolicyEnforcer>>,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
     allow_test_header_context: bool,
+    auth_timeout: Option<std::time::Duration>,
 }
 
 impl OtlpMetricsService {
@@ -37,6 +38,7 @@ impl OtlpMetricsService {
             policy_enforcer: None,
             circuit_breaker: None,
             allow_test_header_context: false,
+            auth_timeout: Some(crate::auth::DEFAULT_AUTH_TIMEOUT),
         }
     }
 
@@ -55,6 +57,7 @@ impl OtlpMetricsService {
             policy_enforcer: None,
             circuit_breaker: Some(circuit_breaker),
             allow_test_header_context: false,
+            auth_timeout: Some(crate::auth::DEFAULT_AUTH_TIMEOUT),
         }
     }
 
@@ -72,6 +75,7 @@ impl OtlpMetricsService {
             policy_enforcer: Some(policy_enforcer),
             circuit_breaker: Some(circuit_breaker),
             allow_test_header_context: false,
+            auth_timeout: Some(crate::auth::DEFAULT_AUTH_TIMEOUT),
         }
     }
 
@@ -91,11 +95,21 @@ impl OtlpMetricsService {
             policy_enforcer: Some(policy_enforcer),
             circuit_breaker: Some(circuit_breaker),
             allow_test_header_context: false,
+            auth_timeout: Some(crate::auth::DEFAULT_AUTH_TIMEOUT),
         }
     }
 
     pub fn with_test_header_context(mut self, allow: bool) -> Self {
         self.allow_test_header_context = allow;
+        self
+    }
+
+    /// Limit API-key verification done by this service (when it is not
+    /// behind [`IngestAuthLayer`](crate::IngestAuthLayer)) to `timeout`;
+    /// `None` or zero disables the limit. Default:
+    /// [`DEFAULT_AUTH_TIMEOUT`](crate::DEFAULT_AUTH_TIMEOUT).
+    pub fn with_auth_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.auth_timeout = timeout.filter(|t| !t.is_zero());
         self
     }
 }
@@ -106,8 +120,13 @@ impl MetricsService for OtlpMetricsService {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        let context =
-            authenticate_grpc(&self.auth, &request, self.allow_test_header_context).await?;
+        let context = authenticate_grpc(
+            &self.auth,
+            &request,
+            self.allow_test_header_context,
+            self.auth_timeout,
+        )
+        .await?;
         if let Some(circuit_breaker) = &self.circuit_breaker {
             circuit_breaker.check_status().await?;
         }

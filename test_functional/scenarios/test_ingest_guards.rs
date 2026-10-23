@@ -138,6 +138,22 @@ async fn test_otlp_http_bad_key_rejected_before_body_is_sent() -> Result<()> {
     Ok(())
 }
 
+/// A client that uploads a large body with a bad key (as exporters do: send
+/// everything, then read) receives the `401`, not a connection reset that
+/// exporters would retry forever.
+#[tokio::test]
+#[ignore]
+async fn test_otlp_http_large_upload_with_bad_key_gets_401() -> Result<()> {
+    let env = TestEnv::setup_with_transport(Transport::Http).await?;
+    let trace_id = TestDataGenerator::trace_id();
+    let body = trace_export(&env, &trace_id, 4 * 1024 * 1024).encode_to_vec();
+    for _ in 0..3 {
+        let response = post_otlp_http(&env, BAD_KEY, None, body.clone()).await?;
+        assert_eq!(response.status(), 401);
+    }
+    Ok(())
+}
+
 /// Over gRPC a bad key is rejected by metadata alone: an oversized message or
 /// a decompression bomb with a bad key gets `UNAUTHENTICATED`, not a size error
 /// (which would mean the message was read and decoded first).

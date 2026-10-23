@@ -1,14 +1,16 @@
 //! Axum handlers for OTLP/HTTP protocol (R1.1).
 
+use axum::Extension;
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, FromRequestParts, State};
-use axum::http::request::Parts;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use zradar_models::RequestContext;
 use zradar_policy::SignalKind;
 use zradar_traits::{Authenticator, SettingsRepository};
@@ -157,10 +159,18 @@ pub fn otlp_http_router_with_limits(
             .allow_headers(tower_http::cors::Any)
     };
 
+    let preflight_state = PreflightState {
+        http: state.clone(),
+        drain_limit: max_body_bytes,
+    };
     Router::new()
         .route("/v1/traces", post(export_traces))
         .route("/v1/metrics", post(export_metrics))
         .route("/v1/logs", post(export_logs))
+        .route_layer(axum::middleware::from_fn_with_state(
+            preflight_state,
+            preflight,
+        ))
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(cors_layer)
         .with_state(state)
@@ -179,36 +189,104 @@ fn check_content_type(headers: &HeaderMap) -> Result<(), StatusCode> {
     }
 }
 
-/// What an export request's headers establish, checked before its body is
-/// read: a protobuf `Content-Type` (`415`), a supported `Content-Encoding`
-/// (`415`) and a valid API key (`401`, or `503` + `Retry-After` when the key
-/// cannot be verified right now). Unacceptable requests are rejected without
-/// buffering or decompressing their body.
-///
-/// Must precede the body extractor in handler arguments: axum runs
-/// extractors in order, and only the last one may consume the body.
+/// What an export request's headers establish, checked by [`preflight`]
+/// before its body is read.
+#[derive(Clone)]
 struct ExportPreflight {
     context: RequestContext,
     encoding: ContentEncoding,
 }
 
-impl FromRequestParts<OtlpHttpState> for ExportPreflight {
-    type Rejection = Response;
+/// State for [`preflight`].
+#[derive(Clone)]
+struct PreflightState {
+    http: OtlpHttpState,
+    /// Most bytes of a rejected request's body that are drained.
+    drain_limit: usize,
+}
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &OtlpHttpState,
-    ) -> Result<Self, Self::Rejection> {
-        check_content_type(&parts.headers).map_err(IntoResponse::into_response)?;
-        let encoding =
-            ContentEncoding::from_headers(&parts.headers).map_err(IntoResponse::into_response)?;
-        let context = IngestAuth::new(state.auth.clone(), state.allow_test_header_context)
-            .with_timeout(state.auth_timeout)
-            .authenticate(&parts.headers)
-            .await
-            .map_err(|rejection| rejection.into_http_response())?;
-        Ok(Self { context, encoding })
+/// Route middleware that checks an export from its headers alone, before the
+/// body is read: a protobuf `Content-Type` (`415`), a supported
+/// `Content-Encoding` (`415`), a valid API key (`401`, or `503` +
+/// `Retry-After` when the key cannot be verified right now) and the circuit
+/// breaker (`503`). Rejected requests are answered at once, without buffering,
+/// decompressing or parsing their body; see [`drain_rejected_body`].
+async fn preflight(
+    State(state): State<PreflightState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    match check_export_headers(&state.http, request.headers()).await {
+        Ok(checked) => {
+            request.extensions_mut().insert(checked);
+            next.run(request).await
+        }
+        Err(response) => {
+            drain_rejected_body(request.into_body(), state.drain_limit);
+            response
+        }
     }
+}
+
+async fn check_export_headers(
+    state: &OtlpHttpState,
+    headers: &HeaderMap,
+) -> Result<ExportPreflight, Response> {
+    check_content_type(headers).map_err(IntoResponse::into_response)?;
+    let encoding = ContentEncoding::from_headers(headers).map_err(IntoResponse::into_response)?;
+    let context = IngestAuth::new(state.auth.clone(), state.allow_test_header_context)
+        .with_timeout(state.auth_timeout)
+        .authenticate(headers)
+        .await
+        .map_err(|rejection| rejection.into_http_response())?;
+    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
+        return Err(response);
+    }
+    Ok(ExportPreflight { context, encoding })
+}
+
+/// Rejected bodies drained at once, across all connections.
+const MAX_CONCURRENT_DRAINS: usize = 64;
+/// Longest time spent draining one rejected body.
+const DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Discard the unread body of a rejected HTTP/1 request in the background.
+///
+/// If the body were simply dropped, hyper would stop reading and close the
+/// connection while the client may still be uploading; the client's TCP stack
+/// can then see a reset instead of the rejection, which OTLP exporters treat
+/// as a retryable network error. Draining lets the client finish its upload
+/// and read the response, and keeps the connection reusable. Bytes are
+/// discarded as they arrive (no buffering); a drain stops after `limit`
+/// bytes or [`DRAIN_DEADLINE`], and at most [`MAX_CONCURRENT_DRAINS`] run at
+/// once — beyond that the body is dropped and the connection closed.
+fn drain_rejected_body(body: axum::body::Body, limit: usize) {
+    use axum::body::HttpBody;
+
+    if body.is_end_stream() {
+        return;
+    }
+    static DRAINS: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
+    let drains = DRAINS.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_DRAINS)));
+    let Ok(permit) = drains.clone().try_acquire_owned() else {
+        return;
+    };
+    tokio::spawn(async move {
+        let _permit = permit;
+        let mut body = std::pin::pin!(body);
+        let mut drained = 0usize;
+        let _ = tokio::time::timeout(DRAIN_DEADLINE, async {
+            while let Some(Ok(frame)) =
+                std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await
+            {
+                drained = drained.saturating_add(frame.data_ref().map_or(0, |data| data.len()));
+                if drained > limit {
+                    break;
+                }
+            }
+        })
+        .await;
+    });
 }
 
 async fn check_circuit_breaker(circuit_breaker: &Option<Arc<CircuitBreaker>>) -> Option<Response> {
@@ -235,16 +313,13 @@ async fn enforce_http_policy(
 
 async fn export_traces(
     State(state): State<OtlpHttpState>,
-    ExportPreflight { context, encoding }: ExportPreflight,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
         Ok(body) => body,
         Err(status) => return status.into_response(),
     };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
     let request =
         match opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
             body,
@@ -304,16 +379,13 @@ async fn export_traces(
 
 async fn export_metrics(
     State(state): State<OtlpHttpState>,
-    ExportPreflight { context, encoding }: ExportPreflight,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
         Ok(body) => body,
         Err(status) => return status.into_response(),
     };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
     let request = match opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(body) {
         Ok(r) => r,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -352,16 +424,13 @@ async fn export_metrics(
 
 async fn export_logs(
     State(state): State<OtlpHttpState>,
-    ExportPreflight { context, encoding }: ExportPreflight,
+    Extension(ExportPreflight { context, encoding }): Extension<ExportPreflight>,
     OtlpBody(body): OtlpBody,
 ) -> impl IntoResponse {
     let body = match decode_body(encoding, body, state.max_decoded_body_bytes).await {
         Ok(body) => body,
         Err(status) => return status.into_response(),
     };
-    if let Some(response) = check_circuit_breaker(&state.circuit_breaker).await {
-        return response;
-    }
     let request =
         match opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(
             body,
@@ -1026,7 +1095,6 @@ mod tests {
         use axum::http::{Request, header};
         use std::path::PathBuf;
         use std::pin::Pin;
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::task::{Context, Poll};
         use std::time::Duration;
         use tokio_stream::Stream;
@@ -1059,19 +1127,18 @@ mod tests {
                 Arc::new(CircuitBreaker::new(PathBuf::from("."), 100, 100, 10)),
                 zradar_models::CorsConfig::default(),
                 OtlpHttpLimits {
-                    max_body_bytes: 1024 * 1024,
+                    max_body_bytes: 8 * 1024 * 1024,
                     max_decoded_body_bytes,
                     auth_timeout: Some(Duration::from_secs(5)),
                 },
             )
         }
 
-        /// A request body that never yields data and records being polled.
-        struct UnreadBody(Arc<AtomicBool>);
-        impl Stream for UnreadBody {
+        /// A request body that never yields any data.
+        struct NeverBody;
+        impl Stream for NeverBody {
             type Item = Result<axum::body::Bytes, std::io::Error>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-                self.0.store(true, Ordering::SeqCst);
                 Poll::Pending
             }
         }
@@ -1099,21 +1166,19 @@ mod tests {
                 .unwrap()
         }
 
+        /// Rejections come from headers alone: they are answered although the
+        /// body never arrives (a rejected body is only drained, in the
+        /// background, never buffered or decoded).
         #[tokio::test]
-        async fn rejected_requests_are_answered_without_reading_the_body() {
+        async fn rejected_requests_are_answered_without_waiting_for_the_body() {
             for (key, encoding, expected) in [
                 ("bad", None, StatusCode::UNAUTHORIZED),
                 ("down", None, StatusCode::SERVICE_UNAVAILABLE),
                 ("good", Some("br"), StatusCode::UNSUPPORTED_MEDIA_TYPE),
             ] {
-                let polled = Arc::new(AtomicBool::new(false));
-                let body = axum::body::Body::from_stream(UnreadBody(polled.clone()));
+                let body = axum::body::Body::from_stream(NeverBody);
                 let response = send(router(1024), export(key, encoding, body)).await;
                 assert_eq!(response.status(), expected, "key {key}");
-                assert!(
-                    !polled.load(Ordering::SeqCst),
-                    "body was read for key {key}"
-                );
             }
         }
 
@@ -1178,6 +1243,94 @@ mod tests {
                     "{encoding}"
                 );
             }
+        }
+
+        async fn start_server() -> std::net::SocketAddr {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(crate::otlp_http::serve(
+                listener,
+                router(1024),
+                crate::otlp_http::OtlpHttpServerOptions::default(),
+            ));
+            addr
+        }
+
+        fn head(key: &str, content_length: usize) -> String {
+            format!(
+                "POST /v1/traces HTTP/1.1\r\nHost: x\r\n\
+                 Content-Type: application/x-protobuf\r\n\
+                 Authorization: Bearer {key}\r\nContent-Length: {content_length}\r\n\r\n"
+            )
+        }
+
+        /// Read one response (status line and headers; these have no body or a
+        /// tiny one) and return its status line.
+        async fn read_status(stream: &mut tokio::net::TcpStream) -> String {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !buf.ends_with(b"\r\n\r\n") {
+                    let n = stream.read(&mut byte).await.unwrap();
+                    assert!(
+                        n > 0,
+                        "connection closed: {}",
+                        String::from_utf8_lossy(&buf)
+                    );
+                    buf.push(byte[0]);
+                }
+            })
+            .await
+            .expect("response in time");
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            // Skip a small body announced with Content-Length.
+            if let Some(len) = text
+                .lines()
+                .find_map(|l| {
+                    l.to_ascii_lowercase()
+                        .strip_prefix("content-length: ")
+                        .map(str::to_owned)
+                })
+                .and_then(|v| v.trim().parse::<usize>().ok())
+            {
+                let mut body = vec![0u8; len];
+                stream.read_exact(&mut body).await.unwrap();
+            }
+            text.lines().next().unwrap_or_default().to_owned()
+        }
+
+        #[tokio::test]
+        async fn rejected_upload_is_drained_and_the_connection_reused() {
+            use tokio::io::AsyncWriteExt;
+            let addr = start_server().await;
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+
+            // The rejection arrives before any of the body is sent.
+            let body_len = 512 * 1024;
+            stream
+                .write_all(head("bad", body_len).as_bytes())
+                .await
+                .unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 401"));
+
+            // The client can still upload the body, and reuse the connection.
+            stream.write_all(&vec![0u8; body_len]).await.unwrap();
+            stream.write_all(head("good", 0).as_bytes()).await.unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 200"));
+        }
+
+        #[tokio::test]
+        async fn client_that_uploads_before_reading_gets_the_rejection() {
+            use tokio::io::AsyncWriteExt;
+            let addr = start_server().await;
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            // Like simple exporters: send the whole request, then read.
+            let body_len = 4 * 1024 * 1024;
+            let mut request = head("bad", body_len).into_bytes();
+            request.extend(vec![0u8; body_len]);
+            stream.write_all(&request).await.unwrap();
+            assert!(read_status(&mut stream).await.starts_with("HTTP/1.1 401"));
         }
 
         #[tokio::test]

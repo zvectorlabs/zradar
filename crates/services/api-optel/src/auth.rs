@@ -139,7 +139,9 @@ impl IngestAuth {
             Some(limit) => match tokio::time::timeout(limit, verification).await {
                 Ok(result) => result,
                 Err(_) => {
-                    log_unavailable(&format!("verification timed out after {limit:?}"));
+                    log_unavailable(&UNAVAILABLE_LOG, || {
+                        format!("verification timed out after {limit:?}")
+                    });
                     return Err(AuthRejection::Unavailable(AUTH_TIMEOUT_RETRY_AFTER));
                 }
             },
@@ -150,10 +152,13 @@ impl IngestAuth {
             Ok(context) => context,
             Err(error) => {
                 if let Some(transient) = AuthUnavailable::find(&error) {
-                    log_unavailable(&redact(&transient.reason, token));
+                    log_unavailable(&UNAVAILABLE_LOG, || redact(&transient.reason, token));
                     return Err(AuthRejection::Unavailable(transient.retry_after));
                 }
-                log_invalid_key(token, &redact(&error.to_string(), token));
+                // `{:#}` keeps the whole error chain, not just the outer context.
+                log_invalid_key(&INVALID_KEY_LOG, token, || {
+                    redact(&format!("{error:#}"), token)
+                });
                 return Err(AuthRejection::Unauthenticated("Invalid API key"));
             }
         };
@@ -184,12 +189,14 @@ pub(crate) async fn authenticate_grpc<T>(
     auth: &Option<Arc<dyn Authenticator>>,
     request: &Request<T>,
     allow_test_header_context: bool,
+    timeout: Option<Duration>,
 ) -> Result<RequestContext, Status> {
     if let Some(Authenticated(context)) = request.extensions().get::<Authenticated>() {
         return Ok(context.clone());
     }
     let headers = request.metadata().clone().into_headers();
     IngestAuth::new(auth.clone(), allow_test_header_context)
+        .with_timeout(timeout)
         .authenticate(&headers)
         .await
         .map_err(AuthRejection::into_status)
@@ -336,11 +343,13 @@ static UNAVAILABLE_LOG: LogLimiter = LogLimiter::new(AUTH_LOG_INTERVAL);
 /// Longest authenticator message that is logged.
 const MAX_LOGGED_ERROR_CHARS: usize = 200;
 
-fn log_invalid_key(token: &str, error: &str) {
-    if let Some(suppressed) = INVALID_KEY_LOG.check() {
+/// Log a rejected key, at most once per interval. The message is only built
+/// when it is logged, so a flood of bad keys costs no formatting.
+fn log_invalid_key(limiter: &LogLimiter, token: &str, error: impl FnOnce() -> String) {
+    if let Some(suppressed) = limiter.check() {
         tracing::warn!(
             key_prefix = %key_prefix(token),
-            error = %error,
+            error = %error(),
             suppressed,
             "OTLP ingest API key rejected (further rejections are logged at most every {}s)",
             AUTH_LOG_INTERVAL.as_secs()
@@ -348,10 +357,10 @@ fn log_invalid_key(token: &str, error: &str) {
     }
 }
 
-fn log_unavailable(reason: &str) {
-    if let Some(suppressed) = UNAVAILABLE_LOG.check() {
+fn log_unavailable(limiter: &LogLimiter, reason: impl FnOnce() -> String) {
+    if let Some(suppressed) = limiter.check() {
         tracing::warn!(
-            reason = %reason,
+            reason = %reason(),
             suppressed,
             "OTLP ingest API key verification unavailable; answering retryable error"
         );
@@ -371,7 +380,9 @@ pub(crate) fn key_prefix(token: &str) -> String {
 
 /// Remove `token` from an authenticator message and bound its length.
 pub(crate) fn redact(message: &str, token: &str) -> String {
-    let message = if token.is_empty() {
+    // Very short "keys" would match ordinary text; they reveal nothing anyway.
+    const MIN_REDACTED_LEN: usize = 8;
+    let message = if token.len() < MIN_REDACTED_LEN {
         message.to_owned()
     } else {
         message.replace(token, "<redacted>")
@@ -571,7 +582,9 @@ mod tests {
         request
             .metadata_mut()
             .insert("authorization", "Bearer wrong".parse().unwrap());
-        let status = authenticate_grpc(&auth, &request, false).await.unwrap_err();
+        let status = authenticate_grpc(&auth, &request, false, Some(DEFAULT_AUTH_TIMEOUT))
+            .await
+            .unwrap_err();
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
 
         request
@@ -580,7 +593,9 @@ mod tests {
         request
             .metadata_mut()
             .insert("x-project-id", "p-2".parse().unwrap());
-        authenticate_grpc(&auth, &request, false).await.unwrap();
+        authenticate_grpc(&auth, &request, false, Some(DEFAULT_AUTH_TIMEOUT))
+            .await
+            .unwrap();
         // All metadata reaches the authenticator.
         let seen = mock.seen_headers.lock().unwrap().clone().unwrap();
         assert_eq!(seen["x-project-id"], "p-2");
@@ -646,7 +661,9 @@ mod tests {
         request
             .extensions_mut()
             .insert(Authenticated(RequestContext::new(uuid::Uuid::max().into())));
-        let ctx = authenticate_grpc(&auth, &request, false).await.unwrap();
+        let ctx = authenticate_grpc(&auth, &request, false, Some(DEFAULT_AUTH_TIMEOUT))
+            .await
+            .unwrap();
         assert_eq!(ctx.workspace_id, uuid::Uuid::max().into());
         // Verified once, by the layer; not again in the handler.
         assert_eq!(mock.calls.load(Ordering::SeqCst), 0);
@@ -663,6 +680,46 @@ mod tests {
         assert_eq!(limiter.check_at(10_000), Some(501));
         assert_eq!(limiter.check_at(10_001), None);
         assert_eq!(limiter.check_at(25_000), Some(1));
+    }
+
+    /// Captures formatted log output.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn rejected_key_logs_are_rate_limited_and_never_contain_the_key() {
+        let captured = Captured::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let limiter = LogLimiter::new(Duration::from_secs(3600));
+        let key = "zk_live_secret_0123456789";
+        let built = AtomicUsize::new(0);
+        tracing::subscriber::with_default(subscriber, || {
+            for _ in 0..1_000 {
+                log_invalid_key(&limiter, key, || {
+                    built.fetch_add(1, Ordering::SeqCst);
+                    redact(&format!("lookup failed for {key}: not found"), key)
+                });
+            }
+        });
+        let output = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(output.lines().count(), 1, "{output}");
+        assert!(output.contains("zk_l… (25 chars)"), "{output}");
+        assert!(!output.contains(key), "{output}");
+        // Suppressed events never build their message.
+        assert_eq!(built.load(Ordering::SeqCst), 1);
     }
 
     #[test]

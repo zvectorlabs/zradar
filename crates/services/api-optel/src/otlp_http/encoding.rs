@@ -78,7 +78,7 @@ fn decompress(
     input: &[u8],
     limit: usize,
 ) -> Result<Vec<u8>, StatusCode> {
-    let reader: Box<dyn Read + '_> = match encoding {
+    let mut reader: Box<dyn Read + '_> = match encoding {
         ContentEncoding::Identity => Box::new(input),
         ContentEncoding::Gzip => Box::new(flate2::read::MultiGzDecoder::new(input)),
         ContentEncoding::Zstd => {
@@ -92,17 +92,54 @@ fn decompress(
             Box::new(decoder)
         }
     };
+    read_capped(&mut reader, input.len(), limit).map_err(|error| match error {
+        ReadError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        // zstd refuses frames whose window exceeds `window_log_max`: the body
+        // needs more memory than allowed, which is a size problem, not
+        // corruption.
+        ReadError::Io(error) if error.to_string().contains("too much memory") => {
+            StatusCode::PAYLOAD_TOO_LARGE
+        }
+        ReadError::Io(_) => bad_request(),
+    })
+}
 
-    // Read one byte past the limit to tell "exactly at the limit" from "over".
-    let mut out = Vec::with_capacity(input.len().saturating_mul(4).min(limit));
-    reader
-        .take(limit as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|_| bad_request())?;
-    if out.len() > limit {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+enum ReadError {
+    TooLarge,
+    Io(std::io::Error),
+}
+
+/// Read all of `reader`, failing once more than `limit` bytes come out. The
+/// output buffer never grows past `limit + 1` bytes (unlike `read_to_end`,
+/// which may double its capacity past the limit).
+fn read_capped(reader: &mut dyn Read, hint: usize, limit: usize) -> Result<Vec<u8>, ReadError> {
+    const CHUNK: usize = 64 * 1024;
+    let cap = limit.saturating_add(1);
+    let mut out: Vec<u8> = Vec::with_capacity(hint.saturating_mul(4).clamp(CHUNK.min(cap), cap));
+    loop {
+        if out.len() == out.capacity() {
+            if out.len() >= cap {
+                return Err(ReadError::TooLarge);
+            }
+            let grow = out.capacity().max(CHUNK).min(cap - out.len());
+            out.reserve_exact(grow);
+        }
+        let start = out.len();
+        let spare = out.capacity() - start;
+        out.resize(start + spare, 0);
+        match reader.read(&mut out[start..]) {
+            Ok(0) => {
+                out.truncate(start);
+                return Ok(out);
+            }
+            Ok(n) => out.truncate(start + n),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => out.truncate(start),
+            Err(error) => return Err(ReadError::Io(error)),
+        }
+        if out.len() > limit {
+            return Err(ReadError::TooLarge);
+        }
     }
-    Ok(out)
 }
 
 fn bad_request() -> StatusCode {
@@ -268,7 +305,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn zstd_frames_claiming_an_oversized_window_are_rejected() {
         // A frame encoded with a 256 MiB window (window log 28) must not make
-        // the decoder allocate it.
+        // the decoder allocate it; it is refused as too large.
         let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
         encoder.long_distance_matching(true).unwrap();
         encoder.window_log(28).unwrap();
@@ -276,7 +313,24 @@ pub(crate) mod tests {
         let body = encoder.finish().unwrap();
         assert_eq!(
             decode_body(ContentEncoding::Zstd, Bytes::from(body), 8 * 1024 * 1024).await,
-            Err(StatusCode::BAD_REQUEST)
+            Err(StatusCode::PAYLOAD_TOO_LARGE)
         );
+    }
+
+    #[test]
+    fn output_buffer_never_exceeds_the_limit() {
+        let data = vec![9u8; 100_000];
+        for limit in [1, 4096, 65_536, 99_999, 100_000, 250_000] {
+            let mut reader: &[u8] = &data;
+            match read_capped(&mut reader, 10, limit) {
+                Ok(out) => {
+                    assert!(limit >= data.len());
+                    assert_eq!(out, data);
+                    assert!(out.capacity() <= limit + 1, "limit {limit}");
+                }
+                Err(ReadError::TooLarge) => assert!(limit < data.len()),
+                Err(ReadError::Io(e)) => panic!("{e}"),
+            }
+        }
     }
 }
