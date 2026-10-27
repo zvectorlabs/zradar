@@ -59,6 +59,22 @@ name       = "default"
 # project_id = "another-project"
 # name       = "another"
 
+# OTLP ingest limits (load shedding). Defaults shown; uncomment to change.
+# Excess concurrent exports are rejected with HTTP 503 / gRPC UNAVAILABLE.
+# [otlp_limits]
+# max_concurrent_requests            = 256      # in-flight exports per listener, across all connections (0 = unlimited)
+# request_timeout_secs               = 30       # per-export deadline, including body upload (0 = none)
+# grpc_max_decoding_message_bytes    = 4194304  # 4 MiB decoded gRPC message cap
+# grpc_max_concurrent_streams        = 100      # HTTP/2 streams per gRPC connection (0 = unlimited)
+# grpc_http2_keepalive_interval_secs = 60       # 0 = no keepalive pings
+# grpc_http2_keepalive_timeout_secs  = 20
+# grpc_tcp_keepalive_secs            = 60       # 0 = disabled
+# http_max_body_bytes                = 8388608  # 8 MiB OTLP/HTTP body cap (413 above this)
+# http_header_read_timeout_secs      = 30       # time to start a request and send its headers; also HTTP/1 keep-alive idle limit (0 = none)
+# http_body_read_timeout_secs        = 15       # time to send the request body, 408 after; keep below request_timeout_secs (0 = none)
+# http_max_decoded_body_bytes        = 8388608  # OTLP/HTTP body cap after gzip/zstd decompression, 413 above this (default: http_max_body_bytes)
+# auth_timeout_secs                  = 10       # API-key verification limit; slower is 503/UNAVAILABLE, retryable (0 = none)
+
 # Ingestion / storage configuration
 [ingestor]
 # Block storage for older Parquet files: "local" (dev) or "s3" (production).
@@ -71,6 +87,13 @@ path = "./data/trace-batches"
 # [ingestor.storage.s3]
 # bucket = "zradar-traces-prod"
 # region = "us-east-1"
+
+# Write-ahead log. Every accepted export is fsynced here before it is acked.
+# Defaults shown; uncomment to change.
+# [ingestor.wal]
+# wal_dir             = "./data/wal"
+# wal_min_free_bytes  = 1073741824  # 1 GiB; below this, exports get gRPC UNAVAILABLE / HTTP 503 (0 = off)
+# disk_check_interval = 1024        # appends between free-space samples (also sampled every second)
 
 # Parquet ingestion lifecycle (write buffer, compaction, memory cache, fsync).
 # All of these are durability/throughput tuning knobs; the durable-by-default

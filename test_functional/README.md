@@ -72,9 +72,13 @@ The script times out if `/health` never responds. Typical causes:
 
 **Tip:** Run with `-r` to keep Docker running and iterate: `make functional_tests_fast -r`
 
-**Common failure: `ResourceExhausted` / "Ingestion backpressure: disk usage … exceeds threshold"**
+**Common failure: `Unavailable` / "Ingestion backpressure: disk usage … exceeds threshold"**
 
 The OTLP circuit breaker rejects writes when the filesystem hosting `parquet_data_dir` is above 95% (default). Free disk space on that volume and re-run the suite.
+
+**Common failure: `Unavailable` / "WAL disk space low"**
+
+The WAL refuses appends while its filesystem has less than `[ingestor.wal] wal_min_free_bytes` free (1 GiB by default). Free disk space on that volume and re-run the suite.
 
 ## 🛠️ Test Structure
 

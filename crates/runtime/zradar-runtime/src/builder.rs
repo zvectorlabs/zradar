@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use api::{
     audit::{AuditState, audit_router},
@@ -37,8 +37,10 @@ use api::{
     telemetry::QueryService,
 };
 use api_optel::{
-    CircuitBreaker, LogsServiceServer, MetricsServiceServer, OtlpLogsService, OtlpMetricsService,
-    OtlpTraceService, ProjectRateLimiter, TraceServiceServer, otlp_http_router,
+    AdmissionLayer, CircuitBreaker, IngestAuth, IngestAuthLayer, IngestProtocol, LogsServiceServer,
+    MetricsServiceServer, OtlpHttpLimits, OtlpHttpServerOptions, OtlpLogsService,
+    OtlpMetricsService, OtlpTraceService, ProjectRateLimiter, TraceServiceServer,
+    otlp_http::serve as serve_otlp_http, otlp_http_router_with_limits,
 };
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
@@ -616,6 +618,8 @@ impl ZradarRuntimeBuilder {
                 flush_interval_ms: wal_config.flush_interval_ms,
                 group_commit_window_ms: wal_config.group_commit_window_ms,
                 replay_batch_max_bytes: wal_config.replay_batch_max_bytes,
+                wal_min_free_bytes: wal_config.wal_min_free_bytes,
+                disk_check_interval: wal_config.disk_check_interval,
                 ..WalConfig::default()
             };
 
@@ -805,6 +809,14 @@ impl ZradarRuntimeBuilder {
                         groups.entry(workspace_id).or_default().push(bytes);
                     }
 
+                    // Refuse the whole request before appending any group, so a
+                    // retry after a free-space rejection does not duplicate the
+                    // groups that were already made durable.
+                    self.wal
+                        .check_free_space()
+                        .await
+                        .map_err(|e| wal_append_error(&e))?;
+
                     let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
                     let mut handles = Vec::with_capacity(groups.len());
 
@@ -821,7 +833,7 @@ impl ZradarRuntimeBuilder {
                             .wal
                             .append(record)
                             .await
-                            .map_err(|e| anyhow::anyhow!("WAL append: {}", e))?;
+                            .map_err(|e| wal_append_error(&e))?;
                         handles.push(handle);
                     }
 
@@ -931,7 +943,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let metrics_service = OtlpMetricsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -940,7 +953,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
         let logs_service = OtlpLogsService::with_settings_and_policy(
             otlp_writer.clone(),
             otlp_auth_ext.clone(),
@@ -949,7 +963,8 @@ impl ZradarRuntimeBuilder {
             policy_enforcer.clone(),
             circuit_breaker.clone(),
         )
-        .with_test_header_context(allow_test_header_context);
+        .with_test_header_context(allow_test_header_context)
+        .with_auth_timeout(secs_or_none(config.otlp_limits.auth_timeout_secs));
 
         info!("OTLP services initialized");
 
@@ -1089,24 +1104,75 @@ impl ZradarRuntimeBuilder {
         // Run servers
         // =====================================================================
 
+        let otlp_limits = config.otlp_limits.clone();
+        let otlp_request_timeout = secs_or_none(otlp_limits.request_timeout_secs);
+        let grpc_max_message = otlp_limits.grpc_max_decoding_message_bytes;
+        let auth_timeout = secs_or_none(otlp_limits.auth_timeout_secs);
+        info!(
+            max_concurrent_requests = otlp_limits.max_concurrent_requests,
+            request_timeout_secs = otlp_limits.request_timeout_secs,
+            grpc_max_decoding_message_bytes = grpc_max_message,
+            http_max_body_bytes = otlp_limits.http_max_body_bytes,
+            http_max_decoded_body_bytes = otlp_limits.effective_http_max_decoded_body_bytes(),
+            auth_timeout_secs = otlp_limits.auth_timeout_secs,
+            "OTLP ingest limits"
+        );
+        if let (Some(auth), Some(request)) = (auth_timeout, otlp_request_timeout)
+            && auth >= request
+        {
+            warn!(
+                auth_timeout_secs = auth.as_secs(),
+                request_timeout_secs = request.as_secs(),
+                "otlp_limits: auth timeout is not below the request timeout; \
+                 slow key verification gets DEADLINE_EXCEEDED/504 instead of UNAVAILABLE/503"
+            );
+        }
+        // Authenticates OTLP gRPC exports from their metadata before tonic
+        // reads or decompresses the message.
+        let otlp_grpc_auth = IngestAuthLayer::new(
+            IngestAuth::new(otlp_auth_ext.clone(), allow_test_header_context)
+                .with_timeout(auth_timeout),
+        );
+
         let otlp_addr = format!("0.0.0.0:{}", otlp_port).parse()?;
+        let otlp_grpc_admission = AdmissionLayer::new(
+            otlp_limits.max_concurrent_requests,
+            otlp_request_timeout,
+            IngestProtocol::Grpc,
+        );
         let otlp_server = async move {
             info!("OTLP gRPC server listening on {}", otlp_addr);
             Server::builder()
+                .max_concurrent_streams(
+                    (otlp_limits.grpc_max_concurrent_streams > 0)
+                        .then_some(otlp_limits.grpc_max_concurrent_streams),
+                )
+                .http2_keepalive_interval(secs_or_none(
+                    otlp_limits.grpc_http2_keepalive_interval_secs,
+                ))
+                .http2_keepalive_timeout(secs_or_none(
+                    otlp_limits.grpc_http2_keepalive_timeout_secs,
+                ))
+                .tcp_keepalive(secs_or_none(otlp_limits.grpc_tcp_keepalive_secs))
+                .layer(otlp_grpc_admission)
+                .layer(otlp_grpc_auth)
                 .add_service(
                     TraceServiceServer::new(trace_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .add_service(
                     MetricsServiceServer::new(metrics_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .add_service(
                     LogsServiceServer::new(logs_service)
                         .accept_compressed(CompressionEncoding::Gzip)
-                        .send_compressed(CompressionEncoding::Gzip),
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .max_decoding_message_size(grpc_max_message),
                 )
                 .serve(otlp_addr)
                 .await
@@ -1123,7 +1189,7 @@ impl ZradarRuntimeBuilder {
         };
 
         let otlp_http_server = if otlp_http_port > 0 {
-            let otlp_http_app = otlp_http_router(
+            let otlp_http_app = otlp_http_router_with_limits(
                 otlp_writer.clone(),
                 otlp_auth_ext.clone(),
                 allow_test_header_context,
@@ -1132,12 +1198,44 @@ impl ZradarRuntimeBuilder {
                 policy_enforcer.clone(),
                 circuit_breaker.clone(),
                 config.cors.clone(),
-            );
+                OtlpHttpLimits {
+                    max_body_bytes: config.otlp_limits.http_max_body_bytes,
+                    max_decoded_body_bytes: config
+                        .otlp_limits
+                        .effective_http_max_decoded_body_bytes(),
+                    auth_timeout,
+                },
+            )
+            .layer(AdmissionLayer::new(
+                config.otlp_limits.max_concurrent_requests,
+                otlp_request_timeout,
+                IngestProtocol::Http,
+            ));
             let otlp_http_addr = format!("0.0.0.0:{}", otlp_http_port);
+            let otlp_http_options = OtlpHttpServerOptions {
+                header_read_timeout: secs_or_none(config.otlp_limits.http_header_read_timeout_secs),
+                body_read_timeout: secs_or_none(config.otlp_limits.http_body_read_timeout_secs),
+            };
+            if let (Some(body), Some(request)) =
+                (otlp_http_options.body_read_timeout, otlp_request_timeout)
+                && body >= request
+            {
+                warn!(
+                    http_body_read_timeout_secs = body.as_secs(),
+                    request_timeout_secs = request.as_secs(),
+                    "otlp_limits: body read timeout is not below the request timeout; \
+                     slow uploads get 504 instead of 408"
+                );
+            }
             Some(async move {
-                info!("OTLP/HTTP receiver listening on http://{}", otlp_http_addr);
+                info!(
+                    header_read_timeout = ?otlp_http_options.header_read_timeout,
+                    body_read_timeout = ?otlp_http_options.body_read_timeout,
+                    "OTLP/HTTP receiver listening on http://{}",
+                    otlp_http_addr
+                );
                 let listener = tokio::net::TcpListener::bind(&otlp_http_addr).await?;
-                axum::serve(listener, otlp_http_app)
+                serve_otlp_http(listener, otlp_http_app, otlp_http_options)
                     .await
                     .map_err(|e| anyhow::anyhow!("OTLP/HTTP server failed: {}", e))
             })
@@ -1207,5 +1305,50 @@ impl ZradarRuntimeBuilder {
         }
 
         Ok(())
+    }
+}
+
+/// Retry delay suggested to exporters when the WAL refuses a write for a
+/// transient reason (free-space floor). Long enough for the flusher and
+/// janitor to reclaim segments, short enough not to stall exporters.
+const WAL_RETRY_AFTER: Duration = Duration::from_secs(5);
+
+/// WAL append failure as a writer error. Transient failures (free-space floor,
+/// full disk) become [`zradar_traits::WriteUnavailable`] so OTLP clients retry.
+fn wal_append_error(error: &zradar_wal::group_commit::AppendError) -> anyhow::Error {
+    if error.is_retryable() {
+        anyhow::Error::new(zradar_traits::WriteUnavailable::new(
+            format!("WAL append: {error}"),
+            WAL_RETRY_AFTER,
+        ))
+    } else {
+        anyhow::anyhow!("WAL append: {}", error)
+    }
+}
+
+/// `Some(Duration)` for a positive number of seconds, `None` for `0` (disabled).
+fn secs_or_none(secs: u64) -> Option<Duration> {
+    (secs > 0).then(|| Duration::from_secs(secs))
+}
+
+#[cfg(test)]
+mod wal_error_tests {
+    use super::*;
+    use zradar_wal::group_commit::AppendError;
+
+    #[test]
+    fn transient_wal_failures_are_write_unavailable() {
+        let floor = AppendError::InsufficientDiskSpace {
+            available: 1,
+            required: 2,
+        };
+        let full = AppendError::Io(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        for err in [floor, full] {
+            let mapped = wal_append_error(&err);
+            let transient = zradar_traits::WriteUnavailable::find(&mapped).expect("retryable");
+            assert_eq!(transient.retry_after, WAL_RETRY_AFTER);
+        }
+        let corrupt = AppendError::Io(std::io::Error::other("corrupt"));
+        assert!(zradar_traits::WriteUnavailable::find(&wal_append_error(&corrupt)).is_none());
     }
 }

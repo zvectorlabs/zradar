@@ -212,6 +212,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -250,6 +251,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -294,6 +296,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()

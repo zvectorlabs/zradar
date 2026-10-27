@@ -35,11 +35,14 @@ pub struct WalConfig {
     #[serde(default = "default_slowdown_max_delay_ms")]
     pub slowdown_max_delay_ms: u64,
 
-    /// Minimum free bytes on wal_dir filesystem before forced rejection.
+    /// Minimum free bytes on the `wal_dir` filesystem. Below it, appends are
+    /// refused with a retryable error until space is reclaimed. `0` disables
+    /// the check.
     #[serde(default = "default_wal_min_free_bytes")]
     pub wal_min_free_bytes: u64,
 
-    /// Records between disk-space checks via statvfs.
+    /// Append attempts between free-space samples (`statvfs`). A sample is
+    /// also refreshed at least once per second.
     #[serde(default = "default_disk_check_interval")]
     pub disk_check_interval: u64,
 

@@ -18,6 +18,10 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 crc32fast = "1"
 
+[target.'cfg(unix)'.dependencies]
+# In-process free-space check of the WAL filesystem (statvfs, no subprocesses).
+rustix = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 chrono = { workspace = true }

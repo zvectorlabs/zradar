@@ -5,9 +5,11 @@ mod cors;
 mod database;
 mod ingestor;
 mod loader;
+mod otlp_limits;
 
 pub use auth::{ApiKeyConfig, AuthConfig};
 pub use cors::CorsConfig;
 pub use database::PostgresConfig;
 pub use ingestor::{IngestorConfig, ParquetStorageConfig, S3StorageConfig, StorageConfig};
 pub use loader::Config;
+pub use otlp_limits::OtlpLimitsConfig;

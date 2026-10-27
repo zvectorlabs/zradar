@@ -28,7 +28,12 @@ pub struct ApiKeyConfig {
 ///
 /// OSS standalone zradar uses config API keys only. An external platform wrapper
 /// can add its own auth strategies without modifying this struct.
-#[derive(Debug, Clone, Deserialize, Default)]
+///
+/// `Default` is implemented by hand so that it matches the serde defaults
+/// exactly. `Config::load()` uses `AuthConfig::default()` when no config file
+/// is present, so a derived `Default` (all `false`) would silently disable
+/// OTLP API-key enforcement.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AuthConfig {
     /// When `false`, OTLP gRPC accepts requests without an API key. Default: `true`.
     #[serde(default = "default_true")]
@@ -43,6 +48,29 @@ pub struct AuthConfig {
     pub allow_test_header_context: bool,
 }
 
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            otlp_require_api_key: default_true(),
+            allow_test_header_context: false,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_matches_serde_defaults() {
+        let from_toml: AuthConfig = toml::from_str("").expect("empty auth config parses");
+        let from_default = AuthConfig::default();
+        assert_eq!(from_default, from_toml);
+        assert!(from_default.otlp_require_api_key);
+        assert!(!from_default.allow_test_header_context);
+    }
 }

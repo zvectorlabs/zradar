@@ -9,7 +9,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::net::SocketAddr;
+use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
 
 /// Health check response
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,6 +141,39 @@ pub async fn readiness(state: HealthState) -> impl IntoResponse {
     (status_code, Json(ReadinessResponse { ready, checks }))
 }
 
+/// Probe `GET {path}` on `addr` over plain HTTP/1.0 and succeed on a `2xx`.
+///
+/// Backs the `zradar healthcheck` subcommand, so container health checks need
+/// no HTTP client (such as `curl`) in the runtime image.
+pub async fn probe(addr: SocketAddr, path: &str, timeout: Duration) -> anyhow::Result<()> {
+    let request = format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    let status_line = tokio::time::timeout(timeout, async {
+        let mut stream = TcpStream::connect(addr).await?;
+        stream.write_all(request.as_bytes()).await?;
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).await?;
+        anyhow::Ok(line)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("health probe to {addr}{path} timed out after {timeout:?}"))??;
+
+    match parse_status_code(&status_line) {
+        Some(code) if (200..300).contains(&code) => Ok(()),
+        Some(code) => anyhow::bail!("health probe to {addr}{path} returned HTTP {code}"),
+        None => anyhow::bail!(
+            "health probe to {addr}{path} got a malformed response: {:?}",
+            status_line.trim_end()
+        ),
+    }
+}
+
+/// Status code from an HTTP/1.x status line (`HTTP/1.1 200 OK`).
+fn parse_status_code(status_line: &str) -> Option<u16> {
+    let mut parts = status_line.split_whitespace();
+    parts.next().filter(|v| v.starts_with("HTTP/1."))?;
+    parts.next()?.parse().ok()
+}
+
 /// Create health check router
 pub fn create_health_router(state: HealthState) -> Router {
     Router::new()
@@ -181,5 +218,61 @@ mod tests {
         .into_response();
         // Should be unhealthy without database
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn parses_status_lines() {
+        assert_eq!(parse_status_code("HTTP/1.1 200 OK\r\n"), Some(200));
+        assert_eq!(
+            parse_status_code("HTTP/1.0 503 Service Unavailable"),
+            Some(503)
+        );
+        assert_eq!(parse_status_code("SSH-2.0-OpenSSH"), None);
+        assert_eq!(parse_status_code(""), None);
+    }
+
+    async fn serve_health() -> SocketAddr {
+        let app = create_health_router(HealthState {
+            pg_pool: None,
+            storage_path: PathBuf::from("."),
+            circuit_breaker: None,
+            retention_initialized: true,
+            ingestion_initialized: true,
+            background_jobs_started: true,
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        addr
+    }
+
+    #[tokio::test]
+    async fn probe_succeeds_against_liveness() {
+        let addr = serve_health().await;
+        probe(addr, "/health/live", Duration::from_secs(5))
+            .await
+            .expect("liveness probe passes");
+    }
+
+    #[tokio::test]
+    async fn probe_fails_on_non_2xx() {
+        let addr = serve_health().await;
+        // Not ready without a database.
+        let err = probe(addr, "/health/ready", Duration::from_secs(5))
+            .await
+            .expect_err("readiness without a database fails");
+        assert!(err.to_string().contains("503"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn probe_fails_when_nothing_listens() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        assert!(
+            probe(addr, "/health/live", Duration::from_secs(5))
+                .await
+                .is_err()
+        );
     }
 }

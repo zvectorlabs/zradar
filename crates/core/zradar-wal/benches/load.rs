@@ -35,6 +35,7 @@ fn bench_sequential_appends(c: &mut Criterion) {
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cancel = CancellationToken::new();
                 let config = WalConfig {
+                    wal_min_free_bytes: 0,
                     segment_max_bytes: 256 * 1024 * 1024,
                     group_commit_window_ms: 1,
                     ..Default::default()
@@ -60,6 +61,7 @@ fn bench_concurrent_appends(c: &mut Criterion) {
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cancel = CancellationToken::new();
                 let config = WalConfig {
+                    wal_min_free_bytes: 0,
                     segment_max_bytes: 256 * 1024 * 1024,
                     group_commit_window_ms: 2,
                     ..Default::default()
@@ -94,6 +96,7 @@ fn bench_segment_rotation(c: &mut Criterion) {
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cancel = CancellationToken::new();
                 let config = WalConfig {
+                    wal_min_free_bytes: 0,
                     segment_max_bytes: 4096, // force frequent rotation
                     group_commit_window_ms: 1,
                     ..Default::default()
@@ -119,6 +122,7 @@ fn bench_durable_roundtrip(c: &mut Criterion) {
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cancel = CancellationToken::new();
                 let config = WalConfig {
+                    wal_min_free_bytes: 0,
                     segment_max_bytes: 64 * 1024 * 1024,
                     group_commit_window_ms: 1,
                     ..Default::default()

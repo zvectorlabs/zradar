@@ -8,6 +8,7 @@ pub mod backpressure;
 pub mod batch;
 pub mod checkpoint;
 pub mod config;
+pub mod disk;
 pub mod flusher;
 pub mod group_commit;
 pub mod janitor;
@@ -24,6 +25,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use config::WalConfig;
+use disk::DiskSpaceGuard;
 use group_commit::{AppendError, AppendHandle, FsyncQueue};
 use record::WalRecord;
 use segment::{SegmentWriter, list_segments, update_current_symlink};
@@ -39,6 +41,7 @@ struct WalInner {
     writer: Mutex<SegmentWriter>,
     fsync_queue: Arc<FsyncQueue>,
     offset_counter: AtomicU64,
+    disk_guard: DiskSpaceGuard,
     _fsync_task: tokio::task::JoinHandle<()>,
 }
 
@@ -122,6 +125,19 @@ impl Wal {
                 Ok(())
             });
 
+        let disk_guard =
+            DiskSpaceGuard::new(dir, config.wal_min_free_bytes, config.disk_check_interval);
+        if disk_guard.enabled() {
+            disk_guard.refresh().await;
+            if let Some(free_bytes) = disk_guard.free_bytes() {
+                tracing::info!(
+                    free_bytes,
+                    min_free_bytes = config.wal_min_free_bytes,
+                    "WAL free-space guard enabled"
+                );
+            }
+        }
+
         let fsync_task = tokio::spawn(group_commit::group_commit_loop(
             fsync_queue.clone(),
             fsync_fn,
@@ -136,6 +152,7 @@ impl Wal {
                 writer: Mutex::new(writer),
                 fsync_queue,
                 offset_counter: AtomicU64::new(next_offset),
+                disk_guard,
                 _fsync_task: fsync_task,
             }),
         })
@@ -143,7 +160,12 @@ impl Wal {
 
     /// Append a record to the WAL. Returns an `AppendHandle` whose `durable()` future
     /// resolves once the group-commit fsync covers this record.
+    ///
+    /// Fails with the retryable [`AppendError::InsufficientDiskSpace`] while the
+    /// WAL filesystem has less than `wal_min_free_bytes` free.
     pub async fn append(&self, mut record: WalRecord) -> Result<AppendHandle, AppendError> {
+        self.inner.disk_guard.admit().await?;
+
         let offset = self.inner.offset_counter.fetch_add(1, Ordering::SeqCst);
         record.assigned_offset = offset;
 
@@ -153,23 +175,16 @@ impl Wal {
 
         // Check if we need to seal and rotate
         if writer.size() + serialized.len() as u64 > self.inner.config.segment_max_bytes {
-            writer
-                .fsync()
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+            writer.fsync().map_err(segment_append_error)?;
             let new_id = writer.id() + 1;
-            let new_writer = SegmentWriter::create(&self.inner.dir, new_id)
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
-            update_current_symlink(&self.inner.dir, new_id)
-                .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+            let new_writer =
+                SegmentWriter::create(&self.inner.dir, new_id).map_err(segment_append_error)?;
+            update_current_symlink(&self.inner.dir, new_id).map_err(segment_append_error)?;
             *writer = new_writer;
         }
 
-        writer
-            .append(&serialized)
-            .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
-        writer
-            .flush()
-            .map_err(|e| AppendError::Io(std::io::Error::other(e.to_string())))?;
+        writer.append(&serialized).map_err(segment_append_error)?;
+        writer.flush().map_err(segment_append_error)?;
 
         drop(writer);
 
@@ -195,6 +210,19 @@ impl Wal {
     /// Path to the WAL directory.
     pub fn dir(&self) -> &Path {
         &self.inner.dir
+    }
+
+    /// Check the free-space floor without appending. Lets callers that append
+    /// several records for one request refuse the whole request up front
+    /// rather than after part of it is durable.
+    pub async fn check_free_space(&self) -> Result<(), AppendError> {
+        self.inner.disk_guard.admit().await
+    }
+
+    /// Last sampled free bytes on the WAL filesystem (`None` if the
+    /// free-space guard is disabled or the measurement is unavailable).
+    pub fn free_disk_bytes(&self) -> Option<u64> {
+        self.inner.disk_guard.free_bytes()
     }
 
     /// WAL configuration.
@@ -224,6 +252,15 @@ pub enum WalError {
 
     #[error("segment error: {0}")]
     Segment(#[from] segment::SegmentError),
+}
+
+/// Convert a segment failure into an append error, keeping the I/O error kind
+/// so a full disk (`StorageFull`) stays recognizable as retryable.
+fn segment_append_error(error: segment::SegmentError) -> AppendError {
+    match error {
+        segment::SegmentError::Io(io) => AppendError::Io(io),
+        other => AppendError::Io(std::io::Error::other(other.to_string())),
+    }
 }
 
 /// Reopen an existing segment for appending (seek to end).
@@ -266,6 +303,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -283,6 +321,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 1024 * 1024,
             group_commit_window_ms: 1,
             ..Default::default()
@@ -303,6 +342,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 2,
             ..Default::default()
@@ -347,6 +387,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 10 * 1024 * 1024,
             group_commit_window_ms: 5, // 5ms window to coalesce
             ..Default::default()
@@ -374,11 +415,70 @@ mod tests {
         cancel.cancel();
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_append_refused_below_min_free_bytes() {
+        let tmp = TempDir::new().unwrap();
+        let cancel = CancellationToken::new();
+        let config = WalConfig {
+            segment_max_bytes: 1024 * 1024,
+            group_commit_window_ms: 1,
+            // More than any filesystem can have free.
+            wal_min_free_bytes: u64::MAX - 1,
+            ..Default::default()
+        };
+
+        let wal = Wal::open(tmp.path(), config, cancel.clone()).await.unwrap();
+        let err = match wal.append(make_record()).await {
+            Err(e) => e,
+            Ok(_) => panic!("append must be refused below the free-space floor"),
+        };
+        assert!(
+            matches!(err, AppendError::InsufficientDiskSpace { .. }),
+            "{err:?}"
+        );
+        assert!(err.is_retryable());
+        assert!(wal.check_free_space().await.is_err());
+        // A refused append consumes no offset and writes nothing.
+        let header_only = wal.active_segment_size().await;
+        assert_eq!(wal.next_offset(), 0);
+        assert!(wal.append(make_record()).await.is_err());
+        assert_eq!(wal.active_segment_size().await, header_only);
+
+        cancel.cancel();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_append_allowed_above_min_free_bytes() {
+        let tmp = TempDir::new().unwrap();
+        let cancel = CancellationToken::new();
+        let config = WalConfig {
+            segment_max_bytes: 1024 * 1024,
+            group_commit_window_ms: 1,
+            wal_min_free_bytes: 1,
+            ..Default::default()
+        };
+
+        let wal = Wal::open(tmp.path(), config, cancel.clone()).await.unwrap();
+        assert!(wal.free_disk_bytes().is_some_and(|b| b >= 1));
+        wal.append(make_record())
+            .await
+            .unwrap()
+            .durable()
+            .await
+            .unwrap();
+        assert_eq!(wal.next_offset(), 1);
+
+        cancel.cancel();
+    }
+
     #[tokio::test]
     async fn test_segment_rotation() {
         let tmp = TempDir::new().unwrap();
         let cancel = CancellationToken::new();
         let config = WalConfig {
+            wal_min_free_bytes: 0,
             segment_max_bytes: 500, // very small to force rotation
             group_commit_window_ms: 1,
             ..Default::default()

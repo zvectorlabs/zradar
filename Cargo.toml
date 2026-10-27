@@ -32,7 +32,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.10.3"
+version = "0.12.0"
 edition = "2024"
 rust-version = "1.93.0"
 license = "Apache-2.0"
@@ -51,7 +51,9 @@ tonic-prost-build = "0.14"
 tonic-prost = "0.14"
 tonic-web = "0.14"
 tonic-reflection = "0.14"
-tokio = { version = "1.52", features = ["full"] }
+# google.rpc error details (RetryInfo) for retryable OTLP rejections
+tonic-types = "0.14"
+tokio = { version = "1.54.1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 
@@ -79,12 +81,13 @@ opendal = { version = "0.49", features = ["services-s3"] }
 
 # Web framework (upgraded to 0.8 for latest support)
 axum = "0.8"
+# Direct connection control for the OTLP/HTTP listener (header-read timeout)
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
 tower = "0.5"
 tower-http = { version = "0.7", features = ["trace", "cors", "compression-gzip"] }
 
 # Auto-documentation
 utoipa = { version = "5.5", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 
 # Database (rustls for pure Rust TLS, no libssl-dev needed)
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "migrate"] }
@@ -100,8 +103,14 @@ dashmap = "6"
 parking_lot = "0.12"
 lru = "0.18"
 
+# Safe syscall wrappers (statvfs for in-process disk usage checks)
+rustix = { version = "1.1", features = ["fs"] }
+
 # Byte buffers
 bytes = "1"
+# OTLP/HTTP request decompression (Content-Encoding: gzip / zstd)
+flate2 = "1"
+zstd = { version = "0.13", default-features = false }
 
 # Hashing
 crc32fast = "1"
