@@ -37,17 +37,19 @@ ignore = [
     { id = "RUSTSEC-2026-0002" },
     { id = "RUSTSEC-2026-0194" },
     { id = "RUSTSEC-2026-0195" },
-    # zstd 0.13 advisories. The fixes need zstd 0.14 / zstd-safe 8, a semver
-    # major that arrow-ipc and parquet 58 (pinned by datafusion 54) do not
-    # accept yet, so a lockfile update cannot resolve them. Drop these once
-    # the DataFusion/Arrow upgrade brings zstd 0.14.
-    # Stream `with_context` reuse; we decode with `Decoder::with_buffer`, and
-    # arrow/parquet use the `bulk` API.
+    # zstd 0.13 advisories, unreachable here. The fixes need zstd >= 0.14.3 /
+    # zstd-safe >= 8.2, which arrow-ipc and parquet 58 (pinned by DataFusion
+    # 54) do not accept yet. Remove these once the DataFusion/Arrow upgrade
+    # brings them in.
+    # Stream `with_context` reuse: OTLP/HTTP decodes with
+    # `Decoder::with_buffer`, arrow/parquet use the `bulk` API, and
+    # async-compression (compression-codecs) uses `raw::Decoder::new`;
+    # none call `with_context`.
     { id = "RUSTSEC-2026-0391", reason = "with_context stream API not used" },
-    # Legacy (v0.4-v0.7) frames; the `legacy` feature is not enabled.
+    # Legacy (v0.4-v0.7) frames: the workspace zstd dependency sets
+    # `default-features = false` and nothing re-enables `legacy`. Re-check
+    # this when dependencies change.
     { id = "RUSTSEC-2026-0403", reason = "zstd legacy feature disabled" },
-    # wasm32 allocator shim; we do not build for wasm32.
-    { id = "RUSTSEC-2026-0410", reason = "wasm32-only, not a build target" },
 ]
 
 # ── dependency bans ───────────────────────────────────────────────────────────
