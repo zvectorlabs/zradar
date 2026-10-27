@@ -96,7 +96,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "api-optel"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "allocation-counter",
  "anyhow",
@@ -5988,7 +5988,7 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zradar-auth-config"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5998,7 +5998,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-functional-tests"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "api",
@@ -6030,7 +6030,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-metrics"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "dashmap",
  "uuid",
@@ -6039,7 +6039,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-models"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6053,7 +6053,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-parquet"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -6078,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-postgres"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-plugin-s3"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6114,7 +6114,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-policy"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6129,7 +6129,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-retention"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6148,7 +6148,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-runtime"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "api",
@@ -6184,7 +6184,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-server"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "tokio",
@@ -6198,7 +6198,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-traits"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6216,7 +6216,7 @@ dependencies = [
 
 [[package]]
 name = "zradar-wal"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
